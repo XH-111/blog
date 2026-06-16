@@ -78,6 +78,30 @@ docker exec blog-postgres psql -U blog -d blog_dev
   - `public/uploads/`
 - 不要提交 `.env`、日志文件、运行时上传文件。
 
+## 编码规则
+
+- 仓库中文文件统一按 UTF-8 处理。
+- 在 Windows PowerShell 中读取中文文件时，使用：
+
+```powershell
+Get-Content -Encoding UTF8 文件路径
+```
+
+- 不要用未指定编码的 `Set-Content` / `Out-File` 重写包含中文的文件。
+- 不要用 PowerShell 正则批量重写包含中文的大段源码。
+- 如果必须修改包含中文的文件，优先使用 `apply_patch`。
+- 修改后用以下方式确认中文没有乱码：
+
+```powershell
+Get-Content -Encoding UTF8 文件路径 | Select-Object -First 30
+```
+
+- 修改 `backend/src/server.js` 后必须执行：
+
+```powershell
+node --check backend\src\server.js
+```
+
 ## 前端说明
 
 主要文件：
