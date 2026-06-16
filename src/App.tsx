@@ -1,0 +1,2748 @@
+﻿import { ChangeEvent, FormEvent, ReactNode, useEffect, useMemo, useRef, useState } from "react";
+import { api, getApiErrorMessage } from "./services/api";
+import type { ClipboardEvent } from "react";
+import type { AboutPageSettings, AdminAiStatus, AdminCategoryItem, AdminCommentItem, AdminDashboardData, AdminMediaItem, AdminMessageItem, AdminPostListItem, AdminTagItem, PublicCommentItem, PublicSiteStats } from "./services/api";
+import type { Article, Message } from "./types";
+
+const nav = [
+  ["首页", "/"],
+  ["文章", "/article"],
+  ["分类", "/categories"],
+  ["归档", "/archive"],
+  ["标签", "/tags"],
+  ["关于", "/about"],
+  ["留言板", "/messages"],
+] as const;
+
+const COMMENT_CONTENT_MAX_LENGTH = 1000;
+const MESSAGE_CONTENT_MAX_LENGTH = 2000;
+
+function useRoute() {
+  const [path, setPath] = useState(location.hash.replace("#", "") || "/");
+  useEffect(() => {
+    const sync = () => setPath(location.hash.replace("#", "") || "/");
+    addEventListener("hashchange", sync);
+    return () => removeEventListener("hashchange", sync);
+  }, []);
+  return path;
+}
+
+function go(path: string) {
+  const nextHash = `#${path}`;
+  if (location.hash === nextHash) {
+    window.dispatchEvent(new HashChangeEvent("hashchange"));
+  } else {
+    location.hash = path;
+  }
+  scrollTo({ top: 0, behavior: "smooth" });
+}
+
+function replaceHash(path: string) {
+  const nextHash = `#${path}`;
+  if (location.hash !== nextHash) history.replaceState(null, "", nextHash);
+}
+
+function emitAdminDataChanged() {
+  window.dispatchEvent(new Event("admin-data-changed"));
+}
+
+function routeQuery() {
+  return new URLSearchParams(location.hash.split("?")[1] ?? "");
+}
+
+function Icon({ name }: { name: string }) {
+  return <span className={`icon icon-${name}`} aria-hidden="true" />;
+}
+
+function Logo({ admin = false }: { admin?: boolean }) {
+  return (
+    <button className="brand" onClick={() => go(admin ? "/admin" : "/")}>
+      <span className="brand-mark">{admin ? "✒" : "</>"}</span>
+      <span>
+        <strong>全栈博客{admin ? "" : "创作平台"}</strong>
+        <small>{admin ? "创作平台" : "记录 · 分享 · 成长"}</small>
+      </span>
+    </button>
+  );
+}
+
+function PublicHeader({ active }: { active: string }) {
+  const [headerSearch, setHeaderSearch] = useState("");
+  const headerNav = active.startsWith("/article") ? nav : nav.filter(([label]) => label !== "分类" && label !== "标签");
+  async function openArticleNav(href: string) {
+    if (href !== "/article") {
+      go(href);
+      return;
+    }
+    try {
+      const result = await api.getHome({ pageSize: 1 });
+      const latest = result.articles[0];
+      go(latest ? `/article/${latest.id}` : "/archive");
+    } catch {
+      go("/archive");
+    }
+  }
+  function submitSearch(event: FormEvent) {
+    event.preventDefault();
+    const keyword = headerSearch.trim();
+    if (keyword) go(`/archive?q=${encodeURIComponent(keyword)}`);
+  }
+  function toggleTheme() {
+    const next = document.documentElement.dataset.theme === "dark" ? "light" : "dark";
+    document.documentElement.dataset.theme = next;
+    localStorage.setItem("blog-theme", next);
+  }
+  return (
+    <header className={`public-header ${active.startsWith("/article") ? "article-header" : ""} ${active === "/archive" ? "floating-header" : ""}`}>
+      <Logo />
+      <nav>
+        {headerNav.map(([label, href]) => (
+          <button key={href} className={active === href || (active.startsWith("/article") && href === "/article") ? "active" : ""} onClick={() => openArticleNav(href)}>
+            {label}
+          </button>
+        ))}
+      </nav>
+      <div className="header-tools">
+        <form className="search-mini" onSubmit={submitSearch}>
+          <input value={headerSearch} onChange={(event) => setHeaderSearch(event.target.value)} placeholder="搜索文章..." />
+          <button aria-label="搜索文章">⌕</button>
+        </form>
+        <button className="round" onClick={toggleTheme}>◐</button>
+        <button className="avatar sm" onClick={() => go("/admin/login")}>站</button>
+      </div>
+    </header>
+  );
+}
+
+function Tag({ children, tone = "cyan" }: { children: ReactNode; tone?: string }) {
+  return <span className={`tag ${tone}`}>{children}</span>;
+}
+
+function Art({ type, wide = false, coverUrl }: { type: Article["image"]; wide?: boolean; coverUrl?: string }) {
+  return (
+    <div className={`art ${coverUrl ? "custom-cover" : type} ${wide ? "wide" : ""}`} style={coverUrl ? { backgroundImage: `url(${coverUrl})` } : undefined}>
+      <div className="art-grid" />
+      <b>{type === "next" ? "Next.js 14" : type === "docker" ? "docker" : type === "vue" ? "Vue 3" : type === "linux" ? "Linux" : "Code"}</b>
+      <span>{type === "next" ? "App Router 实战指南" : type === "linux" ? "性能优化" : type === "mountain" ? "" : "全栈实践"}</span>
+    </div>
+  );
+}
+
+function HomePage() {
+  const [query, setQuery] = useState("");
+  const [homeArticles, setHomeArticles] = useState<Article[]>([]);
+  const [homeCategories, setHomeCategories] = useState<AdminCategoryItem[]>([]);
+  const [homeTags, setHomeTags] = useState<AdminTagItem[]>([]);
+  const [siteStats, setSiteStats] = useState<PublicSiteStats>();
+  const [homeUsingMock, setHomeUsingMock] = useState(false);
+  const keyword = query.trim().toLowerCase();
+  useEffect(() => {
+    let alive = true;
+    Promise.all([api.getHome(), api.getPublicCategories(), api.getPublicTags(), api.getPublicStats()]).then(([postResult, categoryResult, tagResult, statsResult]) => {
+      if (!alive) return;
+      setHomeArticles(postResult.articles);
+      setHomeCategories(categoryResult.items);
+      setHomeTags(tagResult.items);
+      setSiteStats(statsResult);
+      setHomeUsingMock(postResult.source === "mock" || categoryResult.source === "mock" || tagResult.source === "mock" || statsResult.source === "mock");
+    });
+    return () => {
+      alive = false;
+    };
+  }, []);
+  const featuredArticle = homeArticles.find((item) => item.featured) ?? homeArticles[0];
+  const filtered = homeArticles.filter((item) => {
+    const haystack = [item.title, item.excerpt, item.category, ...item.tags].join(" ").toLowerCase();
+    return !keyword || haystack.includes(keyword);
+  });
+  const latestItems = keyword || !featuredArticle ? filtered : filtered.filter((item) => item.id !== featuredArticle.id);
+  return (
+    <>
+      <PublicHeader active="/" />
+      <main className="page two-col home">
+        <section className="main-flow">
+          <PublicDataNotice show={homeUsingMock} surface="首页" />
+          <div className="hero-card">
+            <div>
+              <h1>全栈之路 · 技术沉淀与成长记录</h1>
+              <p>这里记录我的技术探索、项目经验与思考总结，希望与同路人一起学习、交流与成长。</p>
+              <div className="chip-row">
+                <Tag>技术笔记</Tag><Tag tone="green">项目复盘</Tag><Tag tone="orange">面试总结</Tag><Tag tone="blue">知识库</Tag>
+              </div>
+            </div>
+            <div className="laptop-scene"><span /></div>
+          </div>
+          <SectionTitle icon="♕" title="精选推荐" />
+          {featuredArticle ? (
+            <article className="featured-card" onClick={() => go(`/article/${featuredArticle.id}`)}>
+              <Art type={featuredArticle.image} />
+              <div>
+                <h2>{featuredArticle.title}</h2>
+                <p>{featuredArticle.excerpt}</p>
+                <div className="chip-row">{featuredArticle.tags.map((tag) => <Tag key={tag}>{tag}</Tag>)}</div>
+                <Meta item={featuredArticle} />
+              </div>
+              <time>{featuredArticle.date}</time>
+            </article>
+          ) : <div className="empty card">数据库暂无精选文章</div>}
+          <Dots />
+          <SectionTitle title="最新文章" />
+          <div className="article-list">
+            {latestItems.length ? latestItems.map((item) => <ArticleRow key={item.id} item={item} />) : <div className="empty card">没有找到匹配的文章</div>}
+          </div>
+        </section>
+        <aside className="side-stack">
+          <Card title="搜索文章">
+            <div className="search-box"><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="输入关键词搜索..." /><button>⌕</button></div>
+          </Card>
+          <Card title="分类导航" moreHref="/categories">
+            <div className="category-grid">{homeCategories.map((item) => <button key={item.id} onClick={() => go(`/archive?category=${encodeURIComponent(item.name)}`)}><Icon name="dot" />{item.name}<b>{item.postsCount}</b></button>)}</div>
+          </Card>
+          <Card title="热门标签" moreHref="/tags">
+            <div className="tag-cloud">{homeTags.map((tag, index) => <button className="tag-button" key={tag.id} onClick={() => go(`/archive?tag=${encodeURIComponent(tag.name)}`)}><Tag tone={["pink", "green", "blue", "purple", "gray"][index % 5]}>{tag.name}</Tag></button>)}</div>
+          </Card>
+          <Card title="推荐文章" moreHref="/archive">
+            <MiniList items={featuredArticle ? homeArticles.filter((item) => item.id !== featuredArticle.id).slice(0, 5) : homeArticles.slice(0, 5)} />
+          </Card>
+          <PublicStatsCard stats={siteStats} />
+        </aside>
+      </main>
+    </>
+  );
+}
+
+function SectionTitle({ title, icon }: { title: string; icon?: string }) {
+  return <h2 className="section-title">{icon && <span>{icon}</span>}{title}</h2>;
+}
+
+function Dots() {
+  return <div className="dots"><i className="on" /><i /><i /><i /></div>;
+}
+
+function Meta({ item }: { item: Article }) {
+  return <div className="meta"><span>◎ {item.reads}</span><span>☰ {item.comments}</span><span>♡ {item.likes}</span><span>◷ 阅读 12 分钟</span></div>;
+}
+
+function ArticleRow({ item }: { item: Article }) {
+  return (
+    <article className="article-row" onClick={() => go(`/article/${item.id}`)}>
+      <Art type={item.image} coverUrl={item.coverUrl} />
+      <div>
+        <h3>{item.title}<Tag tone="purple">AI 摘要</Tag></h3>
+        <p>{item.excerpt}</p>
+        <div className="chip-row">{item.tags.map((tag) => <Tag key={tag}>{tag}</Tag>)}</div>
+        <Meta item={item} />
+      </div>
+      <time>{item.date}</time>
+    </article>
+  );
+}
+
+function Card({ title, children, more, moreHref }: { title: string; children: React.ReactNode; more?: boolean; moreHref?: string }) {
+  return <section className="card"><header><h3>{title}</h3>{(more || moreHref) && <button onClick={() => moreHref && go(moreHref)}>更多 ›</button>}</header>{children}</section>;
+}
+
+function MiniList({ items }: { items: Article[] }) {
+  return <div className="mini-list">{items.length ? items.map((item) => <button key={item.id} onClick={() => go(`/article/${item.id}`)}><Art type={item.image} coverUrl={item.coverUrl} /><span>{item.title}<small>◎ {item.reads}　♡ {item.likes}</small></span></button>) : <p className="soft-text">暂无文章</p>}</div>;
+}
+
+function PublicStatsCard({ stats }: { stats?: PublicSiteStats }) {
+  const items = [
+    ["文章总数", stats ? String(stats.posts) : "--"],
+    ["访问量(PV)", stats ? api.formatCount(stats.views) : "--"],
+    ["评论数", stats ? String(stats.comments) : "--"],
+    ["留言数", stats ? String(stats.messages) : "--"],
+    ["点赞数", stats ? String(stats.likes) : "--"],
+];
+  return <Card title="站点数据"><div className="stat-grid">{items.map(([k, v]) => <div key={k}><Icon name="doc" /><span>{k}</span><b>{v}</b></div>)}</div></Card>;
+}
+
+function PublicDataNotice({ show, surface }: { show: boolean; surface: string }) {
+  return show ? <div className="note">当前{surface}展示的是前端 mock 兜底数据；后端可用时会自动读取 PostgreSQL。</div> : null;
+}
+
+function StatsCard() {
+  return <Card title="站点数据"><div className="stat-grid">{[["文章总数", "--"], ["访问量 (PV)", "--"], ["评论数", "--"], ["点赞数", "--"]].map(([k, v]) => <div key={k}><Icon name="doc" /><span>{k}</span><b>{v}</b></div>)}</div></Card>;
+}
+
+function ArticlePage({ articleId }: { articleId: number }) {
+  const [liked, setLiked] = useState(false);
+  const [likeCount, setLikeCount] = useState(0);
+  const [likeNotice, setLikeNotice] = useState("");
+  const [liking, setLiking] = useState(false);
+  const [comment, setComment] = useState("");
+  const [activeSection, setActiveSection] = useState("");
+  const [article, setArticle] = useState<Article | null>(null);
+  const [articleSource, setArticleSource] = useState<"api" | "mock">("mock");
+  const [articleLoading, setArticleLoading] = useState(true);
+  const [articleNotice, setArticleNotice] = useState("");
+  const [relatedArticles, setRelatedArticles] = useState<Article[]>([]);
+  const [latestArticles, setLatestArticles] = useState<Article[]>([]);
+  const [articleSideUsingMock, setArticleSideUsingMock] = useState(false);
+  const toc = article?.sections ?? [];
+
+  useEffect(() => {
+    let alive = true;
+    setArticleLoading(true);
+    setArticleNotice("");
+    setArticle(null);
+    setRelatedArticles([]);
+    setLatestArticles([]);
+    setArticleSideUsingMock(false);
+    if (!articleId) {
+      api.getHome({ pageSize: 1 })
+        .then((result) => {
+          if (!alive) return;
+          const latest = result.articles[0];
+          if (latest) {
+            go(`/article/${latest.id}`);
+          } else {
+            setArticleSource(result.source);
+            setArticleNotice(result.source === "mock" ? "后端不可用，当前没有可打开的真实文章。" : "暂无已发布文章。");
+            setArticle(null);
+          }
+        })
+        .catch((error) => {
+          if (!alive) return;
+          setArticleSource("api");
+          setArticleNotice(getApiErrorMessage(error));
+          setArticle(null);
+        })
+        .finally(() => {
+          if (alive) setArticleLoading(false);
+        });
+      return () => {
+        alive = false;
+      };
+    }
+    api.getArticle(articleId)
+      .then(({ article: nextArticle, source, message }) => {
+        if (alive) {
+          setArticleSource(source);
+          setArticleNotice(message);
+          setArticle(nextArticle);
+          setLikeCount(nextArticle?.likes ?? 0);
+        }
+      })
+      .catch((error) => {
+        if (alive) {
+          setArticleSource("api");
+          setArticleNotice(getApiErrorMessage(error));
+          setArticle(null);
+          setLikeCount(0);
+        }
+      })
+      .finally(() => {
+        if (alive) setArticleLoading(false);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [articleId]);
+
+  useEffect(() => {
+    if (!article) return;
+    setLiked(false);
+    setLikeCount(article.likes);
+    setLikeNotice("");
+    setComment("");
+    setActiveSection(article.sections[0]?.id ?? "");
+    let alive = true;
+    Promise.all([
+      api.getHome({ category: article.category, pageSize: 4 }),
+      api.getHome({ pageSize: 5 }),
+    ]).then(([relatedResult, latestResult]) => {
+      if (!alive) return;
+      setRelatedArticles(relatedResult.articles.filter((item) => item.id !== article.id).slice(0, 3));
+      setLatestArticles(latestResult.articles.filter((item) => item.id !== article.id).slice(0, 5));
+      setArticleSideUsingMock(relatedResult.source === "mock" || latestResult.source === "mock");
+    });
+    return () => {
+      alive = false;
+    };
+  }, [article]);
+
+  function jumpToSection(id: string) {
+    setActiveSection(id);
+    document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+
+  async function copyArticleLink() {
+    try {
+      await navigator.clipboard?.writeText(location.href);
+      setLikeNotice("文章链接已复制到剪贴板。");
+    } catch {
+      setLikeNotice("当前浏览器不支持自动复制，请手动复制地址栏链接。");
+    }
+  }
+
+  async function likeArticle() {
+    if (!article) {
+      setLikeNotice("文章尚未加载完成，暂时不能点赞。");
+      return;
+    }
+    if (articleSource !== "api") {
+      setLikeNotice("当前为 mock 文章，点赞不会写入数据库。");
+      return;
+    }
+    if (liking) return;
+    setLiking(true);
+    try {
+      const result = await api.likePost(article.id);
+      setLikeCount(result.likesCount);
+      setLiked(result.liked || result.alreadyLiked);
+      setLikeNotice(result.alreadyLiked ? "你已经点过赞了" : "点赞已写入数据库");
+      setArticle((current) => current ? ({ ...current, likes: result.likesCount }) : current);
+    } catch (error) {
+      setLikeNotice(getApiErrorMessage(error));
+    } finally {
+      setLiking(false);
+    }
+  }
+
+  return (
+    <>
+      <PublicHeader active={`/article/${article?.id ?? articleId}`} />
+      {!article ? (
+        <main className="page-shell">
+          <section className="empty card">
+            <h1>{articleLoading ? "正在读取文章" : "文章不可用"}</h1>
+            <p>{articleLoading ? "正在从后端数据库加载文章内容..." : articleNotice || "文章不存在或尚未发布。"}</p>
+            <button onClick={() => go("/")}>返回首页</button>
+          </section>
+        </main>
+      ) : (
+      <main className="article-layout">
+        <aside className="toc card"><h3>文章目录</h3>{toc.map((section) => <button className={activeSection === section.id ? "active" : ""} key={section.id} onClick={() => jumpToSection(section.id)}>{section.title}</button>)}<button onClick={() => scrollTo({ top: 0, behavior: "smooth" })}>回到顶部 ↑</button></aside>
+        <article className="paper">
+          <div className="cover mountain" style={article.coverUrl ? { backgroundImage: `url(${article.coverUrl})` } : undefined} />
+          <div className="paper-body">
+            <h1>{article.title}</h1>
+            <div className="chip-row" aria-busy={articleLoading}><Tag tone="orange">{article.category}</Tag>{article.tags.map((tag) => <Tag key={tag}>{tag}</Tag>)}<span className="meta">▣ {article.date}　◷ 阅读 {article.readingMinutes} 分钟　◎ {article.reads}　♡ {likeCount}</span></div>
+            <div className="article-actions" aria-label="文章操作">
+              <button className={liked ? "liked" : ""} onClick={likeArticle} disabled={liking || articleSource !== "api"} title={articleSource !== "api" ? "mock 文章不支持点赞" : liked ? "已点赞" : "点赞文章"}>
+                <span>{liked ? "♥" : "♡"}</span>{liking ? "点赞中..." : liked ? `已点赞 ${likeCount}` : `点赞 ${likeCount}`}
+              </button>
+              <button onClick={() => document.querySelector(".comments")?.scrollIntoView({ behavior: "smooth", block: "start" })}>
+                <span>评</span>评论 {article.comments}
+              </button>
+              <button onClick={copyArticleLink}>
+                <span>链</span>复制链接
+              </button>
+            </div>
+            {likeNotice && <p className="form-notice">{likeNotice}</p>}
+            <blockquote>{article.summary}</blockquote>
+            {article.sections.map((section) => {
+              const Heading = section.level === 3 ? "h3" : "h2";
+              return (
+                <section key={section.id} id={section.id} className="article-section">
+                  <Heading>{section.title}</Heading>
+                  <div className="article-markdown">{renderArticleMarkdown(section.body, `article-${article.id}-${section.id}`)}</div>
+                  {section.list && <ul>{section.list.map((item) => <li key={item}>{item}</li>)}</ul>}
+                </section>
+              );
+            })}
+            {articleSource === "mock" && <div className="note">💡 当前为前端 mock 文章详情，后端不可用或文章不存在时使用兜底数据。</div>}
+            {article.codeSample && <><h3>示例代码</h3><pre><button onClick={() => navigator.clipboard?.writeText(article.codeSample ?? "")}>复制代码</button><code>{article.codeSample}</code></pre></>}
+            <Pager article={article} />
+            <CommentBox articleId={article.id} value={comment} onChange={setComment} enabled={articleSource === "api" && article.allowComment !== false} disabledReason={articleSource !== "api" ? "当前为 mock 文章，评论不会写入数据库。" : undefined} />
+          </div>
+        </article>
+        <aside className="side-stack article-side">
+          <PublicDataNotice show={articleSideUsingMock} surface="文章页侧栏" />
+          <AuthorCard />
+          <Card title="AI 摘要（模拟）"><p className="soft-text">{article.summary}</p><button className="ghost-purple" disabled title="AI 模型任务尚未接入 ai_tasks">AI 思维导图未接入</button></Card>
+          <Card title="相关文章">{relatedArticles.length ? <MiniList items={relatedArticles} /> : <p className="soft-text">暂无相关文章</p>}</Card>
+          <Card title="最新文章">{latestArticles.length ? <ol className="rank-list">{latestArticles.map((item) => <li key={item.id}>{item.title}<time>{item.date.slice(5)}</time></li>)}</ol> : <p className="soft-text">暂无最新文章</p>}</Card>
+        </aside>
+        <div className="float-actions"><button onClick={likeArticle} disabled={liking || articleSource !== "api"} title={articleSource !== "api" ? "mock 文章不支持点赞" : liked ? "已点赞" : "点赞"}>{liked ? "♥" : "♡"}</button><button onClick={() => document.querySelector(".comments")?.scrollIntoView({ behavior: "smooth", block: "start" })} title="跳到评论区">评</button><button onClick={copyArticleLink} title="复制文章链接">链</button><button onClick={() => scrollTo(0, 0)} title="回到顶部">↑</button></div>
+      </main>
+      )}
+    </>
+  );
+}
+
+function Pager({ article }: { article: Article }) {
+  return <div className="pager"><button disabled={!article.previousId} onClick={() => article.previousId && go(`/article/${article.previousId}`)}>← 上一篇<br /><b>{article.previousTitle ?? "没有上一篇"}</b></button><button disabled={!article.nextId} onClick={() => article.nextId && go(`/article/${article.nextId}`)}>下一篇 →<br /><b>{article.nextTitle ?? "没有下一篇"}</b></button></div>;
+}
+
+function CommentBox({ articleId, value, onChange, enabled, disabledReason }: { articleId: number; value: string; onChange: (value: string) => void; enabled: boolean; disabledReason?: string }) {
+  const [comments, setComments] = useState<PublicCommentItem[]>([]);
+  const [commenter, setCommenter] = useState({ authorName: "", authorEmail: "" });
+  const [loading, setLoading] = useState(true);
+  const [submitting, setSubmitting] = useState(false);
+  const [message, setMessage] = useState("");
+
+  useEffect(() => {
+    let alive = true;
+    function loadComments() {
+      setLoading(true);
+      setMessage("");
+      api.getComments(articleId)
+        .then((result) => {
+          if (!alive) return;
+          setComments(result.items);
+          if (result.source === "mock") setMessage("评论接口暂不可用，当前未展示前端假评论。");
+        })
+        .catch((error) => {
+          if (alive) setMessage(getApiErrorMessage(error));
+        })
+        .finally(() => {
+          if (alive) setLoading(false);
+        });
+    }
+    loadComments();
+    window.addEventListener("admin-data-changed", loadComments);
+    return () => {
+      alive = false;
+      window.removeEventListener("admin-data-changed", loadComments);
+    };
+  }, [articleId]);
+
+  async function submitComment() {
+    const content = value.trim();
+    if (!enabled) {
+      setMessage(disabledReason ?? "这篇文章已关闭评论。");
+      return;
+    }
+    if (!commenter.authorName.trim()) {
+      setMessage("请输入评论昵称。");
+      return;
+    }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(commenter.authorEmail.trim())) {
+      setMessage("请输入有效邮箱，邮箱不会公开。");
+      return;
+    }
+    if (content.length > COMMENT_CONTENT_MAX_LENGTH) {
+      setMessage(`评论内容不能超过 ${COMMENT_CONTENT_MAX_LENGTH} 字。`);
+      return;
+    }
+    if (!content || submitting) return;
+    setSubmitting(true);
+    try {
+      const submittedComment = await api.postComment(articleId, { ...commenter, content });
+      setComments((items) => [{ ...submittedComment, localPending: submittedComment.status === "pending" }, ...items]);
+      onChange("");
+      setMessage(submittedComment.status === "pending" ? "评论已写入数据库，审核通过后会公开显示。" : "评论已发布。");
+      emitAdminDataChanged();
+    } catch (error) {
+      setMessage(getApiErrorMessage(error));
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  const title = enabled ? "发表评论" : "评论已关闭";
+
+  return (
+    <section className="comments">
+      <h3>{title}</h3>
+      {!enabled ? (
+        <div className="comment-closed">{disabledReason ?? "站长已关闭这篇文章的评论，前端和后端都会拒绝新评论。"}</div>
+      ) : (
+        <div className="comment-input">
+          <span className="avatar sm">访</span>
+          <div className="comment-compose">
+            <div className="comment-meta">
+              <input value={commenter.authorName} onChange={(event) => setCommenter((current) => ({ ...current, authorName: event.target.value }))} placeholder="昵称" />
+              <input value={commenter.authorEmail} onChange={(event) => setCommenter((current) => ({ ...current, authorEmail: event.target.value }))} placeholder="邮箱（不会公开）" />
+            </div>
+            <input value={value} maxLength={COMMENT_CONTENT_MAX_LENGTH} onChange={(event) => onChange(event.target.value)} placeholder="写下你的评论..." />
+            <div className="comment-tools"><span>表情</span><span>#</span><span>&lt;/&gt;</span><span>引用</span><small>{value.length}/{COMMENT_CONTENT_MAX_LENGTH}</small></div>
+          </div>
+          <button onClick={submitComment} disabled={submitting || !value.trim() || !commenter.authorName.trim() || !commenter.authorEmail.trim()}>{submitting ? "提交中..." : "发表评论"}</button>
+        </div>
+      )}
+      {message && <p className="form-notice">{message}</p>}
+      <div className="comment-thread">
+        {loading ? <p className="soft-text">正在读取评论...</p> : comments.length ? comments.map((item) => (
+          <article className="comment-row" key={item.id}>
+            <span className="avatar xs">{item.localPending || item.status === "pending" ? "审" : "评"}</span>
+            <div>
+              <p><b>{item.authorName}</b>：{item.content}</p>
+              <small>{item.createdAt?.slice(0, 16).replace("T", " ") ?? "刚刚"} · 点赞 {item.likesCount}{(item.localPending || item.status === "pending") ? " · 待审核" : ""}</small>
+            </div>
+          </article>
+        )) : <p className="soft-text">暂无公开评论</p>}
+      </div>
+    </section>
+  );
+}
+
+function AuthorCard() {
+  const [stats, setStats] = useState<PublicSiteStats>();
+  const [usingMock, setUsingMock] = useState(false);
+
+  useEffect(() => {
+    let alive = true;
+    api.getPublicStats().then((result) => {
+      if (!alive) return;
+      setStats(result);
+      setUsingMock(result.source === "mock");
+    });
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  return <section className="author card"><div className="avatar lg">山</div><h3>一行代码 <Tag>LV6</Tag></h3><p>全栈开发者 · 技术博主</p>{usingMock && <p className="soft-text">作者统计当前为 mock 兜底数据。</p>}<div className="author-stats"><b>{stats ? stats.posts : "--"}<span>文章</span></b><b>{stats ? api.formatCount(stats.views) : "--"}<span>访问</span></b><b>--<span>粉丝</span></b></div><button disabled title="关注功能尚未接入后端">关注未接入</button></section>;
+}
+
+function ArchivePage() {
+  const [mode, setMode] = useState("time");
+  const archiveRoute = useRoute();
+  const params = routeQuery();
+  const [search, setSearch] = useState(params.get("q") ?? "");
+  const [category, setCategory] = useState(params.get("category") ?? "全部分类");
+  const [tag, setTag] = useState(params.get("tag") ?? "全部标签");
+  const [year, setYear] = useState(params.get("year") ?? "全部年份");
+  const [expanded, setExpanded] = useState<Record<string, boolean>>({});
+  const [subscriptionEmail, setSubscriptionEmail] = useState("");
+  const [subscriptionNotice, setSubscriptionNotice] = useState("");
+  const [subscribedEmail, setSubscribedEmail] = useState("");
+  const [subscribing, setSubscribing] = useState(false);
+  const [archiveArticles, setArchiveArticles] = useState<Article[]>([]);
+  const [archiveCategories, setArchiveCategories] = useState<AdminCategoryItem[]>([]);
+  const [archiveTagItems, setArchiveTagItems] = useState<AdminTagItem[]>([]);
+  const [archiveStats, setArchiveStats] = useState<PublicSiteStats>();
+  const [archiveUsingMock, setArchiveUsingMock] = useState(false);
+  useEffect(() => {
+    const nextParams = routeQuery();
+    setSearch(nextParams.get("q") ?? "");
+    setCategory(nextParams.get("category") ?? "全部分类");
+    setTag(nextParams.get("tag") ?? "全部标签");
+    setYear(nextParams.get("year") ?? "全部年份");
+  }, [archiveRoute]);
+  useEffect(() => {
+    let alive = true;
+    Promise.all([api.getHome(), api.getPublicCategories(), api.getPublicTags(), api.getPublicStats()]).then(([postResult, categoryResult, tagResult, statsResult]) => {
+      if (!alive) return;
+      setArchiveArticles(postResult.articles);
+      setArchiveCategories(categoryResult.items);
+      setArchiveTagItems(tagResult.items);
+      setArchiveStats(statsResult);
+      setArchiveUsingMock(postResult.source === "mock" || categoryResult.source === "mock" || tagResult.source === "mock" || statsResult.source === "mock");
+    });
+    return () => {
+      alive = false;
+    };
+  }, []);
+  const categoryOptions = ["全部分类", ...Array.from(new Set(archiveArticles.map((item) => item.category)))];
+  const archiveTags = Array.from(new Set(archiveArticles.flatMap((item) => item.tags)));
+  const databaseCategoryOptions = archiveCategories.length ? [categoryOptions[0], ...archiveCategories.map((item) => item.name)] : categoryOptions;
+  const categoryCountMap = new Map(archiveCategories.map((item) => [item.name, item.postsCount]));
+  const databaseArchiveTags = archiveTagItems.length ? archiveTagItems.map((item) => item.name) : archiveTags;
+  const yearOptions = ["全部年份", ...Array.from(new Set(archiveArticles.map((item) => `${new Date(item.date).getFullYear()} 年`)))];
+  const filteredArticles = archiveArticles.filter((item) => {
+    const keyword = search.trim().toLowerCase();
+    const matchSearch = !keyword || [item.title, item.excerpt, item.category, ...item.tags].join(" ").toLowerCase().includes(keyword);
+    const matchCategory = category === "全部分类" || item.category === category;
+    const matchTag = tag === "全部标签" || item.tags.includes(tag);
+    const matchYear = year === "全部年份" || item.date.startsWith(year.replace(" 年", ""));
+    return matchSearch && matchCategory && matchTag && matchYear;
+  });
+  const grouped = filteredArticles.reduce<Record<string, Article[]>>((acc, item) => {
+    const key = `${new Date(item.date).getFullYear()} 年`;
+    acc[key] = acc[key] ? [...acc[key], item] : [item];
+    return acc;
+  }, {});
+  async function submitSubscription() {
+    const email = subscriptionEmail.trim();
+    if (!email) {
+      setSubscriptionNotice("请输入邮箱后再订阅");
+      return;
+    }
+    if (subscribing) return;
+    setSubscribing(true);
+    setSubscriptionNotice("");
+    try {
+      const result = await api.subscribe(email);
+      setSubscribedEmail(result.item.email);
+      setSubscriptionEmail("");
+      setSubscriptionNotice(`已写入订阅数据库：${result.item.email}`);
+    } catch (error) {
+      setSubscriptionNotice(getApiErrorMessage(error));
+    } finally {
+      setSubscribing(false);
+    }
+  }
+  return (
+    <>
+      <PublicHeader active="/archive" />
+      <main className="page archive-layout">
+        <aside className="filter card"><h3>筛选</h3><div className="search-line"><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="搜索归档" /><span>⌕</span></div><h4>按分类</h4>{databaseCategoryOptions.map((x) => <button className={category === x ? "active" : ""} key={x} onClick={() => setCategory(x)}>{x} <small>{x === "全部分类" ? archiveArticles.length : categoryCountMap.get(x) ?? archiveArticles.filter((item) => item.category === x).length}</small></button>)}<h4>按标签</h4><div className="tag-cloud">{["全部标签", ...databaseArchiveTags.slice(0, 8)].map((x) => <button className={`tag-button ${tag === x ? "active" : ""}`} key={x} onClick={() => setTag(x)}><Tag tone="gray">{x}</Tag></button>)}</div><h4>按年份</h4>{yearOptions.map((x) => <button className={year === x ? "active" : ""} key={x} onClick={() => setYear(x)}>{x} <small>{x === "全部年份" ? archiveArticles.length : archiveArticles.filter((item) => item.date.startsWith(x.replace(" 年", ""))).length}</small></button>)}</aside>
+        <section className="timeline-wrap">
+          <PublicDataNotice show={archiveUsingMock} surface="归档页" />
+          <h1>文章归档</h1><p>按时间浏览，发现每一个成长的足迹</p>
+          <div className="tabs"><button className={mode === "time" ? "active" : ""} onClick={() => setMode("time")}>按时间浏览</button><button className={mode === "all" ? "active" : ""} onClick={() => setMode("all")}>全部文章</button><span>共 {filteredArticles.length} 篇文章</span></div>
+          {filteredArticles.length ? <div className="timeline">{Object.entries(grouped).map(([yearLabel, items]) => <div className="year" key={yearLabel}><div className="year-badge">{yearLabel} <small>{items.length} 篇文章</small></div><div className="month"><div className="month-label"><b>{mode === "time" ? "5 月" : "全部"}</b><span>{items.length} 篇</span></div><div className="month-card">{items.slice(0, expanded[yearLabel] ? items.length : 3).map((item) => <button className="archive-item" key={item.id} onClick={() => go(`/article/${item.id}`)}><b>{item.title}</b><small>发布于 {item.date.slice(5)} · 阅读 {item.reads} · 点赞 {item.likes} · 评论 {item.comments}</small><span><Tag>{item.category}</Tag>{item.tags.slice(0, 1).map((itemTag) => <Tag key={itemTag} tone="blue">{itemTag}</Tag>)} ♡</span></button>)}{items.length > 3 && <button onClick={() => setExpanded({ ...expanded, [yearLabel]: !expanded[yearLabel] })}>{expanded[yearLabel] ? "收起" : `查看该年全部 ${items.length} 篇文章⌄`}</button>}</div></div></div>)}</div> : <section className="empty card">没有找到匹配的归档文章</section>}
+        </section>
+        <aside className="side-stack"><Card title="归档统计"><div className="stats-lines">{[`文章总数 ${archiveStats?.posts ?? archiveArticles.length}`, `分类总数 ${archiveStats?.categories ?? databaseCategoryOptions.length - 1}`, `标签总数 ${archiveStats?.tags ?? databaseArchiveTags.length}`, `留言数 ${archiveStats?.messages ?? 0}`, `访问量 ${api.formatCount(archiveStats?.views ?? 0)}`, `点赞数 ${api.formatCount(archiveStats?.likes ?? 0)}`, `评论数 ${api.formatCount(archiveStats?.comments ?? 0)}`].map((x) => <p key={x}>{x}</p>)}</div></Card><Card title="热门标签"><div className="tag-cloud">{databaseArchiveTags.slice(0, 12).map((x) => <button className="tag-button" key={x} onClick={() => setTag(x)}><Tag tone="gray">{x}</Tag></button>)}</div></Card><section className="subscribe card"><h3>★ 订阅更新</h3><p>{subscribedEmail ? `已订阅 ${subscribedEmail}，记录已保存到数据库。` : "输入邮箱订阅文章更新；提交成功后会写入 subscriptions 表。"}</p><input value={subscriptionEmail} onChange={(event) => setSubscriptionEmail(event.target.value)} placeholder="email@example.com" /><button onClick={submitSubscription} disabled={subscribing || !subscriptionEmail.trim()}>{subscribing ? "提交中..." : subscribedEmail ? "更新订阅" : "立即订阅"}</button>{subscriptionNotice && <p className="form-notice">{subscriptionNotice}</p>}</section><section className="empty card"><div>□</div><p>在归档中探索知识的轨迹<br />每一篇文章，都是成长的印记</p></section></aside>
+      </main>
+    </>
+  );
+}
+
+function AboutPage() {
+  const [aboutStats, setAboutStats] = useState<PublicSiteStats>();
+  const [aboutTags, setAboutTags] = useState<AdminTagItem[]>([]);
+  const [aboutConfig, setAboutConfig] = useState<AboutPageSettings>(defaultAboutSettings);
+  const [aboutUsingMock, setAboutUsingMock] = useState(false);
+  const [wechatQrOpen, setWechatQrOpen] = useState(false);
+
+  useEffect(() => {
+    let alive = true;
+    Promise.all([api.getPublicStats(), api.getPublicTags(), api.getPublicAbout()]).then(([stats, tagResult, aboutResult]) => {
+      if (!alive) return;
+      setAboutStats(stats);
+      setAboutTags(tagResult.items);
+      setAboutConfig(aboutResult.item);
+      setAboutUsingMock(stats.source === "mock" || tagResult.source === "mock" || aboutResult.source === "mock");
+    });
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  const aboutStatItems = [
+    `文章总数 ${aboutStats?.posts ?? "--"}`,
+    `分类 ${aboutStats?.categories ?? "--"}`,
+    `标签 ${aboutStats?.tags ?? "--"}`,
+    `评论 ${aboutStats?.comments ?? "--"}`,
+    `留言 ${aboutStats?.messages ?? "--"}`,
+    `访问量 ${api.formatCount(aboutStats?.views ?? 0)}`,
+  ];
+  const navigateConfiguredUrl = (url?: string) => {
+    if (!url) return;
+    if (url.startsWith("/")) go(url);
+    else window.open(url, "_blank", "noreferrer");
+  };
+  const aboutSkills = aboutConfig.skills.filter((item) => item.trim() && item.trim() !== "…");
+
+  return (
+    <>
+      <PublicHeader active="/about" />
+      <main className="page about-layout">
+        <section className="about-main card">
+          <div className="profile">
+            <div className="portrait" style={{ backgroundImage: `url(${aboutConfig.portraitUrl || "/assets/about-portrait.png"})` }} />
+            <div className="profile-text"><h1>{aboutConfig.title} <Tag>{aboutConfig.badge}</Tag></h1><p>{aboutConfig.subtitle}</p><h3>{aboutConfig.introTitle}</h3><p>{aboutConfig.intro}</p><div className="contact"><span>⌖ {aboutConfig.location}</span><span>✉ {aboutConfig.email}</span><span>☎ {aboutConfig.phone}</span></div></div>
+          </div>
+          <hr />
+          <h3>技术栈</h3><div className="skill-row">{aboutSkills.map((x) => <span className="skill-chip" key={x}><b>{x.slice(0, 2).toUpperCase()}</b>{x}</span>)}</div>
+          <h3>项目作品集</h3>
+          <div className="project-grid">{aboutConfig.projects.map((project, i) => <article className={project.projectUrl || project.demoUrl ? "clickable" : ""} key={`${project.title}-${i}`} onClick={() => navigateConfiguredUrl(project.projectUrl || project.demoUrl)}><div className="project-cover art wide" style={{ backgroundImage: project.imageUrl ? `url(${project.imageUrl})` : undefined }}>{project.badge && <span>{project.badge}</span>}</div><h4>{project.title}</h4><p>{project.description}</p><div>{project.tags.map((tag) => <Tag key={tag} tone="gray">{tag}</Tag>)}</div></article>)}</div>
+          <div className="cooperate"><span>💬✈</span><div><h3>{aboutConfig.cooperateTitle}</h3><p>{aboutConfig.cooperateText}</p></div><button onClick={() => navigateConfiguredUrl(aboutConfig.cooperateUrl || "/messages")}>{aboutConfig.cooperateButtonText} →</button></div>
+        </section>
+        <aside className="side-stack"><PublicDataNotice show={aboutUsingMock} surface="关于页公开数据" /><Card title="站点数据"><div className="about-stats">{aboutStatItems.map((x) => <div key={x}>{x}</div>)}</div></Card><Card title="关注我"><div className="socials about-socials"><button type="button" onClick={() => navigateConfiguredUrl(aboutConfig.githubUrl)}><span className="social-icon github-icon" aria-hidden="true">GH</span><b>GitHub</b></button><button type="button" onClick={() => setWechatQrOpen(true)}><span className="social-icon wechat-icon" aria-hidden="true">微</span><b>微信</b></button></div></Card><Card title="写作主题"><div className="tag-cloud">{aboutConfig.writingTopics.length ? aboutConfig.writingTopics.map((x) => <button className="tag-button" key={x.label} onClick={() => navigateConfiguredUrl(x.url)}><Tag tone="gray">{x.label}</Tag></button>) : aboutTags.slice(0, 12).map((x) => <Tag key={x.id} tone="gray">{x.name}</Tag>)}</div></Card><Card title="自我介绍时间线"><div className="intro-line">{aboutConfig.timeline.map((x) => <p key={`${x.year}-${x.title}`}><b>{x.year}</b><span>{x.title}</span><small>{x.description}</small></p>)}</div></Card></aside>
+        {wechatQrOpen && (
+          <div className="media-modal" role="dialog" aria-modal="true" aria-label="微信二维码" onClick={() => setWechatQrOpen(false)}>
+            <div className="media-modal-panel qr-modal-panel" onClick={(event) => event.stopPropagation()}>
+              <header><b>微信</b><button type="button" onClick={() => setWechatQrOpen(false)}>关闭</button></header>
+              {aboutConfig.wechatQrUrl ? <img src={aboutConfig.wechatQrUrl} alt="微信二维码" /> : <p className="soft-text">请在后台关于页配置中上传微信二维码。</p>}
+            </div>
+          </div>
+        )}
+      </main>
+    </>
+  );
+}
+
+function listToText(items: string[]) {
+  return items.join("\n");
+}
+
+function textToList(text: string) {
+  return text.split(/\r?\n/).map((item) => item.trim()).filter(Boolean);
+}
+
+function topicsToText(items: AboutPageSettings["writingTopics"]) {
+  return items.map((item) => `${item.label}|${item.url ?? ""}`).join("\n");
+}
+
+function textToTopics(text: string): AboutPageSettings["writingTopics"] {
+  return text.split(/\r?\n/).map((line) => {
+    const [label = "", url = ""] = line.split("|");
+    return { label: label.trim(), url: url.trim() };
+  }).filter((item) => item.label);
+}
+
+function timelineToText(items: AboutPageSettings["timeline"]) {
+  return items.map((item) => `${item.year}|${item.title}|${item.description}`).join("\n");
+}
+
+function textToTimeline(text: string): AboutPageSettings["timeline"] {
+  return text.split(/\r?\n/).map((line) => {
+    const [year = "", title = "", description = ""] = line.split("|");
+    return { year: year.trim(), title: title.trim(), description: description.trim() };
+  }).filter((item) => item.year || item.title || item.description);
+}
+
+function AboutSettingsPage() {
+  const [config, setConfig] = useState<AboutPageSettings>(defaultAboutSettings);
+  const [skillsText, setSkillsText] = useState(listToText(defaultAboutSettings.skills));
+  const [projects, setProjects] = useState<AboutPageSettings["projects"]>(defaultAboutSettings.projects);
+  const [topicsText, setTopicsText] = useState(topicsToText(defaultAboutSettings.writingTopics));
+  const [timelineText, setTimelineText] = useState(timelineToText(defaultAboutSettings.timeline));
+  const [aboutMediaItems, setAboutMediaItems] = useState<AdminMediaItem[]>([]);
+  const [mediaTarget, setMediaTarget] = useState<"portrait" | "project" | "wechatQr" | null>(null);
+  const [mediaProjectIndex, setMediaProjectIndex] = useState(0);
+  const [mediaLoading, setMediaLoading] = useState(false);
+  const [notice, setNotice] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    let alive = true;
+    api.getAdminAboutSettings()
+      .then((result) => {
+        if (!alive) return;
+        setConfig(result.item);
+        setSkillsText(listToText(result.item.skills));
+        setProjects(result.item.projects);
+        setTopicsText(topicsToText(result.item.writingTopics));
+        setTimelineText(timelineToText(result.item.timeline));
+      })
+      .catch((error) => {
+        if (!alive) return;
+        setNotice(getApiErrorMessage(error));
+        if (getApiErrorMessage(error).includes("登录")) api.logout();
+      });
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  function updateField<K extends keyof AboutPageSettings>(key: K, value: AboutPageSettings[K]) {
+    setConfig((current) => ({ ...current, [key]: value }));
+  }
+
+  function updateProject(index: number, patch: Partial<AboutPageSettings["projects"][number]>) {
+    setProjects((items) => items.map((item, itemIndex) => itemIndex === index ? { ...item, ...patch } : item));
+  }
+
+  function addProject() {
+    setProjects((items) => [...items, { title: "新项目", description: "", imageUrl: "", projectUrl: "", demoUrl: "", tags: [], badge: "个人项目" }]);
+  }
+
+  function removeProject(index: number) {
+    setProjects((items) => items.filter((_, itemIndex) => itemIndex !== index));
+  }
+
+  async function saveAboutSettings() {
+    setSaving(true);
+    setNotice("");
+    try {
+      const payload: AboutPageSettings = {
+        ...config,
+        skills: textToList(skillsText),
+        projects: projects.map((item) => ({ ...item, tags: Array.isArray(item.tags) ? item.tags : [] })),
+        socials: [{ label: "GitHub", url: config.githubUrl }, { label: "微信", url: "" }],
+        writingTopics: textToTopics(topicsText),
+        timeline: textToTimeline(timelineText),
+      };
+      const result = await api.updateAdminAboutSettings(payload);
+      setConfig(result.item);
+      setNotice("关于页配置已保存到数据库。");
+      emitAdminDataChanged();
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : getApiErrorMessage(error));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function openAboutMediaPicker(target: "portrait" | "project" | "wechatQr", projectIndex = 0) {
+    setMediaTarget(target);
+    setMediaProjectIndex(projectIndex);
+    setMediaLoading(true);
+    setNotice("");
+    try {
+      const result = await api.getAdminMedia();
+      setAboutMediaItems(result.items.filter((item) => item.mimeType.startsWith("image/")));
+    } catch (error) {
+      setNotice(getApiErrorMessage(error));
+    } finally {
+      setMediaLoading(false);
+    }
+  }
+
+  function selectAboutMedia(item: AdminMediaItem) {
+    if (mediaTarget === "portrait") {
+      updateField("portraitUrl", item.url);
+    } else if (mediaTarget === "wechatQr") {
+      updateField("wechatQrUrl", item.url);
+    } else if (mediaTarget === "project") {
+      updateProject(mediaProjectIndex, { imageUrl: item.url });
+    }
+    setMediaTarget(null);
+    setNotice(`已选择图片：${item.originalName}`);
+  }
+
+  return (
+    <>
+      <AdminTop />
+      <div className="admin-content admin-placeholder">
+        <div className="title-row">
+          <h1>关于页配置</h1>
+          <div className="title-actions"><button onClick={saveAboutSettings} disabled={saving}>{saving ? "保存中..." : "保存配置"}</button><button onClick={() => go("/about")}>预览关于页</button></div>
+        </div>
+        {notice && <p className="admin-hint">{notice}</p>}
+        <section className="card about-config">
+          <div className="settings-panel">
+            <header>
+              <b>基础资料</b>
+              <span>控制关于页首屏、个人介绍与联系信息。</span>
+            </header>
+            <div className="settings-grid">
+            <label>标题<input value={config.title} onChange={(event) => updateField("title", event.target.value)} /></label>
+            <label>身份标签<input value={config.badge} onChange={(event) => updateField("badge", event.target.value)} /></label>
+            <label className="wide">副标题<input value={config.subtitle} onChange={(event) => updateField("subtitle", event.target.value)} /></label>
+            <label>头像 URL<div className="inline-picker"><input value={config.portraitUrl} onChange={(event) => updateField("portraitUrl", event.target.value)} /><button type="button" onClick={() => openAboutMediaPicker("portrait")}>媒体库</button></div></label>
+            <label>安全运行天数<input value={config.safeDays} onChange={(event) => updateField("safeDays", event.target.value)} /></label>
+            <label>安全运行起始说明<input value={config.safeSince} onChange={(event) => updateField("safeSince", event.target.value)} /></label>
+            <label>简介小标题<input value={config.introTitle} onChange={(event) => updateField("introTitle", event.target.value)} /></label>
+            <label className="wide">个人简介<textarea value={config.intro} onChange={(event) => updateField("intro", event.target.value)} /></label>
+            <label>所在地<input value={config.location} onChange={(event) => updateField("location", event.target.value)} /></label>
+            <label>邮箱<input value={config.email} onChange={(event) => updateField("email", event.target.value)} /></label>
+            <label>电话<input value={config.phone} onChange={(event) => updateField("phone", event.target.value)} /></label>
+            <label>GitHub 链接<input value={config.githubUrl} onChange={(event) => updateField("githubUrl", event.target.value)} /></label>
+            <label className="wide">微信二维码<div className="inline-picker"><input value={config.wechatQrUrl} onChange={(event) => updateField("wechatQrUrl", event.target.value)} /><button type="button" onClick={() => openAboutMediaPicker("wechatQr")}>媒体库</button></div></label>
+            </div>
+          </div>
+          <div className="settings-panel">
+            <header>
+              <b>侧栏与履历</b>
+              <span>每行一条，链接字段使用“名称|链接”。</span>
+            </header>
+            <div className="settings-grid compact">
+            <label>技术栈（每行一个）<textarea value={skillsText} onChange={(event) => setSkillsText(event.target.value)} /></label>
+            <label>写作主题（名称|链接，每行一个）<textarea value={topicsText} onChange={(event) => setTopicsText(event.target.value)} /></label>
+            <label>时间线（年份|标题|说明，每行一个）<textarea value={timelineText} onChange={(event) => setTimelineText(event.target.value)} /></label>
+            </div>
+          </div>
+          <div className="settings-panel wide">
+            <div className="wide project-editor">
+              <header><div><b>项目作品集</b><span>封面从媒体库选择，链接留空时前台仅展示不跳转。</span></div><button type="button" onClick={addProject}>新增项目</button></header>
+              {projects.map((project, index) => (
+                <article key={`${project.title}-${index}`}>
+                  <div className="project-media-column">
+                    <div className="project-thumb" style={{ backgroundImage: project.imageUrl ? `url(${project.imageUrl})` : undefined }} />
+                    <button type="button" onClick={() => openAboutMediaPicker("project", index)}>选择封面</button>
+                  </div>
+                  <div className="project-form-grid">
+                    <div className="project-card-head">
+                      <b>项目 {index + 1}</b>
+                      <button className="project-remove" type="button" onClick={() => removeProject(index)}>删除</button>
+                    </div>
+                    <label>项目名称<input value={project.title} onChange={(event) => updateProject(index, { title: event.target.value })} /></label>
+                    <label>项目徽标<input value={project.badge ?? ""} onChange={(event) => updateProject(index, { badge: event.target.value })} /></label>
+                    <label className="wide">项目描述<textarea value={project.description} onChange={(event) => updateProject(index, { description: event.target.value })} /></label>
+                    <label>标签（逗号分隔）<input value={project.tags.join(", ")} onChange={(event) => updateProject(index, { tags: event.target.value.split(",").map((item) => item.trim()).filter(Boolean) })} /></label>
+                    <label>项目链接<input value={project.projectUrl ?? ""} onChange={(event) => updateProject(index, { projectUrl: event.target.value })} /></label>
+                    <label>演示链接<input value={project.demoUrl ?? ""} onChange={(event) => updateProject(index, { demoUrl: event.target.value })} /></label>
+                    <label className="wide">封面 URL<input value={project.imageUrl ?? ""} onChange={(event) => updateProject(index, { imageUrl: event.target.value })} /></label>
+                  </div>
+                </article>
+              ))}
+            </div>
+          </div>
+          <div className="settings-panel wide">
+            <header>
+              <b>合作入口</b>
+              <span>控制关于页底部行动按钮与文案。</span>
+            </header>
+            <div className="settings-grid">
+            <label>合作标题<input value={config.cooperateTitle} onChange={(event) => updateField("cooperateTitle", event.target.value)} /></label>
+            <label>合作按钮<input value={config.cooperateButtonText} onChange={(event) => updateField("cooperateButtonText", event.target.value)} /></label>
+            <label>合作按钮链接<input value={config.cooperateUrl} onChange={(event) => updateField("cooperateUrl", event.target.value)} /></label>
+            <label className="wide">合作文案<textarea value={config.cooperateText} onChange={(event) => updateField("cooperateText", event.target.value)} /></label>
+            </div>
+          </div>
+        </section>
+        {mediaTarget && (
+          <div className="media-modal" role="dialog" aria-modal="true" aria-label="选择关于页图片" onClick={() => setMediaTarget(null)}>
+            <div className="media-modal-panel media-picker-panel" onClick={(event) => event.stopPropagation()}>
+              <header><b>选择图片</b><button type="button" onClick={() => setMediaTarget(null)}>关闭</button></header>
+              {mediaLoading ? <p className="soft-text">正在读取媒体库...</p> : aboutMediaItems.length ? (
+                <div className="media-picker-grid">
+                  {aboutMediaItems.map((item) => <button type="button" key={item.id} onClick={() => selectAboutMedia(item)}><img src={item.url} alt={item.altText || item.originalName} /><span>{item.originalName}</span></button>)}
+                </div>
+              ) : <p className="soft-text">媒体库暂无图片</p>}
+            </div>
+          </div>
+        )}
+      </div>
+    </>
+  );
+}
+
+function MessagesPage() {
+  const [tab, setTab] = useState("all");
+  const [sort, setSort] = useState("latest");
+  const [form, setForm] = useState({ author: "", email: "", site: "", content: "" });
+  const [list, setList] = useState<Message[]>([]);
+  const [submitNotice, setSubmitNotice] = useState("");
+  const [messagesUsingMock, setMessagesUsingMock] = useState(false);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let alive = true;
+    function loadMessages() {
+      setLoading(true);
+      api.getMessages()
+        .then(({ messages: nextMessages, source }) => {
+          if (!alive) return;
+          const usingMock = source === "mock";
+          setList(nextMessages);
+          setMessagesUsingMock(usingMock);
+          setSubmitNotice("");
+        })
+        .catch((error) => {
+          if (alive) {
+            setMessagesUsingMock(false);
+            setSubmitNotice(getApiErrorMessage(error));
+          }
+        })
+        .finally(() => {
+          if (alive) setLoading(false);
+        });
+    }
+    loadMessages();
+    window.addEventListener("admin-data-changed", loadMessages);
+    return () => {
+      alive = false;
+      window.removeEventListener("admin-data-changed", loadMessages);
+    };
+  }, []);
+
+  const repliedCount = list.filter((item) => item.replies?.length).length;
+  const pendingCount = list.filter((item) => !item.approved).length;
+  const visibleMessages = [...list]
+    .filter((item) => tab === "all" || (tab === "reply" ? Boolean(item.replies?.length) : !item.approved))
+    .sort((a, b) => sort === "hot" ? b.likes - a.likes : b.id - a.id);
+
+  async function submit(event: FormEvent) {
+    event.preventDefault();
+    if (!form.author.trim() || !form.email.trim() || !form.content.trim()) return;
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email.trim())) {
+      setSubmitNotice("请输入有效邮箱，邮箱不会公开。");
+      return;
+    }
+    if (form.content.trim().length > MESSAGE_CONTENT_MAX_LENGTH) {
+      setSubmitNotice(`留言内容不能超过 ${MESSAGE_CONTENT_MAX_LENGTH} 字。`);
+      return;
+    }
+    try {
+      const next = await api.postMessage(form);
+      setList((items) => [{ ...next, approved: false, replies: [] }, ...items]);
+      setForm({ author: "", email: "", site: "", content: "" });
+      setSubmitNotice("留言已提交，审核通过后会公开显示。");
+      emitAdminDataChanged();
+    } catch (error) {
+      setSubmitNotice(getApiErrorMessage(error));
+    }
+  }
+
+  return (
+    <>
+      <PublicHeader active="/messages" />
+      <main className="page two-col message-page">
+        <section className="main-flow">
+          <PublicDataNotice show={messagesUsingMock} surface="留言板" />
+          <div className="message-title">
+            <div><h1><span className="message-title-icon" />留言板</h1><p>欢迎交流，有问题可以留言，我会尽快回复你。</p></div>
+            <span>♧ {repliedCount ? `有 ${repliedCount} 条站长回复` : "暂无站长回复"}</span>
+          </div>
+          <form className="message-form card" onSubmit={submit}>
+            <div className="form-grid">
+              <label>昵称 *<input value={form.author} onChange={(event) => setForm({ ...form, author: event.target.value })} placeholder="请输入你的昵称" /></label>
+              <label>邮箱 *<input value={form.email} onChange={(event) => setForm({ ...form, email: event.target.value })} placeholder="请输入邮箱，不会公开" /></label>
+              <label>网站（可选）<input value={form.site} onChange={(event) => setForm({ ...form, site: event.target.value })} placeholder="https://your-site.com" /></label>
+            </div>
+            <label>写下你的留言 *<textarea value={form.content} onChange={(event) => setForm({ ...form, content: event.target.value })} maxLength={MESSAGE_CONTENT_MAX_LENGTH} placeholder="欢迎留言交流，分享你的想法或问题..." /></label>
+            <footer><span>☺　▧　&lt;/&gt;</span><small>{form.content.length} / {MESSAGE_CONTENT_MAX_LENGTH}</small><button disabled={!form.author.trim() || !form.email.trim() || !form.content.trim()}>发布留言</button></footer>
+            {submitNotice && <p className="form-notice">{submitNotice}</p>}
+          </form>
+          <div className="message-tabs">
+            <button className={tab === "all" ? "active" : ""} onClick={() => setTab("all")}>全部留言 <b>{list.length}</b></button>
+            <button onClick={() => setTab("reply")} className={tab === "reply" ? "active" : ""}>站长回复 <b>{repliedCount}</b></button>
+            <button onClick={() => setTab("pending")} className={tab === "pending" ? "active" : ""}>待审核 <b>{pendingCount}</b></button>
+            <select value={sort} onChange={(event) => setSort(event.target.value)}><option value="latest">最新留言</option><option value="hot">点赞最多</option></select>
+          </div>
+          <div className="message-list">{loading ? <section className="empty card">正在读取留言...</section> : visibleMessages.length ? visibleMessages.map((item) => <MessageItem key={item.id} item={item} readonlyMock={messagesUsingMock} />) : <section className="empty card">当前筛选下暂无留言</section>}</div>
+        </section>
+        <aside className="side-stack"><section className="rule-card card"><h3>友好交流</h3><p>请尊重他人、文明发言</p><p>禁止发布广告、恶意链接</p><p>技术讨论请尽量具体清晰</p><p>站长会定期查看并回复</p></section><Card title="最新评论"><MiniComments /></Card><section className="author card"><div className="avatar lg">站</div><h3>站长 <Tag>站长</Tag></h3><p>全栈开发 & 技术分享</p><p>热爱技术，热爱分享。在这里记录学习与实践的点滴。</p></section></aside>
+      </main>
+    </>
+  );
+}
+
+function MessageItem({ item, readonlyMock = false }: { item: Message; readonlyMock?: boolean }) {
+  const [liked, setLiked] = useState(false);
+  const [likesCount, setLikesCount] = useState(item.likes);
+  const [likeNotice, setLikeNotice] = useState("");
+  const [liking, setLiking] = useState(false);
+  async function likeMessage() {
+    if (readonlyMock) {
+      setLikeNotice("当前为 mock 留言，点赞不会写入数据库。");
+      return;
+    }
+    if (liking) return;
+    setLiking(true);
+    setLikeNotice("");
+    try {
+      const result = await api.likeMessage(item.id);
+      setLikesCount(result.likesCount);
+      setLiked(result.liked || result.alreadyLiked);
+      setLikeNotice(result.alreadyLiked ? "你已经点过赞了" : "点赞已写入数据库");
+    } catch (error) {
+      setLikeNotice(getApiErrorMessage(error));
+    } finally {
+      setLiking(false);
+    }
+  }
+  return (
+    <article className="message-item card">
+      <div className={`avatar ${item.avatar}`}>{item.author[0]}</div>
+      <div>
+        <h3>{item.author}<Tag tone={item.role === "站长" ? "green" : "blue"}>{item.role}</Tag><small> · {item.time}</small></h3>
+        <p>{item.content}</p>
+        <button onClick={likeMessage} disabled={liking || !item.approved || readonlyMock} title={readonlyMock ? "mock 留言不支持点赞" : item.approved ? "点赞留言" : "审核通过后可点赞"}>{liked ? "♥" : "♡"} {likesCount}</button>
+        {likeNotice && <small className="form-notice">{likeNotice}</small>}
+        {item.replies?.map((reply) => <MessageItem key={reply.id} item={reply} readonlyMock={readonlyMock} />)}
+      </div>
+      <span className="approved">{item.approved ? "已通过 ✓" : "待审核"}</span>
+    </article>
+  );
+}
+
+function MiniComments({ items }: { items?: AdminDashboardData["pendingComments"] }) {
+  const list = items ?? [];
+  return <div className="comment-mini">{list.length ? list.map((item) => <p key={item.id}><span className="avatar xs">{item.authorName[0]}</span><b>{item.authorName}</b><small>{item.createdAt?.slice(0, 10) ?? "刚刚"}</small><br />{item.content}</p>) : <p className="soft-text">{items ? "暂无待审核评论" : "暂无评论数据"}</p>}</div>;
+}
+
+function AdminLogin() {
+  const [loading, setLoading] = useState(false);
+  const [account, setAccount] = useState("admin");
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState("");
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setLoading(true);
+    setError("");
+    try {
+      await api.login(account, password);
+      go("/admin");
+    } catch (loginError) {
+      setError(getApiErrorMessage(loginError));
+    } finally {
+      setLoading(false);
+    }
+  }
+  return (
+    <main className="login-page">
+      <section className="login-copy">
+        <p className="path">后台 /admin/login</p>
+        <h1>管理后台登录</h1>
+        <p>登录后才能访问文章、媒体、评论和留言等管理接口。</p>
+        <div className="feature-row">
+          <span>真实鉴权<small>校验管理员账号密码</small></span>
+          <span>Token 会话<small>后台接口自动携带 Bearer token</small></span>
+          <span>数据库闭环<small>操作结果写入 PostgreSQL</small></span>
+        </div>
+        <div className="dashboard-preview"><aside><b>后台</b><span>文章</span><span>评论</span><span>媒体</span><span>设置</span></aside><div><StatsCard /><div className="chart-line" /></div></div>
+        <div className="security-tip"><b>登录说明</b><span>默认账号由 backend/.env 的 ADMIN_DEFAULT_PASSWORD 和 seed 数据决定。</span></div>
+      </section>
+      <form className="login-card" onSubmit={submit}>
+        <span className="brand-mark">站</span>
+        <h2>登录后台</h2>
+        <p>请输入管理员账号密码</p>
+        <label>账号<input value={account} onChange={(event) => setAccount(event.target.value)} placeholder="管理员账号或邮箱" /></label>
+        <label>密码<input value={password} onChange={(event) => setPassword(event.target.value)} placeholder="请输入密码" type="password" /></label>
+        {error && <p className="form-notice">{error}</p>}
+        <div className="row-between"><label className="check"><input type="checkbox" />记住我</label><a>忘记密码</a></div>
+        <button className="primary" disabled={loading}>{loading ? "登录中..." : "登录管理后台"}</button>
+        <div className="warning"><b>安全提示</b><span>管理接口必须带 Bearer token，未登录时后端会返回 401。</span></div>
+      </form>
+    </main>
+  );
+}
+
+const adminRoutes: Record<string, { label: string; path: string }> = {
+  dashboard: { label: "仪表盘", path: "/admin" },
+  posts: { label: "文章管理", path: "/admin/posts" },
+  drafts: { label: "草稿箱", path: "/admin/drafts" },
+  trash: { label: "回收站", path: "/admin/trash" },
+  categories: { label: "分类管理", path: "/admin/categories" },
+  tags: { label: "标签管理", path: "/admin/tags" },
+  comments: { label: "评论审核", path: "/admin/comments" },
+  messages: { label: "留言管理", path: "/admin/messages" },
+  media: { label: "媒体库", path: "/admin/media" },
+  about: { label: "关于页配置", path: "/admin/about-config" },
+  home: { label: "首页配置", path: "/admin/home-config" },
+  settings: { label: "站点设置", path: "/admin/settings" },
+};
+
+type AdminRow = {
+  key: string;
+  id: number;
+  text: string;
+  status: string;
+  href: string;
+  media?: AdminMediaItem;
+  actions?: Array<{
+    label: string;
+    title?: string;
+    href?: string;
+    run?: () => void;
+  }>;
+  review?: {
+    kind: "comment" | "message";
+    id: number;
+    status: string;
+  };
+};
+
+const emptyDashboard: AdminDashboardData = {
+  counts: { posts: 0, published: 0, draft: 0, scheduled: 0, archived: 0, pendingComments: 0, pendingMessages: 0, media: 0, categories: 0, tags: 0, views: 0, likes: 0, comments: 0 },
+  hotPosts: [],
+  pendingComments: [],
+  pendingMessages: [],
+  latestPosts: [],
+  dailyStats: [],
+  source: "mock",
+};
+
+function formatCompactNumber(value = 0) {
+  return value >= 1000 ? `${(value / 1000).toFixed(1).replace(".0", "")}k` : String(value);
+}
+
+function getDefaultScheduledAt() {
+  const next = new Date(Date.now() + 60 * 60 * 1000);
+  const pad = (value: number) => String(value).padStart(2, "0");
+  return `${next.getFullYear()}-${pad(next.getMonth() + 1)}-${pad(next.getDate())} ${pad(next.getHours())}:${pad(next.getMinutes())}`;
+}
+
+function adminStatusText(status: string) {
+  if (status === "published") return "已发布";
+  if (status === "draft") return "草稿";
+  if (status === "scheduled") return "定时";
+  if (status === "archived") return "回收站";
+  return status || "未知";
+}
+
+function looksLikeMojibake(value = "") {
+  return /[ÃÂ�]|[åäæçèé][\u0080-\u00ff]/i.test(value);
+}
+
+function looksLikeGeneratedName(value = "") {
+  const baseName = value.replace(/\.[a-z0-9]+$/i, "");
+  return /^[a-f0-9-]{24,}$/i.test(baseName) || /^\d{10,}-[a-f0-9]{8,}$/i.test(baseName);
+}
+
+function mediaUrlFileName(url = "") {
+  return decodeURIComponent(url.split("?")[0].split("/").pop() ?? "");
+}
+
+function cleanMediaText(value = "") {
+  const text = value.trim();
+  if (!text || looksLikeMojibake(text) || looksLikeGeneratedName(text)) return "";
+  return text;
+}
+
+function mediaDisplayName(item: AdminMediaItem) {
+  return cleanMediaText(item.altText ?? "") || cleanMediaText(item.originalName) || cleanMediaText(mediaUrlFileName(item.url)) || `图片 #${item.id}`;
+}
+
+function mediaMetaText(item: AdminMediaItem) {
+  const displayName = mediaDisplayName(item);
+  const originalName = cleanMediaText(item.originalName);
+  return [
+    item.mimeType.replace(/^image\//, "").toUpperCase(),
+    item.width && item.height ? `${item.width}x${item.height}` : "",
+    originalName && originalName !== displayName ? originalName : "",
+  ].filter(Boolean).join(" · ");
+}
+
+function compactMediaUrl(url = "") {
+  const parts = url.split("/");
+  if (parts.length >= 6) return `${parts.slice(0, 5).join("/")}/.../${parts[parts.length - 1]}`;
+  return url;
+}
+
+const defaultAboutSettings: AboutPageSettings = {
+  title: "关于我",
+  badge: "技术博主 / 开发者",
+  subtitle: "热爱编程 · 热爱分享 · 持续学习 · 长期主义",
+  introTitle: "个人简介",
+  intro: "大家好，我是一名全栈开发者，喜欢用代码解决问题，也热衷于分享技术经验与思考。本站是我独立搭建并持续运营的个人博客，记录学习、工作与生活中的点滴。希望通过持续输出，与更多志同道合的朋友一起成长。",
+  location: "中国 · 杭州",
+  email: "hello@example.com",
+  phone: "17354410494",
+  website: "https://example.com",
+  githubUrl: "https://github.com",
+  wechatQrUrl: "",
+  portraitUrl: "/assets/about-portrait.png",
+  safeDays: "567",
+  safeSince: "自 2023-11-01 起",
+  skills: ["TypeScript", "React", "Next.js", "Node.js", "NestJS", "MySQL", "Docker", "Git", "…"],
+  projects: [
+    { title: "BlogCore 全栈博客系统", description: "基于 Node.js + React 的全栈博客系统，支持 Markdown、文章管理、评论、留言、统计与主题自定义。", imageUrl: "/assets/about-project-blogcore.png", projectUrl: "", demoUrl: "", tags: ["Node.js", "React", "MySQL", "TypeScript"], badge: "开源项目" },
+    { title: "PlanDo 任务管理应用", description: "一个简洁高效的任务管理工具，支持看板、日历、协作与数据统计，帮助团队提升效率。", imageUrl: "/assets/about-project-plando.png", projectUrl: "", demoUrl: "", tags: ["React", "TypeScript", "Tailwind CSS"], badge: "个人项目" },
+    { title: "DevNote 开发者笔记", description: "专为开发者设计的笔记工具，支持代码片段、Markdown、标签分类与全文搜索。", imageUrl: "/assets/about-project-devnote.png", projectUrl: "", demoUrl: "", tags: ["Vue 3", "Vite", "IndexedDB"], badge: "个人项目" },
+  ],
+  socials: [{ label: "GitHub", url: "https://github.com" }, { label: "掘金", url: "https://juejin.cn" }, { label: "知乎", url: "https://www.zhihu.com" }, { label: "Bilibili", url: "https://www.bilibili.com" }, { label: "微信公众号", url: "" }],
+  writingTopics: ["后端开发", "前端开发", "全栈实践", "项目复盘", "算法与数据结构", "工具推荐", "成长思考", "面试总结"].map((label) => ({ label, url: `/archive?tag=${encodeURIComponent(label)}` })),
+  timeline: [{ year: "2021", title: "计算机科学与技术 本科毕业", description: "在校期间热爱编程，参与多个项目开发。" }, { year: "2022", title: "全栈开发工程师", description: "参与企业级系统开发，积累全栈开发经验。" }, { year: "2023", title: "开始技术写作", description: "搭建个人博客，持续输出技术文章与教程。" }, { year: "2024", title: "独立开发 & 开源贡献", description: "发布开源项目，专注于自研与系统优化。" }],
+  cooperateTitle: "欢迎交流与合作",
+  cooperateText: "如果你有任何问题、建议，或者想一起交流技术，欢迎在留言板给我留言～",
+  cooperateButtonText: "去留言",
+  cooperateUrl: "/messages",
+};
+
+function AdminShell({ editor = false, page = "dashboard" }: { editor?: boolean; page?: string }) {
+  const active = editor ? "文章管理" : adminRoutes[page]?.label ?? "仪表盘";
+  return <main className={`admin-app ${editor ? "admin-editor-app" : ""}`}><AdminSidebar active={active} /><section className="admin-main">{editor ? <EditorPage /> : page === "dashboard" ? <DashboardPage /> : page === "about" ? <AboutSettingsPage /> : <AdminPlaceholder page={page} />}</section></main>;
+}
+
+function AdminSidebar({ active }: { active: string }) {
+  const items = Object.values(adminRoutes);
+  const [dashboard, setDashboard] = useState<AdminDashboardData>(emptyDashboard);
+  useEffect(() => {
+    let alive = true;
+    function loadDashboard() {
+      api.getDashboard()
+      .then((result) => {
+        if (alive) {
+          setDashboard(result);
+        }
+      })
+      .catch((error) => {
+        if (!alive) return;
+        const message = getApiErrorMessage(error);
+        if (message.includes("登录")) api.logout();
+      });
+    }
+    loadDashboard();
+    window.addEventListener("admin-data-changed", loadDashboard);
+    return () => {
+      alive = false;
+      window.removeEventListener("admin-data-changed", loadDashboard);
+    };
+  }, []);
+  function badge(label: string) {
+    const count = label === "文章管理" ? dashboard.counts.posts
+      : label === "草稿箱" ? dashboard.counts.draft
+        : label === "回收站" ? dashboard.counts.archived
+          : label === "分类管理" ? dashboard.counts.categories
+            : label === "标签管理" ? dashboard.counts.tags
+              : label === "评论审核" ? dashboard.counts.pendingComments
+                : label === "留言管理" ? dashboard.counts.pendingMessages
+                  : label === "媒体库" ? dashboard.counts.media
+                    : 0;
+    return count > 0 ? formatCompactNumber(count) : "";
+  }
+  function logoutAdmin() {
+    api.logout();
+    go("/admin/login");
+  }
+  return <aside className="admin-side"><Logo admin /><nav>{items.map((item) => {
+    const itemBadge = badge(item.label);
+    return <button key={item.path} className={active === item.label ? "active" : ""} onClick={() => go(item.path)}>{item.label}{itemBadge && <small>{itemBadge}</small>}</button>;
+  })}</nav><div className="admin-user"><span className="avatar sm">管</span><span>管理员<small>超级管理员</small></span><button type="button" title="退出登录并使当前后端会话失效" onClick={logoutAdmin}>退出</button></div></aside>;
+}
+
+function AdminTop({ editor = false, editorTitle = "新建文章" }: { editor?: boolean; editorTitle?: string }) {
+  const [pendingCount, setPendingCount] = useState(0);
+  useEffect(() => {
+    let alive = true;
+    function loadPendingCount() {
+      api.getDashboard()
+        .then((result) => {
+          if (alive) setPendingCount(result.counts.pendingComments + result.counts.pendingMessages);
+        })
+        .catch((error) => {
+          if (alive && error instanceof Error && error.message.includes("登录")) api.logout();
+        });
+    }
+    loadPendingCount();
+    window.addEventListener("admin-data-changed", loadPendingCount);
+    return () => {
+      alive = false;
+      window.removeEventListener("admin-data-changed", loadPendingCount);
+    };
+  }, []);
+  return <header className="admin-top"><div>{editor ? `‹ 文章管理 / ${editorTitle}` : "欢迎回来，站长 👋"}</div><label className="search-mini"><input placeholder="搜索文章、分类、标签..." /><span>⌕</span></label><button className="bell">♧{pendingCount > 0 && <b>{formatCompactNumber(pendingCount)}</b>}</button><span className="avatar sm">站</span></header>;
+}
+
+function AdminPlaceholder({ page }: { page: string }) {
+  const info = adminRoutes[page] ?? adminRoutes.dashboard;
+  const dbPages = ["posts", "drafts", "trash", "media", "categories", "tags", "comments", "messages"];
+  const [adminPosts, setAdminPosts] = useState<AdminPostListItem[]>([]);
+  const [adminMedia, setAdminMedia] = useState<AdminMediaItem[]>([]);
+  const [adminCategories, setAdminCategories] = useState<AdminCategoryItem[]>([]);
+  const [adminTags, setAdminTags] = useState<AdminTagItem[]>([]);
+  const [adminComments, setAdminComments] = useState<AdminCommentItem[]>([]);
+  const [adminMessages, setAdminMessages] = useState<AdminMessageItem[]>([]);
+  const [previewMedia, setPreviewMedia] = useState<AdminMediaItem | null>(null);
+  const [source, setSource] = useState<"api" | "unimplemented">("api");
+  const [loading, setLoading] = useState(dbPages.includes(page));
+  const [actionNotice, setActionNotice] = useState("");
+  const [batchMode, setBatchMode] = useState(false);
+  const [selectedKeys, setSelectedKeys] = useState<string[]>([]);
+  const mediaInputRef = useRef<HTMLInputElement | null>(null);
+
+  useEffect(() => {
+    setBatchMode(false);
+    setSelectedKeys([]);
+    let alive = true;
+    async function load() {
+      setLoading(dbPages.includes(page));
+      setActionNotice("");
+      try {
+        if (page === "posts" || page === "drafts" || page === "trash") {
+          const result = await api.getAdminPosts(page === "drafts" ? "draft" : page === "trash" ? "archived" : undefined);
+          if (alive) {
+            setAdminPosts(result.items);
+            setSource(result.source);
+            setLoading(false);
+          }
+        } else if (page === "media") {
+          const result = await api.getAdminMedia();
+          if (alive) {
+            setAdminMedia(result.items);
+            setSource(result.source);
+            setLoading(false);
+          }
+        } else if (page === "categories") {
+          const result = await api.getAdminCategories();
+          if (alive) {
+            setAdminCategories(result.items);
+            setSource(result.source);
+            setLoading(false);
+          }
+        } else if (page === "tags") {
+          const result = await api.getAdminTags();
+          if (alive) {
+            setAdminTags(result.items);
+            setSource(result.source);
+            setLoading(false);
+          }
+        } else if (page === "comments") {
+          const result = await api.getAdminComments();
+          if (alive) {
+            setAdminComments(result.items);
+            setSource(result.source);
+            setLoading(false);
+          }
+        } else if (page === "messages") {
+          const result = await api.getAdminMessages();
+          if (alive) {
+            setAdminMessages(result.items);
+            setSource(result.source);
+            setLoading(false);
+          }
+        } else {
+          setSource("unimplemented");
+          setLoading(false);
+          setActionNotice(`${info.label}尚未接入后端接口，当前不展示 mock 管理数据。`);
+        }
+      } catch (error) {
+        if (!alive) return;
+        setLoading(false);
+        setSource("api");
+        setActionNotice(getApiErrorMessage(error));
+        if (getApiErrorMessage(error).includes("登录")) api.logout();
+      }
+    }
+    load();
+    return () => {
+      alive = false;
+    };
+  }, [page]);
+
+  async function reviewRow(kind: "comment" | "message", id: number, status: "approved" | "rejected") {
+    try {
+      if (kind === "comment") {
+        const result = await api.reviewComment(id, status);
+        setAdminComments((items) => items.map((item) => item.id === id ? { ...item, ...(result.item ?? {}), status: result.status } : item));
+      } else {
+        const result = await api.reviewMessage(id, status);
+        setAdminMessages((items) => items.map((item) => item.id === id ? { ...item, ...(result.item ?? {}), status: result.status } : item));
+      }
+      setActionNotice("操作已写入数据库。");
+      emitAdminDataChanged();
+    } catch (error) {
+      setActionNotice(getApiErrorMessage(error));
+    }
+  }
+
+  async function replyToMessage(id: number) {
+    const content = window.prompt("请输入站长回复内容");
+    if (!content?.trim()) return;
+    try {
+      const result = await api.replyMessage(id, content.trim());
+      setAdminMessages((items) => [result.item, ...items]);
+      setActionNotice("站长回复已写入数据库，并会在留言板对应留言下展示。");
+      emitAdminDataChanged();
+    } catch (error) {
+      setActionNotice(getApiErrorMessage(error));
+    }
+  }
+
+  async function changePostStatus(id: number, status: "draft" | "published" | "scheduled" | "archived") {
+    try {
+      const result = await api.updatePostStatus(id, status);
+      setAdminPosts((items) => items.map((item) => item.id === id ? { ...item, ...(result.item ?? {}), status: result.status } : item).filter((item) => page !== "drafts" || item.status === "draft").filter((item) => page !== "trash" || item.status === "archived").filter((item) => page !== "posts" || item.status !== "archived"));
+      setActionNotice("文章状态已写入数据库。");
+      emitAdminDataChanged();
+    } catch (error) {
+      setActionNotice(getApiErrorMessage(error));
+    }
+  }
+
+  async function deletePost(id: number) {
+    try {
+      await api.deletePost(id);
+      setAdminPosts((items) => items.filter((item) => item.id !== id));
+      setActionNotice(page === "trash" ? "文章已从数据库永久删除。" : "文章已移入回收站。");
+      emitAdminDataChanged();
+    } catch (error) {
+      setActionNotice(getApiErrorMessage(error));
+    }
+  }
+
+  async function uploadMediaFile(event: ChangeEvent<HTMLInputElement>) {
+    const files = Array.from(event.target.files ?? []);
+    event.target.value = "";
+    if (!files.length) return;
+    const imageFiles = files.filter((file) => file.type.startsWith("image/"));
+    if (!imageFiles.length) {
+      setActionNotice("请选择图片文件。");
+      return;
+    }
+
+    const uploaded: AdminMediaItem[] = [];
+    const failed: string[] = [];
+    for (const [index, file] of imageFiles.entries()) {
+      try {
+        setActionNotice(`正在上传图片 ${index + 1}/${imageFiles.length}：${file.name}`);
+        const result = await api.uploadMedia(file, file.name);
+        uploaded.push(result.item);
+      } catch (error) {
+        failed.push(`${file.name}：${getApiErrorMessage(error)}`);
+      }
+    }
+    if (uploaded.length) {
+      setAdminMedia((items) => [...uploaded.reverse(), ...items]);
+      setSource("api");
+      emitAdminDataChanged();
+    }
+    const skipped = files.length - imageFiles.length;
+    const parts = [
+      uploaded.length ? `已上传 ${uploaded.length} 张图片` : "",
+      failed.length ? `失败 ${failed.length} 张：${failed[0]}` : "",
+      skipped ? `已跳过 ${skipped} 个非图片文件` : "",
+    ].filter(Boolean);
+    setActionNotice(parts.join("；") || "没有上传图片。");
+  }
+
+  async function updateMediaAlt(id: number, currentAltText = "") {
+    const altText = window.prompt("请输入媒体说明（alt_text）", currentAltText);
+    if (altText === null) return;
+    try {
+      const result = await api.updateMedia(id, altText.trim());
+      setAdminMedia((items) => items.map((item) => item.id === id ? result.item : item));
+      setActionNotice("媒体说明已更新到数据库。");
+      emitAdminDataChanged();
+    } catch (error) {
+      setActionNotice(getApiErrorMessage(error));
+    }
+  }
+
+  async function deleteMedia(id: number) {
+    if (!window.confirm("确定删除这个媒体文件吗？数据库记录会删除，本地上传文件也会尝试删除。")) return;
+    try {
+      const result = await api.deleteMedia(id);
+      setAdminMedia((items) => items.filter((item) => item.id !== result.id));
+      setActionNotice("媒体文件已从数据库删除。");
+      emitAdminDataChanged();
+    } catch (error) {
+      setActionNotice(getApiErrorMessage(error));
+    }
+  }
+
+  async function createCategory() {
+    const name = window.prompt("请输入新分类名称");
+    if (!name?.trim()) return;
+    const description = window.prompt("请输入分类描述（可留空）") ?? "";
+    try {
+      const result = await api.createCategory({ name: name.trim(), description: description.trim() });
+      setAdminCategories((items) => [...items, result.item]);
+      setActionNotice("分类已写入数据库。");
+      emitAdminDataChanged();
+    } catch (error) {
+      setActionNotice(getApiErrorMessage(error));
+    }
+  }
+
+  async function updateCategory(item: AdminCategoryItem) {
+    const name = window.prompt("请输入分类名称", item.name);
+    if (!name?.trim()) return;
+    const description = window.prompt("请输入分类描述（可留空）", item.description ?? "") ?? "";
+    try {
+      const result = await api.updateCategory(item.id, { name: name.trim(), slug: item.slug, description: description.trim(), icon: item.icon });
+      setAdminCategories((items) => items.map((current) => current.id === item.id ? result.item : current));
+      setActionNotice("分类已更新到数据库。");
+      emitAdminDataChanged();
+    } catch (error) {
+      setActionNotice(getApiErrorMessage(error));
+    }
+  }
+
+  async function deleteCategory(id: number) {
+    if (!window.confirm("确定删除这个分类吗？仍有文章使用时后端会拒绝删除。")) return;
+    try {
+      const result = await api.deleteCategory(id);
+      setAdminCategories((items) => items.filter((item) => item.id !== result.id));
+      setActionNotice("分类已从数据库删除。");
+      emitAdminDataChanged();
+    } catch (error) {
+      setActionNotice(getApiErrorMessage(error));
+    }
+  }
+
+  async function createTag() {
+    const name = window.prompt("请输入新标签名称");
+    if (!name?.trim()) return;
+    const color = window.prompt("请输入标签颜色（可留空，例如 #14b8a6）") ?? "";
+    try {
+      const result = await api.createTag({ name: name.trim(), color: color.trim() || undefined });
+      setAdminTags((items) => [...items, result.item]);
+      setActionNotice("标签已写入数据库。");
+      emitAdminDataChanged();
+    } catch (error) {
+      setActionNotice(getApiErrorMessage(error));
+    }
+  }
+
+  async function updateTag(item: AdminTagItem) {
+    const name = window.prompt("请输入标签名称", item.name);
+    if (!name?.trim()) return;
+    const color = window.prompt("请输入标签颜色（可留空，例如 #14b8a6）", item.color ?? "") ?? "";
+    try {
+      const result = await api.updateTag(item.id, { name: name.trim(), slug: item.slug, color: color.trim() || undefined });
+      setAdminTags((items) => items.map((current) => current.id === item.id ? result.item : current));
+      setActionNotice("标签已更新到数据库。");
+      emitAdminDataChanged();
+    } catch (error) {
+      setActionNotice(getApiErrorMessage(error));
+    }
+  }
+
+  async function deleteTag(id: number) {
+    if (!window.confirm("确定删除这个标签吗？仍有文章使用时后端会拒绝删除。")) return;
+    try {
+      const result = await api.deleteTag(id);
+      setAdminTags((items) => items.filter((item) => item.id !== result.id));
+      setActionNotice("标签已从数据库删除。");
+      emitAdminDataChanged();
+    } catch (error) {
+      setActionNotice(getApiErrorMessage(error));
+    }
+  }
+
+  async function deleteComment(id: number) {
+    if (!window.confirm("确定删除这条评论吗？删除后不可恢复。")) return;
+    try {
+      const result = await api.deleteComment(id);
+      setAdminComments((items) => items.filter((item) => item.id !== result.id));
+      setActionNotice("评论已从数据库删除。");
+      emitAdminDataChanged();
+    } catch (error) {
+      setActionNotice(getApiErrorMessage(error));
+    }
+  }
+
+  async function deleteMessage(id: number) {
+    if (!window.confirm("确定删除这条留言吗？若它有回复，回复也会一起删除。")) return;
+    try {
+      const result = await api.deleteMessage(id);
+      setAdminMessages((items) => items.filter((item) => item.id !== result.id && item.parentId !== result.id));
+      setActionNotice("留言已从数据库删除。");
+      emitAdminDataChanged();
+    } catch (error) {
+      setActionNotice(getApiErrorMessage(error));
+    }
+  }
+
+  function setRowSelected(key: string, selected: boolean) {
+    setSelectedKeys((keys) => selected ? [...new Set([...keys, key])] : keys.filter((item) => item !== key));
+  }
+
+  function postStatusLabel(status?: string) {
+    if (status === "draft") return "草稿";
+    if (status === "scheduled") return "定时";
+    if (status === "archived") return "已归档";
+    return "已发布";
+  }
+
+  function reviewStatus(status: string) {
+    if (status === "approved") return "已通过";
+    if (status === "rejected") return "已驳回";
+    return "待审核";
+  }
+
+  const rows: AdminRow[] = page === "posts" || page === "drafts" || page === "trash"
+    ? adminPosts.map((item) => ({
+        key: `post-${item.id}`,
+        id: item.id,
+        text: `${item.title} · ${item.date || "未发布"} · ${item.category}`,
+        status: postStatusLabel(item.status),
+        href: `/admin/editor?id=${item.id}`,
+        actions: page === "trash"
+          ? [
+              { label: "恢复为草稿", title: "从回收站恢复，恢复后会进入草稿箱，不会直接公开显示", run: () => changePostStatus(item.id, "draft") },
+              { label: "永久删除", title: "彻底清除文章及关联评论、章节、标签关系，删除后不可恢复", run: () => deletePost(item.id) },
+            ]
+          : [
+              { label: "编辑", title: "打开编辑器修改这篇文章", href: `/admin/editor?id=${item.id}` },
+              ...(item.status === "published" ? [{ label: "查看", title: "打开前台文章详情页", href: `/article/${item.id}` }] : []),
+              ...(item.status === "published" ? [{ label: "下架为草稿", title: "前台不再展示，文章保留在草稿箱继续编辑", run: () => changePostStatus(item.id, "draft") }] : [{ label: "发布", title: "将草稿发布到前台公开显示", run: () => changePostStatus(item.id, "published") }]),
+              { label: "删除", title: "先移入回收站，之后可恢复或永久删除", run: () => deletePost(item.id) },
+            ],
+      }))
+    : page === "media"
+      ? adminMedia.map((item) => ({
+          key: `media-${item.id}`,
+          id: item.id,
+          text: mediaDisplayName(item),
+          status: compactMediaUrl(item.url),
+          href: "",
+          media: item,
+          actions: [
+            { label: "查看", title: "预览这张图片", run: () => setPreviewMedia(item) },
+            { label: "编辑说明", title: "更新媒体 alt_text，保存到 media_assets", run: () => updateMediaAlt(item.id, item.altText ?? "") },
+            { label: "删除", title: "删除媒体数据库记录，并尝试删除本地上传文件", run: () => deleteMedia(item.id) },
+          ],
+        }))
+        : page === "categories"
+          ? adminCategories.map((item) => ({
+              key: `category-${item.id}`,
+              id: item.id,
+              text: `${item.name} · ${item.slug}${item.description ? ` · ${item.description}` : ""}`,
+              status: `${item.postsCount} 篇文章`,
+              href: `/archive?category=${encodeURIComponent(item.name)}`,
+              actions: [
+                { label: "编辑", title: "修改分类名称和描述，保存到 categories", run: () => updateCategory(item) },
+                { label: "删除", title: "删除未被文章使用的分类", run: () => deleteCategory(item.id) },
+              ],
+            }))
+        : page === "tags"
+          ? adminTags.map((item) => ({
+              key: `tag-${item.id}`,
+              id: item.id,
+              text: `${item.name} · ${item.slug}${item.color ? ` · ${item.color}` : ""}`,
+              status: `${item.postsCount} 篇文章`,
+              href: `/archive?tag=${encodeURIComponent(item.name)}`,
+              actions: [
+                { label: "编辑", title: "修改标签名称和颜色，保存到 tags", run: () => updateTag(item) },
+                { label: "删除", title: "删除未被文章使用的标签", run: () => deleteTag(item.id) },
+              ],
+            }))
+          : page === "comments"
+            ? adminComments.map((item) => ({
+                key: `comment-${item.id}`,
+                id: item.id,
+                text: `${item.authorName} · ${item.content}${item.postTitle ? ` · ${item.postTitle}` : ""}`,
+                status: reviewStatus(item.status),
+                href: "",
+                actions: [{ label: "删除", title: "删除这条评论，保存到 comments", run: () => deleteComment(item.id) }],
+                review: { kind: "comment" as const, id: item.id, status: item.status },
+              }))
+            : page === "messages"
+              ? adminMessages.map((item) => ({
+                  key: `message-${item.id}`,
+                  id: item.id,
+                  text: `${item.parentId ? "回复" : "留言"} · ${item.authorName} · ${item.content}`,
+                  status: reviewStatus(item.status),
+                  href: "",
+                  actions: [
+                    ...(!item.parentId ? [{ label: "站长回复", title: "给这条留言写入一条站长回复，保存到 messages.parent_id", run: () => replyToMessage(item.id) }] : []),
+                    { label: "删除", title: item.parentId ? "删除这条留言回复" : "删除这条留言及其回复", run: () => deleteMessage(item.id) },
+                  ],
+                  review: { kind: "message" as const, id: item.id, status: item.status },
+                }))
+              : [];
+  const selectedRows = rows.filter((row) => selectedKeys.includes(row.key));
+  const allRowsSelected = rows.length > 0 && selectedRows.length === rows.length;
+  const batchActions = page === "posts"
+    ? [{ label: "批量下架", danger: false, run: () => batchChangePostStatus("draft") }, { label: "批量移入回收站", danger: true, run: () => batchDeletePosts() }]
+    : page === "drafts"
+      ? [{ label: "批量发布", danger: false, run: () => batchChangePostStatus("published") }, { label: "批量移入回收站", danger: true, run: () => batchDeletePosts() }]
+      : page === "trash"
+        ? [{ label: "批量恢复为草稿", danger: false, run: () => batchChangePostStatus("draft") }, { label: "批量永久删除", danger: true, run: () => batchDeletePosts(true) }]
+        : page === "media"
+          ? [{ label: "批量删除媒体", danger: true, run: () => batchDeleteMedia() }]
+          : page === "categories"
+            ? [{ label: "批量删除分类", danger: true, run: () => batchDeleteCategories() }]
+            : page === "tags"
+              ? [{ label: "批量删除标签", danger: true, run: () => batchDeleteTags() }]
+              : page === "comments"
+                ? [{ label: "批量通过", danger: false, run: () => batchReview("comment", "approved") }, { label: "批量驳回", danger: false, run: () => batchReview("comment", "rejected") }, { label: "批量删除", danger: true, run: () => batchDeleteComments() }]
+                : page === "messages"
+                  ? [{ label: "批量通过", danger: false, run: () => batchReview("message", "approved") }, { label: "批量驳回", danger: false, run: () => batchReview("message", "rejected") }, { label: "批量删除", danger: true, run: () => batchDeleteMessages() }]
+                  : [];
+
+  async function runBatch(label: string, runner: (row: AdminRow) => Promise<void>) {
+    if (!selectedRows.length) return;
+    const failures: string[] = [];
+    setActionNotice(`正在${label} ${selectedRows.length} 项...`);
+    for (const row of selectedRows) {
+      try {
+        await runner(row);
+      } catch (error) {
+        failures.push(`${row.text}：${getApiErrorMessage(error)}`);
+      }
+    }
+    setSelectedKeys((keys) => keys.filter((key) => failures.some((failure) => rows.find((row) => row.key === key && failure.startsWith(row.text)))));
+    setActionNotice(failures.length ? `${label}完成，成功 ${selectedRows.length - failures.length} 项，失败 ${failures.length} 项。${failures[0]}` : `${label}完成，已处理 ${selectedRows.length} 项。`);
+    emitAdminDataChanged();
+  }
+
+  function batchChangePostStatus(status: "draft" | "published" | "scheduled" | "archived") {
+    const label = status === "published" ? "批量发布" : "批量恢复/下架";
+    runBatch(label, async (row) => {
+      const result = await api.updatePostStatus(row.id, status);
+      setAdminPosts((items) => items.map((item) => item.id === row.id ? { ...item, ...(result.item ?? {}), status: result.status } : item).filter((item) => page !== "drafts" || item.status === "draft").filter((item) => page !== "trash" || item.status === "archived").filter((item) => page !== "posts" || item.status !== "archived"));
+    });
+  }
+
+  function batchDeletePosts(permanent = false) {
+    const message = permanent ? `确定永久删除选中的 ${selectedRows.length} 篇文章吗？删除后不可恢复。` : `确定将选中的 ${selectedRows.length} 篇文章移入回收站吗？`;
+    if (!window.confirm(message)) return;
+    runBatch(permanent ? "批量永久删除" : "批量移入回收站", async (row) => {
+      await api.deletePost(row.id);
+      setAdminPosts((items) => items.filter((item) => item.id !== row.id));
+    });
+  }
+
+  function batchDeleteMedia() {
+    if (!window.confirm(`确定删除选中的 ${selectedRows.length} 个媒体文件吗？`)) return;
+    runBatch("批量删除媒体", async (row) => {
+      const result = await api.deleteMedia(row.id);
+      setAdminMedia((items) => items.filter((item) => item.id !== result.id));
+    });
+  }
+
+  function batchDeleteCategories() {
+    if (!window.confirm(`确定删除选中的 ${selectedRows.length} 个分类吗？仍有文章使用时后端会拒绝删除。`)) return;
+    runBatch("批量删除分类", async (row) => {
+      const result = await api.deleteCategory(row.id);
+      setAdminCategories((items) => items.filter((item) => item.id !== result.id));
+    });
+  }
+
+  function batchDeleteTags() {
+    if (!window.confirm(`确定删除选中的 ${selectedRows.length} 个标签吗？仍有文章使用时后端会拒绝删除。`)) return;
+    runBatch("批量删除标签", async (row) => {
+      const result = await api.deleteTag(row.id);
+      setAdminTags((items) => items.filter((item) => item.id !== result.id));
+    });
+  }
+
+  function batchDeleteComments() {
+    if (!window.confirm(`确定删除选中的 ${selectedRows.length} 条评论吗？删除后不可恢复。`)) return;
+    runBatch("批量删除评论", async (row) => {
+      const result = await api.deleteComment(row.id);
+      setAdminComments((items) => items.filter((item) => item.id !== result.id));
+    });
+  }
+
+  function batchDeleteMessages() {
+    if (!window.confirm(`确定删除选中的 ${selectedRows.length} 条留言吗？父留言的回复会一起删除。`)) return;
+    runBatch("批量删除留言", async (row) => {
+      const result = await api.deleteMessage(row.id);
+      setAdminMessages((items) => items.filter((item) => item.id !== result.id && item.parentId !== result.id));
+    });
+  }
+
+  function batchReview(kind: "comment" | "message", status: "approved" | "rejected") {
+    const label = status === "approved" ? "批量通过" : "批量驳回";
+    runBatch(label, async (row) => {
+      if (kind === "comment") {
+        const result = await api.reviewComment(row.id, status);
+        setAdminComments((items) => items.map((item) => item.id === row.id ? { ...item, ...(result.item ?? {}), status: result.status } : item));
+      } else {
+        const result = await api.reviewMessage(row.id, status);
+        setAdminMessages((items) => items.map((item) => item.id === row.id ? { ...item, ...(result.item ?? {}), status: result.status } : item));
+      }
+    });
+  }
+  const postPageHint = page === "trash"
+    ? "回收站里的文章不会在前台显示。点“恢复为草稿”可找回，点“永久删除”会彻底清除。"
+    : page === "drafts"
+      ? "草稿箱保存未公开文章。点“发布”后才会在前台显示，点“删除”会先进入回收站。"
+      : page === "posts"
+        ? "文章管理显示非回收站文章。点“删除”只是移入回收站，不会立即清除。"
+        : "";
+
+  return (
+    <>
+      <AdminTop />
+      <div className="admin-content admin-placeholder">
+        <div className="title-row">
+          <h1>{info.label}</h1>
+          {(page === "posts" || page === "drafts" || page === "trash") && <div className="title-actions"><button title="创建一篇新文章" onClick={() => go("/admin/editor")}>＋ 新建文章</button><button title="查看还没有公开发布的文章" onClick={() => go("/admin/drafts")}>草稿箱</button><button title="查看已删除但还可以恢复的文章" onClick={() => go("/admin/trash")}>回收站</button></div>}
+          {page === "categories" && <div className="title-actions"><button title="新增分类并写入 categories 表" onClick={createCategory}>＋ 新建分类</button></div>}
+          {page === "tags" && <div className="title-actions"><button title="新增标签并写入 tags 表" onClick={createTag}>＋ 新建标签</button></div>}
+        </div>
+        {postPageHint && <p className="admin-hint">{postPageHint}</p>}
+        {actionNotice && <p className="admin-hint">{actionNotice}</p>}
+        {page === "media" && (
+          <div className="admin-hint media-upload-strip">
+            <button type="button" onClick={() => mediaInputRef.current?.click()}>上传图片</button>
+            <span>可一次选择多张图片；上传后会写入 media_assets，并可作为文章封面使用。</span>
+            <input ref={mediaInputRef} className="visually-hidden" type="file" accept="image/*" multiple onChange={uploadMediaFile} />
+          </div>
+        )}
+        <section className="card admin-table">
+          <header>
+            <div>
+              <b>{info.label} {source === "api" ? "数据库列表" : "未接入"}</b>
+              <span>{source === "api" ? "当前列表来自本地 PostgreSQL 后端。" : "该后台模块还没有对应后端接口，已隐藏前端假数据。"}</span>
+            </div>
+            {!loading && rows.length > 0 && !batchMode && <button className="table-batch-button" onClick={() => setBatchMode(true)}>批量选择</button>}
+          </header>
+          {!loading && rows.length > 0 && batchMode && (
+            <div className="batch-toolbar">
+              <label><input type="checkbox" checked={allRowsSelected} onChange={(event) => setSelectedKeys(event.target.checked ? rows.map((row) => row.key) : [])} />全选</label>
+              <span>已选 {selectedRows.length} 项</span>
+              <div>
+                {batchActions.map((action) => <button key={action.label} className={action.danger ? "danger" : ""} disabled={!selectedRows.length} onClick={action.run}>{action.label}</button>)}
+                {selectedRows.length > 0 && <button onClick={() => setSelectedKeys([])}>取消选择</button>}
+                <button onClick={() => { setBatchMode(false); setSelectedKeys([]); }}>退出批量</button>
+              </div>
+            </div>
+          )}
+          {loading ? <p className="soft-text">正在读取数据...</p> : rows.length ? rows.map((row) => <div className={`admin-row ${row.href ? "clickable" : ""} ${row.media ? "media-row" : ""} ${selectedKeys.includes(row.key) ? "selected" : ""}`} key={row.key} onClick={() => row.href && go(row.href)}>{batchMode && <label className="row-check" onClick={(event) => event.stopPropagation()}><input type="checkbox" checked={selectedKeys.includes(row.key)} onChange={(event) => setRowSelected(row.key, event.target.checked)} /><span className="visually-hidden">选择 {row.text}</span></label>}{row.media && <button className="media-thumb" type="button" style={{ backgroundImage: `url(${row.media.url})` }} onClick={(event) => { event.stopPropagation(); setPreviewMedia(row.media!); }} aria-label={`查看 ${row.text}`} />}{row.media ? <span className="media-text"><b>{row.text}</b><small>{mediaMetaText(row.media)}</small></span> : <span>{row.text}</span>}<div className="admin-row-actions"><small>{row.status}</small>{row.actions?.map((action) => <button key={action.label} title={action.title} onClick={(event) => { event.stopPropagation(); if (action.href) go(action.href); action.run?.(); }}>{action.label}</button>)}{row.review && row.review.status !== "approved" && <button onClick={(event) => { event.stopPropagation(); reviewRow(row.review!.kind, row.review!.id, "approved"); }}>通过</button>}{row.review && row.review.status !== "rejected" && <button onClick={(event) => { event.stopPropagation(); reviewRow(row.review!.kind, row.review!.id, "rejected"); }}>驳回</button>}</div></div>) : <p className="soft-text">暂无{info.label}数据。</p>}
+        </section>
+        {previewMedia && (
+          <div className="media-modal" role="dialog" aria-modal="true" aria-label="图片预览" onClick={() => setPreviewMedia(null)}>
+            <div className="media-modal-panel" onClick={(event) => event.stopPropagation()}>
+              <header><b>{previewMedia.originalName}</b><button type="button" onClick={() => setPreviewMedia(null)}>关闭</button></header>
+              <img src={previewMedia.url} alt={previewMedia.altText || previewMedia.originalName} />
+              <p>{previewMedia.url}</p>
+            </div>
+          </div>
+        )}
+      </div>
+    </>
+  );
+}
+
+function DashboardPage() {
+  const [metric, setMetric] = useState("PV");
+  const [dashboard, setDashboard] = useState<AdminDashboardData>(emptyDashboard);
+  const [dashboardNotice, setDashboardNotice] = useState("");
+  const quickActions: Record<string, string> = { "新建文章": "/admin/editor", "写草稿": "/admin/editor?status=draft", "上传图片": "/admin/media", "管理分类": "/admin/categories", "管理标签": "/admin/tags", "站点设置": "/admin/settings" };
+  useEffect(() => {
+    let alive = true;
+    function loadDashboard() {
+      api.getDashboard()
+        .then((result) => {
+          if (alive) {
+            setDashboard(result);
+            setDashboardNotice("");
+          }
+        })
+        .catch((error) => {
+          if (!alive) return;
+          const message = getApiErrorMessage(error);
+          setDashboardNotice(message);
+          if (message.includes("登录")) api.logout();
+        });
+    }
+    loadDashboard();
+    window.addEventListener("admin-data-changed", loadDashboard);
+    return () => {
+      alive = false;
+      window.removeEventListener("admin-data-changed", loadDashboard);
+    };
+  }, []);
+  const trendValues = dashboard.dailyStats.map((item) => metric === "PV" ? item.pv : item.uv);
+  const maxTrendValue = Math.max(1, ...trendValues);
+  const chartData = dashboard.dailyStats.map((item) => {
+    const value = metric === "PV" ? item.pv : item.uv;
+    return {
+      date: item.date,
+      value,
+      height: Math.max(8, (value / maxTrendValue) * 86),
+    };
+  });
+  const dashboardCards = [
+    ["文章总数", formatCompactNumber(dashboard.counts.posts), `${dashboard.counts.published} 已发布 / ${dashboard.counts.draft} 草稿`, "doc"],
+    ["访问量", formatCompactNumber(dashboard.counts.views), `近 7 天 ${formatCompactNumber(trendValues.reduce((sum, value) => sum + value, 0))}`, "eye"],
+    ["评论数", formatCompactNumber(dashboard.counts.comments), `${dashboard.counts.pendingComments} 条待审核`, "comment"],
+    ["待处理留言", formatCompactNumber(dashboard.counts.pendingMessages), "留言板待审核", "mail"],
+    ["点赞数", formatCompactNumber(dashboard.counts.likes), "累计互动", "like"],
+  ] as const;
+  const statusTotal = Math.max(1, dashboard.counts.published + dashboard.counts.draft + dashboard.counts.scheduled + dashboard.counts.archived);
+  const percent = (value: number) => `${((value / statusTotal) * 100).toFixed(1)}%`;
+  const latestActivity = [
+    ...dashboard.latestPosts.map((item) => `${adminStatusText(item.status)}文章《${item.title}》`),
+    ...(dashboard.counts.pendingComments ? [`有 ${dashboard.counts.pendingComments} 条评论待审核`] : []),
+    ...(dashboard.counts.pendingMessages ? [`有 ${dashboard.counts.pendingMessages} 条留言待审核`] : []),
+  ].slice(0, 5);
+  const dashboardConnected = dashboard.source === "api" && !dashboardNotice;
+  return (
+    <>
+      <AdminTop />
+      <div className="admin-content">
+        {dashboardNotice && <p className="admin-hint">{dashboardNotice}</p>}
+        <div className="title-row">
+          <h1>站点数据</h1>
+          <button onClick={() => go("/admin/editor")}>✎ 新建文章</button>
+        </div>
+        <div className="admin-stats">
+          {dashboardCards.map(([title, value, sub, icon]) => (
+            <section className="admin-stat card" key={title}>
+              <Icon name={icon} />
+              <span>{title}</span>
+              <b>{value}</b>
+              <small>{sub}</small>
+            </section>
+          ))}
+        </div>
+        <div className="left-stack">
+          <section className="chart card">
+            <header><h3>访问趋势</h3><select><option>近 7 天</option></select></header>
+            <div className="seg"><button className={metric === "PV" ? "active" : ""} onClick={() => setMetric("PV")}>PV</button><button className={metric === "UV" ? "active" : ""} onClick={() => setMetric("UV")}>UV</button></div>
+            <div className="line-chart">
+              {chartData.length ? chartData.map((item, index) => (
+                <i key={item.date} style={{ height: `${item.height}%` }} title={`${item.date} ${metric}: ${item.value}`}>
+                  <b>{index === chartData.length - 1 ? formatCompactNumber(item.value) : ""}</b>
+                </i>
+              )) : <p className="soft-text chart-empty">暂无近 7 天趋势数据</p>}
+            </div>
+          </section>
+          <section className="activity card">
+            <h3>最新动态</h3>
+            {latestActivity.length ? latestActivity.map((x, index) => <p key={`${index}-${x}`}><span>{x}</span><time>刚刚同步</time></p>) : <p className="soft-text">暂无最新动态</p>}
+            <button className="text-link" onClick={() => go("/admin")}>查看全部动态 →</button>
+          </section>
+        </div>
+        <div className="middle-stack">
+          <section className="donut card">
+            <h3>内容状态概览</h3>
+            <div className="donut-ring"><b>{dashboard.counts.posts + dashboard.counts.archived}<small>总计</small></b></div>
+            <p>● 已发布　{dashboard.counts.published} ({percent(dashboard.counts.published)})</p>
+            <p>● 草稿　{dashboard.counts.draft} ({percent(dashboard.counts.draft)})</p>
+            <p>● 定时发布　{dashboard.counts.scheduled} ({percent(dashboard.counts.scheduled)})</p>
+            <p>● 回收站　{dashboard.counts.archived} ({percent(dashboard.counts.archived)})</p>
+          </section>
+          <section className="site-status card">
+            <h3>站点运行状态</h3>
+            <div><b>数据来源</b><span>{dashboardConnected ? "本地 PostgreSQL" : "后端不可用，未展示 mock 数据"}</span></div>
+            <div><b>后端接口</b><span>127.0.0.1:8000/api</span></div>
+            <div><b>联调状态</b><span>{dashboardConnected ? "已连接" : "后端不可用"}</span></div>
+          </section>
+          <section className="hot card">
+            <h3>热门文章</h3>
+            {dashboard.hotPosts.length ? dashboard.hotPosts.map((a, i) => <p key={a.id}><b>{i + 1}</b>{a.title}<span>◎ {formatCompactNumber(a.viewsCount)}</span></p>) : <p className="soft-text">暂无热门文章</p>}
+            <button className="text-link" onClick={() => go("/admin/posts")}>查看全部文章 →</button>
+          </section>
+        </div>
+        <div className="right-stack">
+          <section className="review card">
+            <h3>待审核</h3>
+            <MiniComments items={dashboard.pendingComments} />
+            <button className="text-link" onClick={() => go("/admin/comments")}>查看全部评论 →</button>
+          </section>
+          <section className="pending card">
+            <h3>留言板待处理</h3>
+            {dashboard.pendingMessages.length ? dashboard.pendingMessages.map((item) => <p key={item.id}><b>{item.authorName}</b><span>{item.createdAt?.slice(0, 10) ?? "刚刚"}</span><small>{item.content}</small></p>) : <p className="soft-text">暂无待处理留言</p>}
+            <button className="text-link" onClick={() => go("/admin/messages")}>查看全部留言 →</button>
+          </section>
+          <section className="quick card">
+            <h3>快捷操作</h3>
+            {Object.entries(quickActions).map(([label, href]) => <button key={label} onClick={() => go(href)}>{label}</button>)}
+          </section>
+        </div>
+      </div>
+    </>
+  );
+}
+
+function renderInlineMarkdown(text: string, keyPrefix: string) {
+  const nodes: ReactNode[] = [];
+  const tokenPattern = /(!\[[^\]]*]\([^)]+\)|\[[^\]]+]\([^)]+\)|`[^`]+`|\*\*[^*]+\*\*|\*[^*]+\*)/g;
+  let lastIndex = 0;
+  let match: RegExpExecArray | null;
+
+  while ((match = tokenPattern.exec(text)) !== null) {
+    if (match.index > lastIndex) nodes.push(text.slice(lastIndex, match.index));
+    const token = match[0];
+    const key = `${keyPrefix}-${match.index}`;
+
+    if (token.startsWith("![")) {
+      const image = token.match(/^!\[([^\]]*)]\(([^)]+)\)$/);
+      nodes.push(image ? <img className="preview-inline-image" key={key} src={image[2]} alt={image[1]} /> : token);
+    } else if (token.startsWith("[")) {
+      const link = token.match(/^\[([^\]]+)]\(([^)]+)\)$/);
+      nodes.push(link ? <a key={key} href={link[2]} target="_blank" rel="noreferrer">{link[1]}</a> : token);
+    } else if (token.startsWith("`")) {
+      nodes.push(<code key={key}>{token.slice(1, -1)}</code>);
+    } else if (token.startsWith("**")) {
+      nodes.push(<strong key={key}>{token.slice(2, -2)}</strong>);
+    } else if (token.startsWith("*")) {
+      nodes.push(<em key={key}>{token.slice(1, -1)}</em>);
+    }
+
+    lastIndex = match.index + token.length;
+  }
+
+  if (lastIndex < text.length) nodes.push(text.slice(lastIndex));
+  return nodes;
+}
+
+function isMarkdownTableStart(lines: string[], index: number) {
+  return /^\s*\|.+\|\s*$/.test(lines[index] ?? "") && /^\s*\|?(\s*:?-{3,}:?\s*\|)+\s*$/.test(lines[index + 1] ?? "");
+}
+
+function collectMarkdownTable(lines: string[], startIndex: number, keyPrefix: string) {
+  const headers = lines[startIndex].split("|").slice(1, -1).map((cell) => cell.trim());
+  const rows: string[][] = [];
+  let index = startIndex + 2;
+  while (index < lines.length && /^\s*\|.+\|\s*$/.test(lines[index])) {
+    rows.push(lines[index].split("|").slice(1, -1).map((cell) => cell.trim()));
+    index += 1;
+  }
+  return {
+    nextIndex: index - 1,
+    node: (
+      <table className="preview-table" key={`${keyPrefix}-table-${startIndex}`}>
+        <thead><tr>{headers.map((cell, cellIndex) => <th key={cellIndex}>{renderInlineMarkdown(cell, `${keyPrefix}-th-${startIndex}-${cellIndex}`)}</th>)}</tr></thead>
+        <tbody>{rows.map((row, rowIndex) => <tr key={rowIndex}>{row.map((cell, cellIndex) => <td key={cellIndex}>{renderInlineMarkdown(cell, `${keyPrefix}-td-${startIndex}-${rowIndex}-${cellIndex}`)}</td>)}</tr>)}</tbody>
+      </table>
+    ),
+  };
+}
+
+function renderArticleMarkdown(markdown: string, keyPrefix: string) {
+  const blocks: ReactNode[] = [];
+  const lines = markdown.split("\n");
+  let inCode = false;
+  let code: string[] = [];
+  let list: ReactNode[] = [];
+  let checklist: ReactNode[] = [];
+
+  function flushList(index: number) {
+    if (list.length) {
+      blocks.push(<ul className="markdown-list" key={`${keyPrefix}-list-${index}`}>{list}</ul>);
+      list = [];
+    }
+    if (checklist.length) {
+      blocks.push(<div className="markdown-checklist" key={`${keyPrefix}-checklist-${index}`}>{checklist}</div>);
+      checklist = [];
+    }
+  }
+
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index];
+
+    if (line.startsWith("```")) {
+      if (inCode) {
+        blocks.push(<pre key={`${keyPrefix}-code-${index}`}><code>{code.join("\n")}</code></pre>);
+        code = [];
+      } else {
+        flushList(index);
+      }
+      inCode = !inCode;
+      continue;
+    }
+
+    if (inCode) {
+      code.push(line);
+      continue;
+    }
+
+    if (!line.trim()) {
+      flushList(index);
+      continue;
+    }
+
+    if (isMarkdownTableStart(lines, index)) {
+      flushList(index);
+      const table = collectMarkdownTable(lines, index, keyPrefix);
+      blocks.push(table.node);
+      index = table.nextIndex;
+    } else if (line.startsWith("> ")) {
+      flushList(index);
+      blocks.push(<blockquote key={`${keyPrefix}-quote-${index}`}>{renderInlineMarkdown(line.replace(/^>\s+/, ""), `${keyPrefix}-quote-${index}`)}</blockquote>);
+    } else if (/^- \[[ x]\]/.test(line)) {
+      const checked = line.includes("[x]");
+      checklist.push(<label className="preview-check" key={`${keyPrefix}-check-${index}`}><input type="checkbox" checked={checked} readOnly />{renderInlineMarkdown(line.replace(/^- \[[ x]\]\s*/, ""), `${keyPrefix}-check-${index}`)}</label>);
+    } else if (line.startsWith("- ")) {
+      list.push(<li key={`${keyPrefix}-li-${index}`}>{renderInlineMarkdown(line.replace(/^-\s+/, ""), `${keyPrefix}-li-${index}`)}</li>);
+    } else {
+      flushList(index);
+      blocks.push(<p key={`${keyPrefix}-p-${index}`}>{renderInlineMarkdown(line, `${keyPrefix}-p-${index}`)}</p>);
+    }
+  }
+
+  flushList(lines.length);
+  if (inCode && code.length) {
+    blocks.push(<pre key={`${keyPrefix}-code-tail`}><code>{code.join("\n")}</code></pre>);
+  }
+  return blocks;
+}
+
+function MarkdownPreview({ title, summary, markdown }: { title: string; summary: string; markdown: string }) {
+  const blocks: ReactNode[] = [];
+  const lines = markdown.split("\n");
+  let inCode = false;
+  let code: string[] = [];
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index];
+    if (line.startsWith("```")) {
+      if (inCode) {
+        blocks.push(<pre key={`code-${index}`}><code>{code.join("\n")}</code></pre>);
+        code = [];
+      }
+      inCode = !inCode;
+      continue;
+    }
+    if (inCode) {
+      code.push(line);
+      continue;
+    }
+    if (!line.trim()) continue;
+    if (isMarkdownTableStart(lines, index)) {
+      const table = collectMarkdownTable(lines, index, "preview");
+      blocks.push(table.node);
+      index = table.nextIndex;
+    } else if (line.startsWith("# ")) {
+      blocks.push(<h2 key={index}>{renderInlineMarkdown(line.replace(/^#\s+/, ""), `h2-${index}`)}</h2>);
+    } else if (line.startsWith("## ")) {
+      blocks.push(<h3 key={index}>{renderInlineMarkdown(line.replace(/^##\s+/, ""), `h3-${index}`)}</h3>);
+    } else if (line.startsWith("### ")) {
+      blocks.push(<h4 key={index}>{renderInlineMarkdown(line.replace(/^###\s+/, ""), `h4-${index}`)}</h4>);
+    } else if (line.startsWith("> ")) {
+      blocks.push(<blockquote key={index}>{renderInlineMarkdown(line.replace(/^>\s+/, ""), `quote-${index}`)}</blockquote>);
+    } else if (/^- \[[ x]\]/.test(line)) {
+      const checked = line.includes("[x]");
+      blocks.push(<label className="preview-check" key={index}><input type="checkbox" checked={checked} readOnly />{renderInlineMarkdown(line.replace(/^- \[[ x]\]\s*/, ""), `check-${index}`)}</label>);
+    } else if (line.startsWith("- ")) {
+      blocks.push(<p className="preview-list" key={index}>{renderInlineMarkdown(line.replace(/^-\s+/, ""), `list-${index}`)}</p>);
+    } else {
+      blocks.push(<p key={index}>{renderInlineMarkdown(line, `p-${index}`)}</p>);
+    }
+  }
+
+  return (
+    <div className="preview-doc">
+      <div className="preview-kicker">实时预览</div>
+      {title.trim() && <h1>{title}</h1>}
+      {summary.trim() && <div className="note">⊙ {summary}</div>}
+      {blocks}
+    </div>
+  );
+}
+
+const DEFAULT_EDITOR_TITLE = "";
+const DEFAULT_EDITOR_MARKDOWN = "";
+const DEFAULT_EDITOR_SUMMARY = "";
+const DEFAULT_EDITOR_CATEGORY = "技术笔记";
+const DEFAULT_EDITOR_TAGS: string[] = [];
+const DEFAULT_EDITOR_COVER = "/assets/editor-cover.png";
+
+function EditorPage() {
+  const [title, setTitle] = useState(DEFAULT_EDITOR_TITLE);
+  const [saved, setSaved] = useState("10:25:30");
+  const [published, setPublished] = useState(false);
+  const [markdown, setMarkdown] = useState(DEFAULT_EDITOR_MARKDOWN);
+  const [notice, setNotice] = useState("自动保存已开启");
+  const [previewMode, setPreviewMode] = useState<"desktop" | "mobile">("desktop");
+  const [aiSummary, setAiSummary] = useState(DEFAULT_EDITOR_SUMMARY);
+  const [categoryOptions, setCategoryOptions] = useState(["技术笔记", "项目复盘"]);
+  const [tagOptions, setTagOptions] = useState(["博客系统", "自建项目", "开发心得", "AI"]);
+  const [categoryName, setCategoryName] = useState(DEFAULT_EDITOR_CATEGORY);
+  const [selectedTags, setSelectedTags] = useState(DEFAULT_EDITOR_TAGS);
+  const [featured, setFeatured] = useState(true);
+  const [allowComment, setAllowComment] = useState(true);
+  const [reviewComment, setReviewComment] = useState(true);
+  const [postStatus, setPostStatus] = useState<"published" | "scheduled" | "draft">("published");
+  const [publishTiming, setPublishTiming] = useState<"now" | "scheduled">("now");
+  const [scheduledAt, setScheduledAt] = useState(getDefaultScheduledAt);
+  const [visibility, setVisibility] = useState<"public" | "private" | "password">("public");
+  const [seoTitle, setSeoTitle] = useState(title.slice(0, 60));
+  const [coverUrl, setCoverUrl] = useState(DEFAULT_EDITOR_COVER);
+  const [coverName, setCoverName] = useState("editor-cover.png");
+  const [mediaPickerOpen, setMediaPickerOpen] = useState(false);
+  const [mediaPickerTarget, setMediaPickerTarget] = useState<"cover" | "body">("cover");
+  const [editorMediaItems, setEditorMediaItems] = useState<AdminMediaItem[]>([]);
+  const [mediaPickerLoading, setMediaPickerLoading] = useState(false);
+  const [loadedEditId, setLoadedEditId] = useState<number | undefined>();
+  const [aiStatus, setAiStatus] = useState<AdminAiStatus>({
+    enabled: false,
+    mode: "mock",
+    provider: null,
+    tasksTableReady: false,
+    tasksCount: 0,
+    message: "正在读取 AI 功能状态...",
+  });
+  const coverInputRef = useRef<HTMLInputElement | null>(null);
+  const bodyImageInputRef = useRef<HTMLInputElement | null>(null);
+  const markdownInputRef = useRef<HTMLTextAreaElement | null>(null);
+  const editorQuery = routeQuery();
+  const editPostId = Number(editorQuery.get("id") ?? 0) || undefined;
+  const initialEditorStatus = editorQuery.get("status") === "draft" ? "draft" : "published";
+  const isEditingExistingPost = Boolean(loadedEditId);
+  const editorModeTitle = isEditingExistingPost ? `编辑文章 #${loadedEditId}` : "新建文章";
+  const primaryPublishLabel = postStatus === "scheduled" ? "已定时" : isEditingExistingPost && published ? "更新发布" : published ? "已发布" : "发布";
+  const readingMinutes = Math.max(1, Math.ceil(markdown.length / 350));
+  const lineNumbers = markdown.split("\n").map((_, index) => index + 1);
+
+  const normalizedScheduledAt = publishTiming === "scheduled" && scheduledAt.trim() ? scheduledAt.trim().replace(" ", "T") : undefined;
+  const postMeta = {
+    categoryName,
+    tags: selectedTags,
+    isFeatured: featured,
+    coverUrl,
+    visibility,
+    scheduledAt: normalizedScheduledAt,
+    seoTitle,
+    allowComment,
+    requireCommentReview: reviewComment,
+  };
+
+  useEffect(() => {
+    let alive = true;
+    if (!editPostId) {
+      setLoadedEditId(undefined);
+      setTitle(DEFAULT_EDITOR_TITLE);
+      setMarkdown(DEFAULT_EDITOR_MARKDOWN);
+      setAiSummary(DEFAULT_EDITOR_SUMMARY);
+      setCategoryName(DEFAULT_EDITOR_CATEGORY);
+      setSelectedTags(DEFAULT_EDITOR_TAGS);
+      setFeatured(true);
+      setAllowComment(true);
+      setReviewComment(true);
+      setPostStatus(initialEditorStatus);
+      setPublishTiming("now");
+      setScheduledAt(getDefaultScheduledAt());
+      setVisibility("public");
+      setSeoTitle(DEFAULT_EDITOR_TITLE.slice(0, 60));
+      setCoverUrl(DEFAULT_EDITOR_COVER);
+      setCoverName("editor-cover.png");
+      setPublished(false);
+      setSaved(new Date().toLocaleTimeString("zh-CN", { hour12: false }));
+      setNotice(initialEditorStatus === "draft" ? "已进入新草稿模式，保存后写入数据库" : "已进入新建文章模式，发布后写入数据库");
+      api.startNewPost();
+      return () => {
+        alive = false;
+      };
+    }
+    setLoadedEditId(editPostId);
+    setNotice(`正在读取文章 #${editPostId}`);
+    api.getEditorPost(editPostId)
+      .then(({ item, source }) => {
+        if (!alive || !item) {
+          if (alive) {
+            setLoadedEditId(undefined);
+            setPublished(false);
+            setNotice("没有找到这篇文章，已停留在新建文章模式");
+            api.startNewPost();
+          }
+          return;
+        }
+        setTitle(item.title);
+        setMarkdown(item.markdown);
+        setAiSummary(item.summary);
+        if (item.categoryName) setCategoryName(item.categoryName);
+        if (item.tags.length) setSelectedTags(item.tags);
+        setFeatured(item.isFeatured ?? true);
+        setAllowComment(item.allowComment ?? true);
+        setReviewComment(item.requireCommentReview ?? true);
+        setVisibility(item.visibility ?? "public");
+        setSeoTitle(item.title.slice(0, 60));
+        if (item.coverUrl) {
+          setCoverUrl(item.coverUrl);
+          setCoverName(item.coverUrl.startsWith("data:") ? "uploaded-cover" : item.coverUrl.split("/").pop() ?? "cover");
+        }
+        setPostStatus(item.status === "draft" ? "draft" : item.status === "scheduled" ? "scheduled" : "published");
+        setPublishTiming(item.status === "scheduled" ? "scheduled" : "now");
+        if (item.scheduledAt) setScheduledAt(item.scheduledAt.slice(0, 16).replace("T", " "));
+        setPublished(item.status === "published");
+        setNotice(source === "api" ? `已加载数据库文章 #${item.id}` : "后端不可用，无法加载文章详情");
+      })
+      .catch((error) => {
+        if (!alive) return;
+        setLoadedEditId(undefined);
+        setPublished(false);
+        setNotice(`${getApiErrorMessage(error)}，已停留在新建文章模式`);
+        api.startNewPost();
+      });
+    return () => {
+      alive = false;
+    };
+  }, [editPostId, initialEditorStatus]);
+
+  useEffect(() => {
+    let alive = true;
+    Promise.all([api.getAdminCategories(), api.getAdminTags()]).then(([categoryResult, tagResult]) => {
+      if (!alive) return;
+      const nextCategories = categoryResult.items.map((item) => item.name);
+      const nextTags = tagResult.items.map((item) => item.name);
+      if (nextCategories.length) {
+        setCategoryOptions(nextCategories);
+        setCategoryName((current) => nextCategories.includes(current) ? current : nextCategories[0]);
+      }
+      if (nextTags.length) setTagOptions(nextTags.slice(0, 12));
+    });
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    let alive = true;
+    api.getAiStatus()
+      .then((status) => {
+        if (alive) setAiStatus(status);
+      })
+      .catch((error) => {
+        if (alive) {
+          setAiStatus((current) => ({ ...current, message: getApiErrorMessage(error) }));
+        }
+      });
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  async function saveDraft() {
+    try {
+      const savedDraft = await api.saveDraft(title, markdown, aiSummary, { ...postMeta, status: "draft" });
+      setSaved(savedDraft.savedAt);
+      setLoadedEditId(savedDraft.id);
+      replaceHash(`/admin/editor?id=${savedDraft.id}`);
+      setPostStatus(savedDraft.status === "published" ? "published" : savedDraft.status === "scheduled" ? "scheduled" : "draft");
+      setPublished(savedDraft.status === "published");
+      const successText = isEditingExistingPost ? `文章 #${savedDraft.id} 已更新为草稿` : `草稿已保存到数据库 #${savedDraft.id}`;
+      setNotice(successText);
+      emitAdminDataChanged();
+      return savedDraft;
+    } catch (error) {
+      setNotice(getApiErrorMessage(error));
+      return undefined;
+    }
+  }
+  async function handleCoverUpload(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+    if (!file.type.startsWith("image/")) {
+      setNotice("请选择图片文件");
+      return;
+    }
+    try {
+      setNotice("正在上传封面...");
+      const result = await api.uploadMedia(file, file.name);
+      setCoverUrl(result.item.url);
+      setCoverName(result.item.originalName);
+      setNotice(`封面已上传并写入媒体库：${result.item.originalName}`);
+      emitAdminDataChanged();
+    } catch (error) {
+      setNotice(getApiErrorMessage(error));
+    }
+  }
+  async function uploadEditorBodyImages(files: File[], source: "upload" | "paste" = "upload") {
+    const imageFiles = files.filter((file) => file.type.startsWith("image/"));
+    if (!imageFiles.length) {
+      setNotice("请选择图片文件");
+      return;
+    }
+    try {
+      setNotice(source === "paste" ? "正在上传粘贴的图片..." : "正在上传正文图片...");
+      const snippets: string[] = [];
+      for (const file of imageFiles) {
+        const result = await api.uploadMedia(file, file.name || "pasted-image.png");
+        snippets.push(`![${result.item.altText || result.item.originalName}](${result.item.url})`);
+      }
+      insertMarkdownAtCursor(snippets.join("\n\n"), source === "paste" ? "图片已从剪切板上传到媒体库，并插入正文。" : "图片已上传到媒体库，并插入正文。");
+      emitAdminDataChanged();
+    } catch (error) {
+      setNotice(getApiErrorMessage(error));
+    }
+  }
+  async function handleBodyImageUpload(event: ChangeEvent<HTMLInputElement>) {
+    const files = Array.from(event.target.files ?? []);
+    event.target.value = "";
+    await uploadEditorBodyImages(files, "upload");
+  }
+  async function handleMarkdownPaste(event: ClipboardEvent<HTMLTextAreaElement>) {
+    const files = Array.from(event.clipboardData.files ?? []).filter((file) => file.type.startsWith("image/"));
+    if (!files.length) return;
+    event.preventDefault();
+    await uploadEditorBodyImages(files, "paste");
+  }
+  async function openMediaPicker(target: "cover" | "body" = "cover") {
+    setMediaPickerTarget(target);
+    setMediaPickerOpen(true);
+    setMediaPickerLoading(true);
+    try {
+      const result = await api.getAdminMedia();
+      setEditorMediaItems(result.items.filter((item) => item.mimeType.startsWith("image/")));
+      setNotice(target === "cover" ? "请选择一张媒体库图片作为封面" : "请选择一张媒体库图片插入正文");
+    } catch (error) {
+      setNotice(getApiErrorMessage(error));
+    } finally {
+      setMediaPickerLoading(false);
+    }
+  }
+  function chooseEditorMedia(item: AdminMediaItem) {
+    if (mediaPickerTarget === "body") {
+      insertMarkdownAtCursor(`![${item.altText || item.originalName}](${item.url})`, `已从媒体库插入图片：${item.originalName}`);
+    } else {
+      setCoverUrl(item.url);
+      setCoverName(item.originalName);
+      setNotice(`已从媒体库选择封面：${item.originalName}`);
+    }
+    setMediaPickerOpen(false);
+  }
+  function insertMarkdownAtCursor(snippet: string, nextNotice = "已插入 Markdown 片段") {
+    const textarea = markdownInputRef.current;
+    const start = textarea?.selectionStart ?? markdown.length;
+    const end = textarea?.selectionEnd ?? markdown.length;
+    const prefix = markdown.slice(0, start);
+    const suffix = markdown.slice(end);
+    const needsLeadingBreak = prefix && !prefix.endsWith("\n") ? "\n" : "";
+    const needsTrailingBreak = suffix && !snippet.endsWith("\n") ? "\n" : "";
+    const nextMarkdown = `${prefix}${needsLeadingBreak}${snippet}${needsTrailingBreak}${suffix}`;
+    const nextCursor = prefix.length + needsLeadingBreak.length + snippet.length;
+    setMarkdown(nextMarkdown);
+    setNotice(nextNotice);
+    window.setTimeout(() => {
+      markdownInputRef.current?.focus();
+      markdownInputRef.current?.setSelectionRange(nextCursor, nextCursor);
+    }, 0);
+  }
+  function insertSnippet(snippet: string) {
+    insertMarkdownAtCursor(snippet);
+  }
+  function toggleTag(tag: string) {
+    setSelectedTags((items) => items.includes(tag) ? items.filter((item) => item !== tag) : [...items, tag]);
+  }
+  async function createEditorTag() {
+    const name = window.prompt("请输入新标签名称");
+    if (!name?.trim()) return;
+    try {
+      const result = await api.createTag({ name: name.trim() });
+      setTagOptions((items) => items.includes(result.item.name) ? items : [...items, result.item.name]);
+      setSelectedTags((items) => items.includes(result.item.name) ? items : [...items, result.item.name]);
+      setNotice(`标签已写入数据库并加入当前文章：${result.item.name}`);
+      emitAdminDataChanged();
+    } catch (error) {
+      setNotice(getApiErrorMessage(error));
+    }
+  }
+  function runMockAiTool(name: string) {
+    if (name === "AI 摘要") {
+      setAiSummary("本文围绕自建博客系统的动机、数据自主、扩展能力和创作体验展开。这是前端模拟摘要，不代表真实模型输出。");
+    }
+    if (name === "标题建议") {
+      setTitle("为什么开发者值得拥有一个自建博客系统（模拟标题）");
+    }
+    setNotice(`${name} 当前为前端模拟预览，未调用模型，也未写入 ai_tasks。`);
+  }
+  async function publish() {
+    if (postStatus === "draft") {
+      const draft = await saveDraft();
+      if (draft) setPublished(false);
+      return;
+    }
+    if (!title.trim()) {
+      setNotice("发布文章必须填写标题。");
+      return;
+    }
+    if (!markdown.trim()) {
+      setNotice("发布文章必须填写正文内容。");
+      return;
+    }
+    if (publishTiming === "scheduled") {
+      const scheduledTime = normalizedScheduledAt ? new Date(normalizedScheduledAt).getTime() : NaN;
+      if (!normalizedScheduledAt || Number.isNaN(scheduledTime)) {
+        setNotice("请填写有效的定时发布时间，例如 2026-06-15 20:00。");
+        return;
+      }
+      if (scheduledTime <= Date.now()) {
+        setNotice("定时发布时间必须晚于当前时间。");
+        return;
+      }
+      try {
+        const scheduledPost = await api.saveDraft(title, markdown, aiSummary, { ...postMeta, status: "scheduled" });
+        setSaved(scheduledPost.savedAt);
+        setLoadedEditId(scheduledPost.id);
+        replaceHash(`/admin/editor?id=${scheduledPost.id}`);
+        setPostStatus(scheduledPost.status === "scheduled" ? "scheduled" : scheduledPost.status === "published" ? "published" : "draft");
+        setPublished(false);
+        const successText = isEditingExistingPost ? `文章 #${scheduledPost.id} 已更新为定时发布` : `文章已定时保存到数据库 #${scheduledPost.id}`;
+        setNotice(successText);
+        emitAdminDataChanged();
+      } catch (error) {
+        setNotice(getApiErrorMessage(error));
+      }
+      return;
+    }
+    try {
+      const publishedPost = await api.publishPost(title, markdown, aiSummary, { ...postMeta, status: "published" });
+      setLoadedEditId(publishedPost.id);
+      replaceHash(`/admin/editor?id=${publishedPost.id}`);
+      setPostStatus(publishedPost.status === "published" ? "published" : publishedPost.status === "scheduled" ? "scheduled" : "draft");
+      setPublished(publishedPost.status === "published");
+      const successText = isEditingExistingPost ? `文章 #${publishedPost.id} 已更新发布` : `文章已发布到数据库 #${publishedPost.id}`;
+      setNotice(successText);
+      emitAdminDataChanged();
+    } catch (error) {
+      setNotice(getApiErrorMessage(error));
+    }
+    return;
+  }
+
+  const tools = [
+    ["B", "**加粗文本**"],
+    ["I", "*斜体文本*"],
+    ["H", "## 新的小节"],
+    ["≡", "- 列表项"],
+    ["</>", "```js\nconsole.log('hello')\n```"],
+    ["❞", "> 引用内容"],
+    ["🔗", "[链接文字](https://example.com)"],
+    ["▦", "| 字段 | 说明 |\n| --- | --- |\n| title | 文章标题 |"],
+  ];
+
+  return (
+    <>
+      <AdminTop editor editorTitle={editorModeTitle} />
+      <div className={`editor preview-${previewMode}`}>
+        <section className="editor-core">
+          <div className="editor-title">
+            <h1>{editorModeTitle}</h1>
+            <span>✓ 已自动保存 {saved} · {notice}</span>
+          </div>
+          <input className="title-input" value={title} onChange={(e) => setTitle(e.target.value)} />
+          <div className="editor-tabs"><button className="active">Markdown</button></div>
+          <div className="editor-split">
+            <div className="markdown-pane">
+              <div className="toolbar">{tools.map(([label, snippet]) => <button key={label} title={`插入${label}`} onClick={() => insertSnippet(snippet)}>{label}</button>)}<button type="button" title="上传正文图片" onClick={() => bodyImageInputRef.current?.click()}>▧</button><button type="button" title="从媒体库插入图片" onClick={() => openMediaPicker("body")}>库</button></div>
+              <div className="markdown-editor-shell">
+                <div className="line-numbers">{lineNumbers.map((line) => <span key={line}>{line}</span>)}</div>
+                <textarea ref={markdownInputRef} value={markdown} onChange={(event) => setMarkdown(event.target.value)} onPaste={handleMarkdownPaste} onBlur={saveDraft} />
+              </div>
+              <input ref={bodyImageInputRef} className="visually-hidden" type="file" accept="image/*" multiple onChange={handleBodyImageUpload} />
+              <footer>字数: {markdown.length}　预计阅读: {readingMinutes} 分钟　保存于 {saved}　• {notice}</footer>
+            </div>
+            <div className="preview-pane"><MarkdownPreview title={title} summary={aiSummary} markdown={markdown} /></div>
+          </div>
+        </section>
+        <aside className="publish-panel card">
+          <Card title="封面图">
+            <div className="cover-thumb" style={{ backgroundImage: `url(${coverUrl})` }} />
+            <div className="cover-actions">
+              <button type="button" onClick={() => coverInputRef.current?.click()}>上传封面</button>
+              <button type="button" onClick={() => openMediaPicker("cover")}>从媒体库选择</button>
+              <small>{coverName}</small>
+            </div>
+            <input ref={coverInputRef} className="visually-hidden" type="file" accept="image/*" onChange={handleCoverUpload} />
+          </Card>
+          <label>分类<select value={categoryName} onChange={(event) => setCategoryName(event.target.value)}>{categoryOptions.map((item) => <option key={item}>{item}</option>)}</select></label>
+          <label>标签<div className="tag-cloud">{tagOptions.map((tag) => <button className={`tag-button ${selectedTags.includes(tag) ? "active" : ""}`} key={tag} onClick={() => toggleTag(tag)}><Tag tone="gray">{tag} {selectedTags.includes(tag) ? "×" : "+"}</Tag></button>)}</div><button className="text-link" onClick={createEditorTag}>+ 新增标签</button></label>
+          <label>文章摘要<textarea value={aiSummary} maxLength={200} onChange={(event) => setAiSummary(event.target.value)} /><small>{aiSummary.length}/200</small></label>
+          <label className="switch">精选推荐<input type="checkbox" checked={featured} onChange={(event) => setFeatured(event.target.checked)} /></label>
+          <h3>发布设置</h3>
+          <label>状态
+            <span className="publish-radio">
+              <label><input name="postStatus" type="radio" checked={postStatus === "published" || postStatus === "scheduled"} onChange={() => setPostStatus("published")} /> 发布</label>
+              <label><input name="postStatus" type="radio" checked={postStatus === "draft"} onChange={() => setPostStatus("draft")} /> 草稿</label>
+            </span>
+          </label>
+          <label>发布方式
+            <span className="publish-radio">
+              <label><input name="publishTiming" type="radio" checked={publishTiming === "now"} onChange={() => setPublishTiming("now")} /> 立即发布</label>
+              <label><input name="publishTiming" type="radio" checked={publishTiming === "scheduled"} onChange={() => setPublishTiming("scheduled")} /> 定时发布</label>
+            </span>
+          </label>
+          <label>定时发布<input value={scheduledAt} disabled={publishTiming === "now"} onChange={(event) => setScheduledAt(event.target.value)} placeholder="2024-06-15 20:00" /></label>
+          <label>访问权限
+            <select value={visibility} onChange={(event) => setVisibility(event.target.value as "public" | "private" | "password")}>
+              <option value="public">公开（所有人可见）</option>
+              <option value="private">私密（仅管理员可见）</option>
+              <option value="password">密码访问</option>
+            </select>
+          </label>
+          <h3>SEO 设置</h3>
+          <label>SEO 标题<input value={seoTitle} maxLength={80} onChange={(event) => setSeoTitle(event.target.value)} placeholder="输入搜索结果标题" /></label>
+          <h3>评论设置</h3>
+          <label className="switch">允许评论<input type="checkbox" checked={allowComment} onChange={(event) => setAllowComment(event.target.checked)} /></label>
+          <label className="switch">评论审核<input type="checkbox" checked={reviewComment} onChange={(event) => setReviewComment(event.target.checked)} /></label>
+        </aside>
+        <aside className="ai-panel card">
+          <header><h3>✦ AI 助手（模拟）</h3><button onClick={() => setNotice("AI 助手面板已保持打开")}>×</button></header>
+          <div className="tabs"><button className="active">前端模拟</button><button onClick={() => setNotice(`AI 任务表已预留，当前已有 ${aiStatus.tasksCount} 条任务记录；模型服务未接入。`)}>任务状态</button></div>
+          {[
+            ["AI 摘要", "自动生成文章摘要"],
+            ["AI 纠错批注", "发现并优化文章问题"],
+            ["标题建议", "生成更吸引人的标题"],
+            ["自动标签", "根据内容智能生成标签"],
+            ["内容润色", "优化语句表达和可读性"],
+          ].map(([name, desc]) => <button className="ai-tool" key={name} onClick={() => runMockAiTool(name)}>{name}<small>{desc} · 当前仅前端模拟</small></button>)}
+          <section><h3>AI 摘要（模拟预览）</h3><p>{aiSummary}</p><button onClick={() => setNotice("摘要内容已作为编辑器字段保存；来源仍为前端模拟。")}>使用当前摘要</button><button className="ghost" onClick={() => runMockAiTool("AI 摘要")}>重新模拟</button></section>
+          <div className="hint">{aiStatus.message} 后续接入真实模型时，应由后端创建 ai_tasks 任务并回传任务状态和结果。</div>
+        </aside>
+        <div className="editor-actions"><button className={previewMode === "desktop" ? "active" : ""} onClick={() => setPreviewMode("desktop")}>▣</button><button className={previewMode === "mobile" ? "active" : ""} onClick={() => setPreviewMode("mobile")}>▯</button><button onClick={() => setNotice("预览已刷新")}>预览</button><button className="draft" onClick={saveDraft}>存为草稿</button><button className="primary" onClick={publish}>{primaryPublishLabel}</button></div>
+        {mediaPickerOpen && (
+          <div className="media-modal" role="dialog" aria-modal="true" aria-label={mediaPickerTarget === "cover" ? "选择封面图" : "插入正文图片"} onClick={() => setMediaPickerOpen(false)}>
+            <div className="media-modal-panel media-picker-panel" onClick={(event) => event.stopPropagation()}>
+              <header><b>{mediaPickerTarget === "cover" ? "选择封面图" : "插入正文图片"}</b><button type="button" onClick={() => setMediaPickerOpen(false)}>关闭</button></header>
+              {mediaPickerLoading ? <p className="soft-text">正在读取媒体库...</p> : editorMediaItems.length ? (
+                <div className="media-picker-grid">
+                  {editorMediaItems.map((item) => <button key={item.id} type="button" onClick={() => chooseEditorMedia(item)}><img src={item.url} alt={item.altText || item.originalName} /><span>{item.originalName}</span></button>)}
+                </div>
+              ) : <p className="soft-text">媒体库暂无可用图片。</p>}
+            </div>
+          </div>
+        )}
+      </div>
+    </>
+  );
+}
+
+export default function App() {
+  const path = useRoute();
+  const [authVersion, setAuthVersion] = useState(0);
+  useEffect(() => {
+    const syncAuth = () => setAuthVersion((value) => value + 1);
+    window.addEventListener(api.authChangedEvent, syncAuth);
+    return () => window.removeEventListener(api.authChangedEvent, syncAuth);
+  }, []);
+  const page = useMemo(() => {
+    const routePath = path.split("?")[0];
+    if (routePath === "/admin/login") return api.isLoggedIn() ? <AdminShell /> : <AdminLogin />;
+    if (routePath === "/admin" || routePath.startsWith("/admin/")) {
+      if (!api.isLoggedIn()) return <AdminLogin />;
+    }
+    if (routePath === "/admin/editor") return <AdminShell editor />;
+    if (routePath === "/admin") return <AdminShell />;
+    if (routePath.startsWith("/admin/")) {
+      const adminPage = Object.entries(adminRoutes).find(([, item]) => item.path === routePath)?.[0] ?? "dashboard";
+      return <AdminShell page={adminPage} />;
+    }
+    if (routePath.startsWith("/article")) return <ArticlePage articleId={Number(routePath.split("/")[2]) || 0} />;
+    if (routePath === "/archive" || routePath === "/categories" || routePath === "/tags") return <ArchivePage />;
+    if (routePath === "/about") return <AboutPage />;
+    if (routePath === "/messages") return <MessagesPage />;
+    return <HomePage />;
+  }, [path, authVersion]);
+  return page;
+}
