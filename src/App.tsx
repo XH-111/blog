@@ -1,21 +1,27 @@
 ﻿import { ChangeEvent, FormEvent, ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { api, getApiErrorMessage } from "./services/api";
 import type { ClipboardEvent } from "react";
-import type { AboutPageSettings, AdminAiStatus, AdminCategoryItem, AdminCommentItem, AdminDashboardData, AdminMediaItem, AdminMessageItem, AdminPostListItem, AdminTagItem, PublicCommentItem, PublicSiteStats } from "./services/api";
+import type { AboutPageSettings, AdminAiReviewFocus, AdminAiStatus, AdminAiTool, AdminCategoryItem, AdminCommentItem, AdminDashboardData, AdminMediaItem, AdminMessageItem, AdminPostListItem, AdminTagItem, PublicCommentItem, PublicSiteStats } from "./services/api";
 import type { Article, Message } from "./types";
 
 const nav = [
   ["首页", "/"],
-  ["文章", "/article"],
-  ["分类", "/categories"],
-  ["归档", "/archive"],
-  ["标签", "/tags"],
+  ["文章", "/posts"],
   ["关于", "/about"],
   ["留言板", "/messages"],
 ] as const;
 
+const HOME_HERO_BACKGROUND_URL = "";
+
+const homeEntryCards = [
+  { title: "精选文章", desc: "保留少量高质量技术文章，适合从这里开始阅读。", action: "立即阅读", icon: "doc", href: "/posts" },
+  { title: "项目作品", desc: "沉淀全栈项目实践、开发复盘和可复用经验。", action: "查看项目", icon: "cube", href: "/about" },
+  { title: "关于我", desc: "了解我的技术栈与经历，也欢迎交流与合作。", action: "了解更多", icon: "user", href: "/about" },
+] as const;
+
 const COMMENT_CONTENT_MAX_LENGTH = 1000;
 const MESSAGE_CONTENT_MAX_LENGTH = 2000;
+const ARCHIVE_PAGE_SIZE = 10;
 
 function useRoute() {
   const [path, setPath] = useState(location.hash.replace("#", "") || "/");
@@ -68,24 +74,14 @@ function Logo({ admin = false }: { admin?: boolean }) {
 
 function PublicHeader({ active }: { active: string }) {
   const [headerSearch, setHeaderSearch] = useState("");
-  const headerNav = active.startsWith("/article") ? nav : nav.filter(([label]) => label !== "分类" && label !== "标签");
-  async function openArticleNav(href: string) {
-    if (href !== "/article") {
-      go(href);
-      return;
-    }
-    try {
-      const result = await api.getHome({ pageSize: 1 });
-      const latest = result.articles[0];
-      go(latest ? `/article/${latest.id}` : "/archive");
-    } catch {
-      go("/archive");
-    }
+  const headerNav = nav;
+  function openPublicNav(href: string) {
+    go(href);
   }
   function submitSearch(event: FormEvent) {
     event.preventDefault();
     const keyword = headerSearch.trim();
-    if (keyword) go(`/archive?q=${encodeURIComponent(keyword)}`);
+    if (keyword) go(`/posts?q=${encodeURIComponent(keyword)}`);
   }
   function toggleTheme() {
     const next = document.documentElement.dataset.theme === "dark" ? "light" : "dark";
@@ -93,11 +89,11 @@ function PublicHeader({ active }: { active: string }) {
     localStorage.setItem("blog-theme", next);
   }
   return (
-    <header className={`public-header ${active.startsWith("/article") ? "article-header" : ""} ${active === "/archive" ? "floating-header" : ""}`}>
+    <header className={`public-header ${active.startsWith("/article") ? "article-header" : ""} ${active === "/posts" ? "floating-header" : ""}`}>
       <Logo />
       <nav>
         {headerNav.map(([label, href]) => (
-          <button key={href} className={active === href || (active.startsWith("/article") && href === "/article") ? "active" : ""} onClick={() => openArticleNav(href)}>
+          <button key={href} className={active === href || (active.startsWith("/article") && href === "/posts") ? "active" : ""} onClick={() => openPublicNav(href)}>
             {label}
           </button>
         ))}
@@ -129,6 +125,47 @@ function Art({ type, wide = false, coverUrl }: { type: Article["image"]; wide?: 
 }
 
 function HomePage() {
+  const heroStyle = HOME_HERO_BACKGROUND_URL ? { backgroundImage: `url(${HOME_HERO_BACKGROUND_URL})` } : undefined;
+
+  return (
+    <>
+      <PublicHeader active="/" />
+      <main className="home-landing">
+        <section className="home-hero-shell">
+          <div className={`home-hero-blank ${HOME_HERO_BACKGROUND_URL ? "has-image" : ""}`} style={heroStyle} aria-hidden="true">
+            <div className="home-hero-orbit one" />
+            <div className="home-hero-orbit two" />
+            <div className="home-hero-horizon" />
+          </div>
+          <div className="home-hero-content">
+            <h1>全栈博客创作平台</h1>
+            <p className="home-hero-subtitle">记录 · 分享 · 成长</p>
+            <p className="home-hero-copy">记录技术探索与项目经验，分享思考与实践，在代码与生活之间持续学习与成长。</p>
+            <div className="home-hero-actions">
+              <button className="home-primary-action" onClick={() => go("/posts")}>开始阅读</button>
+              <button className="home-secondary-action" onClick={() => go("/about")}>了解我</button>
+            </div>
+          </div>
+        </section>
+
+        <section className="home-entry-grid" aria-label="首页入口">
+          {homeEntryCards.map((item) => (
+            <button className="home-entry-card" key={item.title} onClick={() => go(item.href)}>
+              <span className={`home-entry-icon ${item.icon}`} aria-hidden="true" />
+              <span>
+                <b>{item.title}</b>
+                <small>{item.desc}</small>
+                <em>{item.action} →</em>
+              </span>
+            </button>
+          ))}
+        </section>
+      </main>
+    </>
+  );
+}
+
+function LegacyHomePage() {
   const [query, setQuery] = useState("");
   const [homeArticles, setHomeArticles] = useState<Article[]>([]);
   const [homeCategories, setHomeCategories] = useState<AdminCategoryItem[]>([]);
@@ -138,7 +175,7 @@ function HomePage() {
   const keyword = query.trim().toLowerCase();
   useEffect(() => {
     let alive = true;
-    Promise.all([api.getHome(), api.getPublicCategories(), api.getPublicTags(), api.getPublicStats()]).then(([postResult, categoryResult, tagResult, statsResult]) => {
+    Promise.all([api.getPublicPosts(), api.getPublicCategories(), api.getPublicTags(), api.getPublicStats()]).then(([postResult, categoryResult, tagResult, statsResult]) => {
       if (!alive) return;
       setHomeArticles(postResult.articles);
       setHomeCategories(categoryResult.items);
@@ -196,12 +233,12 @@ function HomePage() {
             <div className="search-box"><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="输入关键词搜索..." /><button>⌕</button></div>
           </Card>
           <Card title="分类导航" moreHref="/categories">
-            <div className="category-grid">{homeCategories.map((item) => <button key={item.id} onClick={() => go(`/archive?category=${encodeURIComponent(item.name)}`)}><Icon name="dot" />{item.name}<b>{item.postsCount}</b></button>)}</div>
+            <div className="category-grid">{homeCategories.map((item) => <button key={item.id} onClick={() => go(`/posts?category=${encodeURIComponent(item.name)}`)}><Icon name="dot" />{item.name}<b>{item.postsCount}</b></button>)}</div>
           </Card>
           <Card title="热门标签" moreHref="/tags">
-            <div className="tag-cloud">{homeTags.map((tag, index) => <button className="tag-button" key={tag.id} onClick={() => go(`/archive?tag=${encodeURIComponent(tag.name)}`)}><Tag tone={["pink", "green", "blue", "purple", "gray"][index % 5]}>{tag.name}</Tag></button>)}</div>
+            <div className="tag-cloud">{homeTags.map((tag, index) => <button className="tag-button" key={tag.id} onClick={() => go(`/posts?tag=${encodeURIComponent(tag.name)}`)}><Tag tone={["pink", "green", "blue", "purple", "gray"][index % 5]}>{tag.name}</Tag></button>)}</div>
           </Card>
-          <Card title="推荐文章" moreHref="/archive">
+          <Card title="推荐文章" moreHref="/posts">
             <MiniList items={featuredArticle ? homeArticles.filter((item) => item.id !== featuredArticle.id).slice(0, 5) : homeArticles.slice(0, 5)} />
           </Card>
           <PublicStatsCard stats={siteStats} />
@@ -235,6 +272,20 @@ function ArticleRow({ item }: { item: Article }) {
       </div>
       <time>{item.date}</time>
     </article>
+  );
+}
+
+function ArchiveArticleCard({ item }: { item: Article }) {
+  return (
+    <button className="archive-featured-card" onClick={() => go(`/article/${item.id}`)}>
+      <Art type={item.image} coverUrl={item.coverUrl} />
+      <span>
+        <Tag>{item.category}</Tag>
+        <b>{item.title}</b>
+        <small>{item.excerpt}</small>
+        <em>阅读 {item.readingMinutes} 分钟 · {item.date}</em>
+      </span>
+    </button>
   );
 }
 
@@ -290,7 +341,7 @@ function ArticlePage({ articleId }: { articleId: number }) {
     setLatestArticles([]);
     setArticleSideUsingMock(false);
     if (!articleId) {
-      api.getHome({ pageSize: 1 })
+      api.getPublicPosts({ pageSize: 1 })
         .then((result) => {
           if (!alive) return;
           const latest = result.articles[0];
@@ -349,8 +400,8 @@ function ArticlePage({ articleId }: { articleId: number }) {
     setActiveSection(article.sections[0]?.id ?? "");
     let alive = true;
     Promise.all([
-      api.getHome({ category: article.category, pageSize: 4 }),
-      api.getHome({ pageSize: 5 }),
+      api.getPublicPosts({ category: article.category, pageSize: 4 }),
+      api.getPublicPosts({ pageSize: 5 }),
     ]).then(([relatedResult, latestResult]) => {
       if (!alive) return;
       setRelatedArticles(relatedResult.articles.filter((item) => item.id !== article.id).slice(0, 3));
@@ -588,130 +639,121 @@ function AuthorCard() {
   return <section className="author card"><div className="avatar lg">山</div><h3>一行代码 <Tag>LV6</Tag></h3><p>全栈开发者 · 技术博主</p>{usingMock && <p className="soft-text">作者统计当前为 mock 兜底数据。</p>}<div className="author-stats"><b>{stats ? stats.posts : "--"}<span>文章</span></b><b>{stats ? api.formatCount(stats.views) : "--"}<span>访问</span></b><b>--<span>粉丝</span></b></div><button disabled title="关注功能尚未接入后端">关注未接入</button></section>;
 }
 
-function ArchivePage() {
-  const [mode, setMode] = useState("time");
+function PostsPage() {
   const archiveRoute = useRoute();
-  const params = routeQuery();
-  const [search, setSearch] = useState(params.get("q") ?? "");
-  const [category, setCategory] = useState(params.get("category") ?? "全部分类");
-  const [tag, setTag] = useState(params.get("tag") ?? "全部标签");
-  const [year, setYear] = useState(params.get("year") ?? "全部年份");
-  const [expanded, setExpanded] = useState<Record<string, boolean>>({});
-  const [subscriptionEmail, setSubscriptionEmail] = useState("");
-  const [subscriptionNotice, setSubscriptionNotice] = useState("");
-  const [subscribedEmail, setSubscribedEmail] = useState("");
-  const [subscribing, setSubscribing] = useState(false);
+  const initialParams = routeQuery();
+  const initialCategory = initialParams.get("category") ?? "全部分类";
+  const initialSearch = initialParams.get("q") ?? "";
+  const initialView = initialParams.get("view");
+  const [search, setSearch] = useState(initialSearch);
+  const [category, setCategory] = useState(initialCategory);
+  const [listMode, setListMode] = useState<"featured" | "all" | "category" | "search">(
+    initialSearch ? "search" : initialCategory !== "全部分类" ? "category" : initialView === "all" ? "all" : "featured"
+  );
   const [archiveArticles, setArchiveArticles] = useState<Article[]>([]);
   const [archiveCategories, setArchiveCategories] = useState<AdminCategoryItem[]>([]);
-  const [archiveTagItems, setArchiveTagItems] = useState<AdminTagItem[]>([]);
   const [archiveStats, setArchiveStats] = useState<PublicSiteStats>();
   const [archiveUsingMock, setArchiveUsingMock] = useState(false);
   useEffect(() => {
     const nextParams = routeQuery();
-    setSearch(nextParams.get("q") ?? "");
-    setCategory(nextParams.get("category") ?? "全部分类");
-    setTag(nextParams.get("tag") ?? "全部标签");
-    setYear(nextParams.get("year") ?? "全部年份");
+    const nextSearch = nextParams.get("q") ?? "";
+    const nextCategory = nextParams.get("category") ?? "全部分类";
+    const nextView = nextParams.get("view");
+    setSearch(nextSearch);
+    setCategory(nextCategory);
+    setListMode(nextSearch ? "search" : nextCategory !== "全部分类" ? "category" : nextView === "all" ? "all" : "featured");
   }, [archiveRoute]);
   useEffect(() => {
     let alive = true;
-    Promise.all([api.getHome(), api.getPublicCategories(), api.getPublicTags(), api.getPublicStats()]).then(([postResult, categoryResult, tagResult, statsResult]) => {
+    Promise.all([api.getPublicPosts(), api.getPublicCategories(), api.getPublicStats()]).then(([postResult, categoryResult, statsResult]) => {
       if (!alive) return;
       setArchiveArticles(postResult.articles);
       setArchiveCategories(categoryResult.items);
-      setArchiveTagItems(tagResult.items);
       setArchiveStats(statsResult);
-      setArchiveUsingMock(postResult.source === "mock" || categoryResult.source === "mock" || tagResult.source === "mock" || statsResult.source === "mock");
+      setArchiveUsingMock(postResult.source === "mock" || categoryResult.source === "mock" || statsResult.source === "mock");
     });
     return () => {
       alive = false;
     };
   }, []);
   const categoryOptions = ["全部分类", ...Array.from(new Set(archiveArticles.map((item) => item.category)))];
-  const archiveTags = Array.from(new Set(archiveArticles.flatMap((item) => item.tags)));
-  const databaseCategoryOptions = archiveCategories.length ? [categoryOptions[0], ...archiveCategories.map((item) => item.name)] : categoryOptions;
+  const databaseCategoryOptions = archiveCategories.length ? archiveCategories.map((item) => item.name) : categoryOptions.filter((item) => item !== "全部分类");
   const categoryCountMap = new Map(archiveCategories.map((item) => [item.name, item.postsCount]));
-  const databaseArchiveTags = archiveTagItems.length ? archiveTagItems.map((item) => item.name) : archiveTags;
-  const yearOptions = ["全部年份", ...Array.from(new Set(archiveArticles.map((item) => `${new Date(item.date).getFullYear()} 年`)))];
+  const featuredArticles = archiveArticles.filter((item) => item.featured);
   const filteredArticles = archiveArticles.filter((item) => {
     const keyword = search.trim().toLowerCase();
     const matchSearch = !keyword || [item.title, item.excerpt, item.category, ...item.tags].join(" ").toLowerCase().includes(keyword);
     const matchCategory = category === "全部分类" || item.category === category;
-    const matchTag = tag === "全部标签" || item.tags.includes(tag);
-    const matchYear = year === "全部年份" || item.date.startsWith(year.replace(" 年", ""));
-    return matchSearch && matchCategory && matchTag && matchYear;
+    return matchSearch && matchCategory;
   });
-  const grouped = filteredArticles.reduce<Record<string, Article[]>>((acc, item) => {
-    const key = `${new Date(item.date).getFullYear()} 年`;
-    acc[key] = acc[key] ? [...acc[key], item] : [item];
-    return acc;
-  }, {});
-  async function submitSubscription() {
-    const email = subscriptionEmail.trim();
-    if (!email) {
-      setSubscriptionNotice("请输入邮箱后再订阅");
-      return;
-    }
-    if (subscribing) return;
-    setSubscribing(true);
-    setSubscriptionNotice("");
-    try {
-      const result = await api.subscribe(email);
-      setSubscribedEmail(result.item.email);
-      setSubscriptionEmail("");
-      setSubscriptionNotice(`已写入订阅数据库：${result.item.email}`);
-    } catch (error) {
-      setSubscriptionNotice(getApiErrorMessage(error));
-    } finally {
-      setSubscribing(false);
-    }
+  const currentArticles = listMode === "featured" ? featuredArticles : filteredArticles;
+  const visibleArticles = currentArticles.slice(0, ARCHIVE_PAGE_SIZE);
+  const currentTitle = listMode === "featured" ? "精选文章" : listMode === "all" ? "全部文章" : listMode === "search" ? "搜索结果" : `${category} 分类文章`;
+  const currentDescription = listMode === "featured"
+    ? `默认展示最多 ${ARCHIVE_PAGE_SIZE} 篇精选文章，点击全部或分类后只看对应文章。`
+    : listMode === "all"
+      ? `当前共 ${currentArticles.length} 篇已发布文章，本页最多显示 ${ARCHIVE_PAGE_SIZE} 篇。`
+      : listMode === "search"
+        ? `包含关键词“${search}”的文章共 ${currentArticles.length} 篇，本页最多显示 ${ARCHIVE_PAGE_SIZE} 篇。`
+        : `该分类下共有 ${currentArticles.length} 篇文章，本页最多显示 ${ARCHIVE_PAGE_SIZE} 篇。`;
+  function openFeaturedArticles() {
+    go("/posts");
+  }
+  function openAllArticles() {
+    go("/posts?view=all");
+  }
+  function openCategory(nextCategory: string) {
+    go(`/posts?category=${encodeURIComponent(nextCategory)}`);
   }
   return (
     <>
-      <PublicHeader active="/archive" />
+      <PublicHeader active="/posts" />
       <main className="page archive-layout">
-        <aside className="filter card"><h3>筛选</h3><div className="search-line"><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="搜索归档" /><span>⌕</span></div><h4>按分类</h4>{databaseCategoryOptions.map((x) => <button className={category === x ? "active" : ""} key={x} onClick={() => setCategory(x)}>{x} <small>{x === "全部分类" ? archiveArticles.length : categoryCountMap.get(x) ?? archiveArticles.filter((item) => item.category === x).length}</small></button>)}<h4>按标签</h4><div className="tag-cloud">{["全部标签", ...databaseArchiveTags.slice(0, 8)].map((x) => <button className={`tag-button ${tag === x ? "active" : ""}`} key={x} onClick={() => setTag(x)}><Tag tone="gray">{x}</Tag></button>)}</div><h4>按年份</h4>{yearOptions.map((x) => <button className={year === x ? "active" : ""} key={x} onClick={() => setYear(x)}>{x} <small>{x === "全部年份" ? archiveArticles.length : archiveArticles.filter((item) => item.date.startsWith(x.replace(" 年", ""))).length}</small></button>)}</aside>
-        <section className="timeline-wrap">
+        <aside className="filter card archive-category-panel">
+          <h3>文章分类</h3>
+          <p>默认先看精选，切换全部或分类后只显示对应文章。</p>
+          <button className={listMode === "featured" ? "active" : ""} onClick={openFeaturedArticles}>精选文章 <small>{featuredArticles.length}</small></button>
+          <button className={listMode === "all" ? "active" : ""} onClick={openAllArticles}>全部文章 <small>{archiveStats?.posts ?? archiveArticles.length}</small></button>
+          <h4>按分类浏览</h4>
+          {databaseCategoryOptions.map((x) => <button className={listMode === "category" && category === x ? "active" : ""} key={x} onClick={() => openCategory(x)}>{x} <small>{categoryCountMap.get(x) ?? archiveArticles.filter((item) => item.category === x).length}</small></button>)}
+        </aside>
+        <section className="timeline-wrap archive-main">
           <PublicDataNotice show={archiveUsingMock} surface="归档页" />
-          <h1>文章归档</h1><p>按时间浏览，发现每一个成长的足迹</p>
-          <div className="tabs"><button className={mode === "time" ? "active" : ""} onClick={() => setMode("time")}>按时间浏览</button><button className={mode === "all" ? "active" : ""} onClick={() => setMode("all")}>全部文章</button><span>共 {filteredArticles.length} 篇文章</span></div>
-          {filteredArticles.length ? <div className="timeline">{Object.entries(grouped).map(([yearLabel, items]) => <div className="year" key={yearLabel}><div className="year-badge">{yearLabel} <small>{items.length} 篇文章</small></div><div className="month"><div className="month-label"><b>{mode === "time" ? "5 月" : "全部"}</b><span>{items.length} 篇</span></div><div className="month-card">{items.slice(0, expanded[yearLabel] ? items.length : 3).map((item) => <button className="archive-item" key={item.id} onClick={() => go(`/article/${item.id}`)}><b>{item.title}</b><small>发布于 {item.date.slice(5)} · 阅读 {item.reads} · 点赞 {item.likes} · 评论 {item.comments}</small><span><Tag>{item.category}</Tag>{item.tags.slice(0, 1).map((itemTag) => <Tag key={itemTag} tone="blue">{itemTag}</Tag>)} ♡</span></button>)}{items.length > 3 && <button onClick={() => setExpanded({ ...expanded, [yearLabel]: !expanded[yearLabel] })}>{expanded[yearLabel] ? "收起" : `查看该年全部 ${items.length} 篇文章⌄`}</button>}</div></div></div>)}</div> : <section className="empty card">没有找到匹配的归档文章</section>}
+          <div className="archive-hero">
+            <div>
+              <h1>{currentTitle}</h1>
+              <p>{currentDescription}</p>
+            </div>
+            {listMode === "featured" ? <button onClick={openAllArticles}>查看全部文章</button> : <button onClick={openFeaturedArticles}>返回精选</button>}
+          </div>
+          {visibleArticles.length ? (
+            <div className="archive-featured-grid">
+              {visibleArticles.map((item) => <ArchiveArticleCard key={item.id} item={item} />)}
+            </div>
+          ) : <section className="empty card">{listMode === "featured" ? "数据库暂无精选文章" : "没有找到匹配的文章"}</section>}
         </section>
-        <aside className="side-stack"><Card title="归档统计"><div className="stats-lines">{[`文章总数 ${archiveStats?.posts ?? archiveArticles.length}`, `分类总数 ${archiveStats?.categories ?? databaseCategoryOptions.length - 1}`, `标签总数 ${archiveStats?.tags ?? databaseArchiveTags.length}`, `留言数 ${archiveStats?.messages ?? 0}`, `访问量 ${api.formatCount(archiveStats?.views ?? 0)}`, `点赞数 ${api.formatCount(archiveStats?.likes ?? 0)}`, `评论数 ${api.formatCount(archiveStats?.comments ?? 0)}`].map((x) => <p key={x}>{x}</p>)}</div></Card><Card title="热门标签"><div className="tag-cloud">{databaseArchiveTags.slice(0, 12).map((x) => <button className="tag-button" key={x} onClick={() => setTag(x)}><Tag tone="gray">{x}</Tag></button>)}</div></Card><section className="subscribe card"><h3>★ 订阅更新</h3><p>{subscribedEmail ? `已订阅 ${subscribedEmail}，记录已保存到数据库。` : "输入邮箱订阅文章更新；提交成功后会写入 subscriptions 表。"}</p><input value={subscriptionEmail} onChange={(event) => setSubscriptionEmail(event.target.value)} placeholder="email@example.com" /><button onClick={submitSubscription} disabled={subscribing || !subscriptionEmail.trim()}>{subscribing ? "提交中..." : subscribedEmail ? "更新订阅" : "立即订阅"}</button>{subscriptionNotice && <p className="form-notice">{subscriptionNotice}</p>}</section><section className="empty card"><div>□</div><p>在归档中探索知识的轨迹<br />每一篇文章，都是成长的印记</p></section></aside>
       </main>
     </>
   );
 }
 
 function AboutPage() {
-  const [aboutStats, setAboutStats] = useState<PublicSiteStats>();
-  const [aboutTags, setAboutTags] = useState<AdminTagItem[]>([]);
   const [aboutConfig, setAboutConfig] = useState<AboutPageSettings>(defaultAboutSettings);
   const [aboutUsingMock, setAboutUsingMock] = useState(false);
   const [wechatQrOpen, setWechatQrOpen] = useState(false);
 
   useEffect(() => {
     let alive = true;
-    Promise.all([api.getPublicStats(), api.getPublicTags(), api.getPublicAbout()]).then(([stats, tagResult, aboutResult]) => {
+    api.getPublicAbout().then((aboutResult) => {
       if (!alive) return;
-      setAboutStats(stats);
-      setAboutTags(tagResult.items);
       setAboutConfig(aboutResult.item);
-      setAboutUsingMock(stats.source === "mock" || tagResult.source === "mock" || aboutResult.source === "mock");
+      setAboutUsingMock(aboutResult.source === "mock");
     });
     return () => {
       alive = false;
     };
   }, []);
 
-  const aboutStatItems = [
-    `文章总数 ${aboutStats?.posts ?? "--"}`,
-    `分类 ${aboutStats?.categories ?? "--"}`,
-    `标签 ${aboutStats?.tags ?? "--"}`,
-    `评论 ${aboutStats?.comments ?? "--"}`,
-    `留言 ${aboutStats?.messages ?? "--"}`,
-    `访问量 ${api.formatCount(aboutStats?.views ?? 0)}`,
-  ];
   const navigateConfiguredUrl = (url?: string) => {
     if (!url) return;
     if (url.startsWith("/")) go(url);
@@ -734,7 +776,7 @@ function AboutPage() {
           <div className="project-grid">{aboutConfig.projects.map((project, i) => <article className={project.projectUrl || project.demoUrl ? "clickable" : ""} key={`${project.title}-${i}`} onClick={() => navigateConfiguredUrl(project.projectUrl || project.demoUrl)}><div className="project-cover art wide" style={{ backgroundImage: project.imageUrl ? `url(${project.imageUrl})` : undefined }}>{project.badge && <span>{project.badge}</span>}</div><h4>{project.title}</h4><p>{project.description}</p><div>{project.tags.map((tag) => <Tag key={tag} tone="gray">{tag}</Tag>)}</div></article>)}</div>
           <div className="cooperate"><span>💬✈</span><div><h3>{aboutConfig.cooperateTitle}</h3><p>{aboutConfig.cooperateText}</p></div><button onClick={() => navigateConfiguredUrl(aboutConfig.cooperateUrl || "/messages")}>{aboutConfig.cooperateButtonText} →</button></div>
         </section>
-        <aside className="side-stack"><PublicDataNotice show={aboutUsingMock} surface="关于页公开数据" /><Card title="站点数据"><div className="about-stats">{aboutStatItems.map((x) => <div key={x}>{x}</div>)}</div></Card><Card title="关注我"><div className="socials about-socials"><button type="button" onClick={() => navigateConfiguredUrl(aboutConfig.githubUrl)}><span className="social-icon github-icon" aria-hidden="true">GH</span><b>GitHub</b></button><button type="button" onClick={() => setWechatQrOpen(true)}><span className="social-icon wechat-icon" aria-hidden="true">微</span><b>微信</b></button></div></Card><Card title="写作主题"><div className="tag-cloud">{aboutConfig.writingTopics.length ? aboutConfig.writingTopics.map((x) => <button className="tag-button" key={x.label} onClick={() => navigateConfiguredUrl(x.url)}><Tag tone="gray">{x.label}</Tag></button>) : aboutTags.slice(0, 12).map((x) => <Tag key={x.id} tone="gray">{x.name}</Tag>)}</div></Card><Card title="自我介绍时间线"><div className="intro-line">{aboutConfig.timeline.map((x) => <p key={`${x.year}-${x.title}`}><b>{x.year}</b><span>{x.title}</span><small>{x.description}</small></p>)}</div></Card></aside>
+        <aside className="side-stack"><PublicDataNotice show={aboutUsingMock} surface="关于页公开数据" /><Card title="关注我"><div className="socials about-socials"><button type="button" onClick={() => navigateConfiguredUrl(aboutConfig.githubUrl)}><span className="social-icon github-icon" aria-hidden="true">GH</span><b>GitHub</b></button><button type="button" onClick={() => setWechatQrOpen(true)}><span className="social-icon wechat-icon" aria-hidden="true">微</span><b>微信</b></button></div></Card><Card title="自我介绍时间线"><div className="intro-line">{aboutConfig.timeline.map((x) => <p key={`${x.year}-${x.title}`}><b>{x.year}</b><span>{x.title}</span><small>{x.description}</small></p>)}</div></Card></aside>
         {wechatQrOpen && (
           <div className="media-modal" role="dialog" aria-modal="true" aria-label="微信二维码" onClick={() => setWechatQrOpen(false)}>
             <div className="media-modal-panel qr-modal-panel" onClick={(event) => event.stopPropagation()}>
@@ -767,23 +809,12 @@ function textToTopics(text: string): AboutPageSettings["writingTopics"] {
   }).filter((item) => item.label);
 }
 
-function timelineToText(items: AboutPageSettings["timeline"]) {
-  return items.map((item) => `${item.year}|${item.title}|${item.description}`).join("\n");
-}
-
-function textToTimeline(text: string): AboutPageSettings["timeline"] {
-  return text.split(/\r?\n/).map((line) => {
-    const [year = "", title = "", description = ""] = line.split("|");
-    return { year: year.trim(), title: title.trim(), description: description.trim() };
-  }).filter((item) => item.year || item.title || item.description);
-}
-
 function AboutSettingsPage() {
   const [config, setConfig] = useState<AboutPageSettings>(defaultAboutSettings);
   const [skillsText, setSkillsText] = useState(listToText(defaultAboutSettings.skills));
   const [projects, setProjects] = useState<AboutPageSettings["projects"]>(defaultAboutSettings.projects);
   const [topicsText, setTopicsText] = useState(topicsToText(defaultAboutSettings.writingTopics));
-  const [timelineText, setTimelineText] = useState(timelineToText(defaultAboutSettings.timeline));
+  const [timeline, setTimeline] = useState<AboutPageSettings["timeline"]>(defaultAboutSettings.timeline);
   const [aboutMediaItems, setAboutMediaItems] = useState<AdminMediaItem[]>([]);
   const [mediaTarget, setMediaTarget] = useState<"portrait" | "project" | "wechatQr" | null>(null);
   const [mediaProjectIndex, setMediaProjectIndex] = useState(0);
@@ -800,7 +831,7 @@ function AboutSettingsPage() {
         setSkillsText(listToText(result.item.skills));
         setProjects(result.item.projects);
         setTopicsText(topicsToText(result.item.writingTopics));
-        setTimelineText(timelineToText(result.item.timeline));
+        setTimeline(result.item.timeline);
       })
       .catch((error) => {
         if (!alive) return;
@@ -828,6 +859,18 @@ function AboutSettingsPage() {
     setProjects((items) => items.filter((_, itemIndex) => itemIndex !== index));
   }
 
+  function updateTimeline(index: number, patch: Partial<AboutPageSettings["timeline"][number]>) {
+    setTimeline((items) => items.map((item, itemIndex) => itemIndex === index ? { ...item, ...patch } : item));
+  }
+
+  function addTimelineItem() {
+    setTimeline((items) => [...items, { year: "", title: "", description: "" }]);
+  }
+
+  function removeTimelineItem(index: number) {
+    setTimeline((items) => items.filter((_, itemIndex) => itemIndex !== index));
+  }
+
   async function saveAboutSettings() {
     setSaving(true);
     setNotice("");
@@ -838,7 +881,11 @@ function AboutSettingsPage() {
         projects: projects.map((item) => ({ ...item, tags: Array.isArray(item.tags) ? item.tags : [] })),
         socials: [{ label: "GitHub", url: config.githubUrl }, { label: "微信", url: "" }],
         writingTopics: textToTopics(topicsText),
-        timeline: textToTimeline(timelineText),
+        timeline: timeline.map((item) => ({
+          year: item.year.trim(),
+          title: item.title.trim(),
+          description: item.description.trim(),
+        })).filter((item) => item.year || item.title || item.description),
       };
       const result = await api.updateAdminAboutSettings(payload);
       setConfig(result.item);
@@ -912,12 +959,34 @@ function AboutSettingsPage() {
           <div className="settings-panel">
             <header>
               <b>侧栏与履历</b>
-              <span>每行一条，链接字段使用“名称|链接”。</span>
+              <span>技术栈每行一条，写作主题使用“名称|链接”。</span>
             </header>
             <div className="settings-grid compact">
             <label>技术栈（每行一个）<textarea value={skillsText} onChange={(event) => setSkillsText(event.target.value)} /></label>
             <label>写作主题（名称|链接，每行一个）<textarea value={topicsText} onChange={(event) => setTopicsText(event.target.value)} /></label>
-            <label>时间线（年份|标题|说明，每行一个）<textarea value={timelineText} onChange={(event) => setTimelineText(event.target.value)} /></label>
+            </div>
+          </div>
+          <div className="settings-panel wide">
+            <div className="timeline-editor">
+              <header>
+                <div>
+                  <b>时间线</b>
+                  <span>逐条编辑公开履历，适合填写教育、工作、项目和个人实践经历。</span>
+                </div>
+                <button type="button" onClick={addTimelineItem}>新增时间线</button>
+              </header>
+              {timeline.map((item, index) => (
+                <article key={`${item.year}-${item.title}-${index}`}>
+                  <div className="project-card-head">
+                    <b>经历 {index + 1}</b>
+                    <button className="project-remove" type="button" onClick={() => removeTimelineItem(index)}>删除</button>
+                  </div>
+                  <label>时间 / 年份<input value={item.year} onChange={(event) => updateTimeline(index, { year: event.target.value })} placeholder="例如：2026.05 - 至今" /></label>
+                  <label>标题<input value={item.title} onChange={(event) => updateTimeline(index, { title: event.target.value })} placeholder="例如：多 Agent 竞品分析系统个人实践" /></label>
+                  <label className="wide">说明<textarea value={item.description} onChange={(event) => updateTimeline(index, { description: event.target.value })} placeholder="写一段公开展示用的简介，尽量简洁。" /></label>
+                </article>
+              ))}
+              {!timeline.length && <p className="soft-text">暂无时间线，点击“新增时间线”开始配置。</p>}
             </div>
           </div>
           <div className="settings-panel wide">
@@ -984,6 +1053,7 @@ function MessagesPage() {
   const [submitNotice, setSubmitNotice] = useState("");
   const [messagesUsingMock, setMessagesUsingMock] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [ownerPortraitUrl, setOwnerPortraitUrl] = useState(defaultAboutSettings.portraitUrl);
 
   useEffect(() => {
     let alive = true;
@@ -1012,6 +1082,25 @@ function MessagesPage() {
     return () => {
       alive = false;
       window.removeEventListener("admin-data-changed", loadMessages);
+    };
+  }, []);
+
+  useEffect(() => {
+    let alive = true;
+    function loadOwnerProfile() {
+      api.getPublicAbout()
+        .then((result) => {
+          if (alive) setOwnerPortraitUrl(result.item.portraitUrl || defaultAboutSettings.portraitUrl);
+        })
+        .catch(() => {
+          if (alive) setOwnerPortraitUrl(defaultAboutSettings.portraitUrl);
+        });
+    }
+    loadOwnerProfile();
+    window.addEventListener("admin-data-changed", loadOwnerProfile);
+    return () => {
+      alive = false;
+      window.removeEventListener("admin-data-changed", loadOwnerProfile);
     };
   }, []);
 
@@ -1071,7 +1160,7 @@ function MessagesPage() {
           </div>
           <div className="message-list">{loading ? <section className="empty card">正在读取留言...</section> : visibleMessages.length ? visibleMessages.map((item) => <MessageItem key={item.id} item={item} readonlyMock={messagesUsingMock} />) : <section className="empty card">当前筛选下暂无留言</section>}</div>
         </section>
-        <aside className="side-stack"><section className="rule-card card"><h3>友好交流</h3><p>请尊重他人、文明发言</p><p>禁止发布广告、恶意链接</p><p>技术讨论请尽量具体清晰</p><p>站长会定期查看并回复</p></section><Card title="最新评论"><MiniComments /></Card><section className="author card"><div className="avatar lg">站</div><h3>站长 <Tag>站长</Tag></h3><p>全栈开发 & 技术分享</p><p>热爱技术，热爱分享。在这里记录学习与实践的点滴。</p></section></aside>
+        <aside className="side-stack"><section className="rule-card card"><h3>友好交流</h3><p>请尊重他人、文明发言</p><p>禁止发布广告、恶意链接</p><p>技术讨论请尽量具体清晰</p><p>站长会定期查看并回复</p></section><Card title="最新评论"><MiniComments /></Card><section className="author card"><div className="avatar lg author-photo" style={{ backgroundImage: `url(${ownerPortraitUrl || defaultAboutSettings.portraitUrl})` }}>站</div><h3>站长 <Tag>站长</Tag></h3><p>全栈开发 & 技术分享</p><p>热爱技术，热爱分享。在这里记录学习与实践的点滴。</p></section></aside>
       </main>
     </>
   );
@@ -1292,7 +1381,7 @@ const defaultAboutSettings: AboutPageSettings = {
     { title: "DevNote 开发者笔记", description: "专为开发者设计的笔记工具，支持代码片段、Markdown、标签分类与全文搜索。", imageUrl: "/assets/about-project-devnote.png", projectUrl: "", demoUrl: "", tags: ["Vue 3", "Vite", "IndexedDB"], badge: "个人项目" },
   ],
   socials: [{ label: "GitHub", url: "https://github.com" }, { label: "掘金", url: "https://juejin.cn" }, { label: "知乎", url: "https://www.zhihu.com" }, { label: "Bilibili", url: "https://www.bilibili.com" }, { label: "微信公众号", url: "" }],
-  writingTopics: ["后端开发", "前端开发", "全栈实践", "项目复盘", "算法与数据结构", "工具推荐", "成长思考", "面试总结"].map((label) => ({ label, url: `/archive?tag=${encodeURIComponent(label)}` })),
+  writingTopics: ["后端开发", "前端开发", "全栈实践", "项目复盘", "算法与数据结构", "工具推荐", "成长思考", "面试总结"].map((label) => ({ label, url: `/posts?tag=${encodeURIComponent(label)}` })),
   timeline: [{ year: "2021", title: "计算机科学与技术 本科毕业", description: "在校期间热爱编程，参与多个项目开发。" }, { year: "2022", title: "全栈开发工程师", description: "参与企业级系统开发，积累全栈开发经验。" }, { year: "2023", title: "开始技术写作", description: "搭建个人博客，持续输出技术文章与教程。" }, { year: "2024", title: "独立开发 & 开源贡献", description: "发布开源项目，专注于自研与系统优化。" }],
   cooperateTitle: "欢迎交流与合作",
   cooperateText: "如果你有任何问题、建议，或者想一起交流技术，欢迎在留言板给我留言～",
@@ -1501,6 +1590,17 @@ function AdminPlaceholder({ page }: { page: string }) {
     }
   }
 
+  async function togglePostFeatured(id: number, isFeatured: boolean) {
+    try {
+      const result = await api.updatePostFeatured(id, isFeatured);
+      setAdminPosts((items) => sortPostsForAdminList(items.map((item) => item.id === id ? { ...item, ...(result.item ?? {}), featured: result.isFeatured } : item)));
+      setActionNotice(isFeatured ? "文章已设为精选，会进入前台精选列表。" : "文章已取消精选，前台精选列表不再优先展示。");
+      emitAdminDataChanged();
+    } catch (error) {
+      setActionNotice(getApiErrorMessage(error));
+    }
+  }
+
   async function deletePost(id: number) {
     try {
       await api.deletePost(id);
@@ -1687,6 +1787,10 @@ function AdminPlaceholder({ page }: { page: string }) {
     return "已发布";
   }
 
+  function sortPostsForAdminList(items: AdminPostListItem[]) {
+    return [...items].sort((a, b) => Number(Boolean(b.featured)) - Number(Boolean(a.featured)));
+  }
+
   function reviewStatus(status: string) {
     if (status === "approved") return "已通过";
     if (status === "rejected") return "已驳回";
@@ -1698,7 +1802,7 @@ function AdminPlaceholder({ page }: { page: string }) {
         key: `post-${item.id}`,
         id: item.id,
         text: `${item.title} · ${item.date || "未发布"} · ${item.category}`,
-        status: postStatusLabel(item.status),
+        status: `${postStatusLabel(item.status)}${item.featured ? " · 精选" : ""}`,
         href: `/admin/editor?id=${item.id}`,
         actions: page === "trash"
           ? [
@@ -1709,6 +1813,7 @@ function AdminPlaceholder({ page }: { page: string }) {
               { label: "编辑", title: "打开编辑器修改这篇文章", href: `/admin/editor?id=${item.id}` },
               ...(item.status === "published" ? [{ label: "查看", title: "打开前台文章详情页", href: `/article/${item.id}` }] : []),
               ...(item.status === "published" ? [{ label: "下架为草稿", title: "前台不再展示，文章保留在草稿箱继续编辑", run: () => changePostStatus(item.id, "draft") }] : [{ label: "发布", title: "将草稿发布到前台公开显示", run: () => changePostStatus(item.id, "published") }]),
+              { label: item.featured ? "取消精选" : "设为精选", title: item.featured ? "从前台精选文章列表移除" : "加入前台精选文章列表", run: () => togglePostFeatured(item.id, !item.featured) },
               { label: "删除", title: "先移入回收站，之后可恢复或永久删除", run: () => deletePost(item.id) },
             ],
       }))
@@ -1732,7 +1837,7 @@ function AdminPlaceholder({ page }: { page: string }) {
               id: item.id,
               text: `${item.name} · ${item.slug}${item.description ? ` · ${item.description}` : ""}`,
               status: `${item.postsCount} 篇文章`,
-              href: `/archive?category=${encodeURIComponent(item.name)}`,
+              href: `/posts?category=${encodeURIComponent(item.name)}`,
               actions: [
                 { label: "编辑", title: "修改分类名称和描述，保存到 categories", run: () => updateCategory(item) },
                 { label: "删除", title: "删除未被文章使用的分类", run: () => deleteCategory(item.id) },
@@ -1744,7 +1849,7 @@ function AdminPlaceholder({ page }: { page: string }) {
               id: item.id,
               text: `${item.name} · ${item.slug}${item.color ? ` · ${item.color}` : ""}`,
               status: `${item.postsCount} 篇文章`,
-              href: `/archive?tag=${encodeURIComponent(item.name)}`,
+              href: `/posts?tag=${encodeURIComponent(item.name)}`,
               actions: [
                 { label: "编辑", title: "修改标签名称和颜色，保存到 tags", run: () => updateTag(item) },
                 { label: "删除", title: "删除未被文章使用的标签", run: () => deleteTag(item.id) },
@@ -1777,9 +1882,9 @@ function AdminPlaceholder({ page }: { page: string }) {
   const selectedRows = rows.filter((row) => selectedKeys.includes(row.key));
   const allRowsSelected = rows.length > 0 && selectedRows.length === rows.length;
   const batchActions = page === "posts"
-    ? [{ label: "批量下架", danger: false, run: () => batchChangePostStatus("draft") }, { label: "批量移入回收站", danger: true, run: () => batchDeletePosts() }]
+    ? [{ label: "批量设精选", danger: false, run: () => batchChangePostFeatured(true) }, { label: "批量取消精选", danger: false, run: () => batchChangePostFeatured(false) }, { label: "批量下架", danger: false, run: () => batchChangePostStatus("draft") }, { label: "批量移入回收站", danger: true, run: () => batchDeletePosts() }]
     : page === "drafts"
-      ? [{ label: "批量发布", danger: false, run: () => batchChangePostStatus("published") }, { label: "批量移入回收站", danger: true, run: () => batchDeletePosts() }]
+      ? [{ label: "批量设精选", danger: false, run: () => batchChangePostFeatured(true) }, { label: "批量取消精选", danger: false, run: () => batchChangePostFeatured(false) }, { label: "批量发布", danger: false, run: () => batchChangePostStatus("published") }, { label: "批量移入回收站", danger: true, run: () => batchDeletePosts() }]
       : page === "trash"
         ? [{ label: "批量恢复为草稿", danger: false, run: () => batchChangePostStatus("draft") }, { label: "批量永久删除", danger: true, run: () => batchDeletePosts(true) }]
         : page === "media"
@@ -1815,6 +1920,14 @@ function AdminPlaceholder({ page }: { page: string }) {
     runBatch(label, async (row) => {
       const result = await api.updatePostStatus(row.id, status);
       setAdminPosts((items) => items.map((item) => item.id === row.id ? { ...item, ...(result.item ?? {}), status: result.status } : item).filter((item) => page !== "drafts" || item.status === "draft").filter((item) => page !== "trash" || item.status === "archived").filter((item) => page !== "posts" || item.status !== "archived"));
+    });
+  }
+
+  function batchChangePostFeatured(isFeatured: boolean) {
+    const label = isFeatured ? "批量设精选" : "批量取消精选";
+    runBatch(label, async (row) => {
+      const result = await api.updatePostFeatured(row.id, isFeatured);
+      setAdminPosts((items) => sortPostsForAdminList(items.map((item) => item.id === row.id ? { ...item, ...(result.item ?? {}), featured: result.isFeatured } : item)));
     });
   }
 
@@ -2288,10 +2401,30 @@ function EditorPage() {
     enabled: false,
     mode: "mock",
     provider: null,
+    model: null,
+    responsesModel: null,
+    webSearchEnabled: false,
     tasksTableReady: false,
     tasksCount: 0,
     message: "正在读取 AI 功能状态...",
   });
+  const [aiBusyTool, setAiBusyTool] = useState<AdminAiTool | "">("");
+  const [aiMode, setAiMode] = useState<AdminAiTool>("polish");
+  const [aiComment, setAiComment] = useState("");
+  const [aiPolishNotes, setAiPolishNotes] = useState("");
+  const [aiCommentSources, setAiCommentSources] = useState<Array<{ title: string; url: string }>>([]);
+  const [aiResultModal, setAiResultModal] = useState<{ title: string; content: string; sources?: Array<{ title: string; url: string }> } | null>(null);
+  const [aiFeedback, setAiFeedback] = useState<{ type: "info" | "success" | "error"; text: string }>({ type: "info", text: "选择功能后开始处理。" });
+  const [aiPolishInstruction, setAiPolishInstruction] = useState("");
+  const [aiCommentInstruction, setAiCommentInstruction] = useState("");
+  const [aiReviewFocus, setAiReviewFocus] = useState<AdminAiReviewFocus>("knowledge");
+  const [aiWebSearch, setAiWebSearch] = useState(true);
+  const [lastPolishSnapshot, setLastPolishSnapshot] = useState<{
+    markdown: string;
+    selectionStart: number;
+    selectionEnd: number;
+    scope: "document" | "selection";
+  } | null>(null);
   const coverInputRef = useRef<HTMLInputElement | null>(null);
   const bodyImageInputRef = useRef<HTMLInputElement | null>(null);
   const markdownInputRef = useRef<HTMLTextAreaElement | null>(null);
@@ -2337,6 +2470,12 @@ function EditorPage() {
       setCoverUrl(DEFAULT_EDITOR_COVER);
       setCoverName("editor-cover.png");
       setPublished(false);
+      setAiComment("");
+      setAiPolishNotes("");
+      setAiCommentSources([]);
+      setAiResultModal(null);
+      setAiFeedback({ type: "info", text: "选择功能后开始处理。" });
+      setLastPolishSnapshot(null);
       setSaved(new Date().toLocaleTimeString("zh-CN", { hour12: false }));
       setNotice(initialEditorStatus === "draft" ? "已进入新草稿模式，保存后写入数据库" : "已进入新建文章模式，发布后写入数据库");
       api.startNewPost();
@@ -2360,6 +2499,12 @@ function EditorPage() {
         setTitle(item.title);
         setMarkdown(item.markdown);
         setAiSummary(item.summary);
+        setAiComment("");
+        setAiPolishNotes("");
+        setAiCommentSources([]);
+        setAiResultModal(null);
+        setAiFeedback({ type: "info", text: "选择功能后开始处理。" });
+        setLastPolishSnapshot(null);
         if (item.categoryName) setCategoryName(item.categoryName);
         if (item.tags.length) setSelectedTags(item.tags);
         setFeatured(item.isFeatured ?? true);
@@ -2410,7 +2555,10 @@ function EditorPage() {
     let alive = true;
     api.getAiStatus()
       .then((status) => {
-        if (alive) setAiStatus(status);
+        if (alive) {
+          setAiStatus(status);
+          if (!status.webSearchEnabled) setAiWebSearch(false);
+        }
       })
       .catch((error) => {
         if (alive) {
@@ -2548,14 +2696,109 @@ function EditorPage() {
       setNotice(getApiErrorMessage(error));
     }
   }
-  function runMockAiTool(name: string) {
-    if (name === "AI 摘要") {
-      setAiSummary("本文围绕自建博客系统的动机、数据自主、扩展能力和创作体验展开。这是前端模拟摘要，不代表真实模型输出。");
+  function undoLastPolish() {
+    if (!lastPolishSnapshot) {
+      setNotice("暂无可撤销的 AI 润色。");
+      return;
     }
-    if (name === "标题建议") {
-      setTitle("为什么开发者值得拥有一个自建博客系统（模拟标题）");
+    setMarkdown(lastPolishSnapshot.markdown);
+    setLastPolishSnapshot(null);
+    setNotice(lastPolishSnapshot.scope === "selection" ? "已撤销上一次选区润色。" : "已撤销上一次全文润色。");
+    window.setTimeout(() => {
+      markdownInputRef.current?.focus();
+      markdownInputRef.current?.setSelectionRange(lastPolishSnapshot.selectionStart, lastPolishSnapshot.selectionEnd);
+    }, 0);
+  }
+  async function runAiTool(tool: AdminAiTool) {
+    const labels: Record<AdminAiTool, string> = {
+      summary: "AI 摘要",
+      polish: "AI 润色",
+      comment: "AI 评论",
+    };
+    if (aiBusyTool) return;
+    const textarea = markdownInputRef.current;
+    const selectionStart = textarea?.selectionStart ?? markdown.length;
+    const selectionEnd = textarea?.selectionEnd ?? markdown.length;
+    const selectedMarkdown = markdown.slice(selectionStart, selectionEnd);
+    const polishScope: "document" | "selection" = tool === "polish" && selectedMarkdown.trim() ? "selection" : "document";
+    const aiContent = tool === "polish" && polishScope === "selection" ? selectedMarkdown : markdown;
+    if (!title.trim() && !markdown.trim()) {
+      setNotice("请先填写标题或正文，再使用 AI 功能。");
+      return;
     }
-    setNotice(`${name} 当前为前端模拟预览，未调用模型，也未写入 ai_tasks。`);
+    if (tool === "polish" && !aiContent.trim()) {
+      setNotice("请先填写正文，或选中一段需要润色的内容。");
+      return;
+    }
+    const userInstruction = tool === "polish" ? aiPolishInstruction.trim() : tool === "comment" ? aiCommentInstruction.trim() : "";
+    const polishSnapshot = tool === "polish" ? { markdown, selectionStart, selectionEnd, scope: polishScope } : null;
+    setAiBusyTool(tool);
+    const runningText = tool === "polish" && polishScope === "selection" ? "AI 正在润色选中内容..." : `${labels[tool]}正在生成...`;
+    setNotice(runningText);
+    setAiFeedback({ type: "info", text: runningText });
+    if (tool === "comment") setAiCommentSources([]);
+    if (tool === "polish") setAiPolishNotes("");
+    try {
+      const result = await api.runAiTool({
+        tool,
+        title,
+        summary: aiSummary,
+        content: aiContent,
+        postId: loadedEditId,
+        scope: polishScope,
+        userInstruction,
+        reviewFocus: tool === "comment" ? aiReviewFocus : undefined,
+        enableWebSearch: tool === "comment" && aiWebSearch,
+      });
+      if (tool === "summary") {
+        const nextSummary = result.result.length > 200 ? result.result.slice(0, 200) : result.result;
+        setAiSummary(nextSummary);
+        const successText = `${labels[tool]}已写入摘要字段，请检查后保存文章。`;
+        setNotice(successText);
+        setAiFeedback({ type: "success", text: successText });
+      }
+      if (tool === "polish") {
+        if (!polishSnapshot) return;
+        const currentMarkdownValue = markdownInputRef.current?.value ?? polishSnapshot.markdown;
+        if (currentMarkdownValue !== polishSnapshot.markdown) {
+          const changedText = "正文在 AI 润色期间发生变化，已取消自动替换，避免覆盖你的手动修改。";
+          setNotice(changedText);
+          setAiFeedback({ type: "error", text: changedText });
+          return;
+        }
+        const nextMarkdown = polishSnapshot.scope === "selection"
+          ? `${polishSnapshot.markdown.slice(0, polishSnapshot.selectionStart)}${result.result}${polishSnapshot.markdown.slice(polishSnapshot.selectionEnd)}`
+          : result.result;
+        const nextSelectionStart = polishSnapshot.scope === "selection" ? polishSnapshot.selectionStart : 0;
+        const nextSelectionEnd = polishSnapshot.scope === "selection" ? polishSnapshot.selectionStart + result.result.length : result.result.length;
+        setLastPolishSnapshot(polishSnapshot);
+        setMarkdown(nextMarkdown);
+        setAiPolishNotes(result.notes || "已完成润色，请检查正文变化。");
+        const successText = polishSnapshot.scope === "selection" ? "AI 已替换选中内容，可点击撤销润色恢复。" : "AI 已替换全文，可点击撤销润色恢复。";
+        setNotice(successText);
+        setAiFeedback({ type: "success", text: successText });
+        window.setTimeout(() => {
+          markdownInputRef.current?.focus();
+          markdownInputRef.current?.setSelectionRange(nextSelectionStart, nextSelectionEnd);
+        }, 0);
+      }
+      if (tool === "comment") {
+        setAiComment(result.result);
+        setAiCommentSources(result.sources ?? []);
+        const successText = result.enableWebSearch ? `${labels[tool]}已完成联网核查，只作为修改建议，不会自动改正文。` : `${labels[tool]}已生成，只作为修改建议，不会自动改正文。`;
+        setNotice(successText);
+        setAiFeedback({ type: "success", text: successText });
+      }
+      if (result.taskId) {
+        setAiStatus((current) => ({ ...current, enabled: true, mode: "api", provider: result.provider, model: result.model, tasksCount: current.tasksCount + 1, message: `千问已接入，当前模型：${result.model}` }));
+      }
+    } catch (error) {
+      const message = getApiErrorMessage(error);
+      setNotice(message);
+      setAiFeedback({ type: "error", text: `${labels[tool]}失败：${message}` });
+    } finally {
+      setAiBusyTool("");
+    }
   }
   async function publish() {
     if (postStatus === "draft") {
@@ -2620,6 +2863,11 @@ function EditorPage() {
     ["❞", "> 引用内容"],
     ["🔗", "[链接文字](https://example.com)"],
     ["▦", "| 字段 | 说明 |\n| --- | --- |\n| title | 文章标题 |"],
+  ];
+  const aiModeOptions: Array<{ tool: AdminAiTool; name: string; desc: string }> = [
+    { tool: "polish", name: "润色", desc: "按要求优化正文" },
+    { tool: "comment", name: "评论", desc: "检查问题并给建议" },
+    { tool: "summary", name: "摘要", desc: "生成文章卡片摘要" },
   ];
 
   return (
@@ -2688,17 +2936,84 @@ function EditorPage() {
           <label className="switch">评论审核<input type="checkbox" checked={reviewComment} onChange={(event) => setReviewComment(event.target.checked)} /></label>
         </aside>
         <aside className="ai-panel card">
-          <header><h3>✦ AI 助手（模拟）</h3><button onClick={() => setNotice("AI 助手面板已保持打开")}>×</button></header>
-          <div className="tabs"><button className="active">前端模拟</button><button onClick={() => setNotice(`AI 任务表已预留，当前已有 ${aiStatus.tasksCount} 条任务记录；模型服务未接入。`)}>任务状态</button></div>
-          {[
-            ["AI 摘要", "自动生成文章摘要"],
-            ["AI 纠错批注", "发现并优化文章问题"],
-            ["标题建议", "生成更吸引人的标题"],
-            ["自动标签", "根据内容智能生成标签"],
-            ["内容润色", "优化语句表达和可读性"],
-          ].map(([name, desc]) => <button className="ai-tool" key={name} onClick={() => runMockAiTool(name)}>{name}<small>{desc} · 当前仅前端模拟</small></button>)}
-          <section><h3>AI 摘要（模拟预览）</h3><p>{aiSummary}</p><button onClick={() => setNotice("摘要内容已作为编辑器字段保存；来源仍为前端模拟。")}>使用当前摘要</button><button className="ghost" onClick={() => runMockAiTool("AI 摘要")}>重新模拟</button></section>
-          <div className="hint">{aiStatus.message} 后续接入真实模型时，应由后端创建 ai_tasks 任务并回传任务状态和结果。</div>
+          <header><h3>✦ AI 助手</h3><button onClick={() => setNotice("AI 助手面板已保持打开")}>×</button></header>
+          <div className="ai-status-row">
+            <span className={aiStatus.enabled ? "ready" : "warn"}>{aiStatus.enabled ? "千问已接入" : "未配置 Key"}</span>
+            <button type="button" onClick={() => setNotice(`AI 任务表已启用，当前已有 ${aiStatus.tasksCount} 条任务记录。`)}>任务</button>
+          </div>
+          <div className="ai-mode-tabs">
+            {aiModeOptions.map((item) => (
+              <button key={item.tool} className={aiMode === item.tool ? "active" : ""} onClick={() => setAiMode(item.tool)}>
+                {item.name}
+                <small>{item.desc}</small>
+              </button>
+            ))}
+          </div>
+          <section className="ai-workspace">
+            <div className={`ai-feedback ${aiFeedback.type}`}>{aiFeedback.text}</div>
+            {aiMode === "polish" && (
+              <>
+                <h3>AI 润色</h3>
+                <p className="ai-muted">选中正文片段时只润色选区；未选中时润色全文。</p>
+                <label className="ai-field">润色要求
+                  <textarea value={aiPolishInstruction} maxLength={800} onChange={(event) => setAiPolishInstruction(event.target.value)} placeholder="例如：润色一下论文结构；让表达更正式；保留技术术语" />
+                  <small>{aiPolishInstruction.length}/800</small>
+                </label>
+                <button className="ai-primary" disabled={Boolean(aiBusyTool)} onClick={() => runAiTool("polish")}>{aiBusyTool === "polish" ? "润色中..." : "开始润色"}</button>
+                <button className="ai-undo" disabled={!lastPolishSnapshot || Boolean(aiBusyTool)} onClick={undoLastPolish}>撤销上次润色</button>
+                <div className="ai-result-head">
+                  <b>润色说明</b>
+                  <button type="button" disabled={!aiPolishNotes} onClick={() => setAiResultModal({ title: "AI 润色说明", content: aiPolishNotes })}>放大查看</button>
+                </div>
+                <div className="ai-result">{aiPolishNotes || "润色完成后会在这里简要说明原文问题和修改方向。"}</div>
+              </>
+            )}
+            {aiMode === "comment" && (
+              <>
+                <h3>AI 评论</h3>
+                <label className="ai-field">评论重点
+                  <select value={aiReviewFocus} onChange={(event) => setAiReviewFocus(event.target.value as AdminAiReviewFocus)}>
+                    <option value="knowledge">知识性错误</option>
+                    <option value="structure">结构性错误</option>
+                    <option value="suggestions">优化建议</option>
+                    <option value="all">综合检查</option>
+                  </select>
+                </label>
+                <label className="ai-field">评论要求
+                  <textarea value={aiCommentInstruction} maxLength={800} onChange={(event) => setAiCommentInstruction(event.target.value)} placeholder="例如：只看知识性错误；检查文章结构；指出论证跳跃处" />
+                  <small>{aiCommentInstruction.length}/800</small>
+                </label>
+                <label className="ai-web-switch">
+                  <span>
+                    联网核查
+                    <small>{aiStatus.webSearchEnabled ? `百炼 ${aiStatus.responsesModel || aiStatus.model || ""}` : "后端未启用"}</small>
+                  </span>
+                  <input type="checkbox" checked={aiWebSearch && Boolean(aiStatus.webSearchEnabled)} disabled={!aiStatus.webSearchEnabled || Boolean(aiBusyTool)} onChange={(event) => setAiWebSearch(event.target.checked)} />
+                </label>
+                <button className="ai-primary" disabled={Boolean(aiBusyTool)} onClick={() => runAiTool("comment")}>{aiBusyTool === "comment" ? "评论生成中..." : "生成评论"}</button>
+                <div className="ai-result-head">
+                  <b>评论结果</b>
+                  <button type="button" disabled={!aiComment} onClick={() => setAiResultModal({ title: "AI 评论结果", content: aiComment, sources: aiCommentSources })}>放大查看</button>
+                </div>
+                <div className="ai-result">{aiComment || "生成后会在这里显示审稿建议。"}</div>
+                {aiCommentSources.length > 0 && (
+                  <div className="ai-sources">
+                    <b>参考来源</b>
+                    {aiCommentSources.map((source) => <a key={source.url} href={source.url} target="_blank" rel="noreferrer">{source.title || source.url}</a>)}
+                  </div>
+                )}
+              </>
+            )}
+            {aiMode === "summary" && (
+              <>
+                <h3>AI 摘要</h3>
+                <p className="ai-muted">生成适合文章卡片展示的短摘要。</p>
+                <button className="ai-primary" disabled={Boolean(aiBusyTool)} onClick={() => runAiTool("summary")}>{aiBusyTool === "summary" ? "摘要生成中..." : "重新生成摘要"}</button>
+                <div className="ai-result">{aiSummary || "暂无摘要"}</div>
+              </>
+            )}
+          </section>
+          <div className="hint">{aiStatus.message}</div>
         </aside>
         <div className="editor-actions"><button className={previewMode === "desktop" ? "active" : ""} onClick={() => setPreviewMode("desktop")}>▣</button><button className={previewMode === "mobile" ? "active" : ""} onClick={() => setPreviewMode("mobile")}>▯</button><button onClick={() => setNotice("预览已刷新")}>预览</button><button className="draft" onClick={saveDraft}>存为草稿</button><button className="primary" onClick={publish}>{primaryPublishLabel}</button></div>
         {mediaPickerOpen && (
@@ -2710,6 +3025,20 @@ function EditorPage() {
                   {editorMediaItems.map((item) => <button key={item.id} type="button" onClick={() => chooseEditorMedia(item)}><img src={item.url} alt={item.altText || item.originalName} /><span>{item.originalName}</span></button>)}
                 </div>
               ) : <p className="soft-text">媒体库暂无可用图片。</p>}
+            </div>
+          </div>
+        )}
+        {aiResultModal && (
+          <div className="ai-result-modal" role="dialog" aria-modal="true" aria-label={aiResultModal.title} onClick={() => setAiResultModal(null)}>
+            <div className="ai-result-modal-panel" onClick={(event) => event.stopPropagation()}>
+              <header><b>{aiResultModal.title}</b><button type="button" onClick={() => setAiResultModal(null)}>关闭</button></header>
+              <pre>{aiResultModal.content}</pre>
+              {aiResultModal.sources?.length ? (
+                <div className="ai-result-modal-sources">
+                  <b>参考来源</b>
+                  {aiResultModal.sources.map((source) => <a key={source.url} href={source.url} target="_blank" rel="noreferrer">{source.title || source.url}</a>)}
+                </div>
+              ) : null}
             </div>
           </div>
         )}
@@ -2739,7 +3068,7 @@ export default function App() {
       return <AdminShell page={adminPage} />;
     }
     if (routePath.startsWith("/article")) return <ArticlePage articleId={Number(routePath.split("/")[2]) || 0} />;
-    if (routePath === "/archive" || routePath === "/categories" || routePath === "/tags") return <ArchivePage />;
+    if (routePath === "/posts" || routePath === "/archive" || routePath === "/categories" || routePath === "/tags") return <PostsPage />;
     if (routePath === "/about") return <AboutPage />;
     if (routePath === "/messages") return <MessagesPage />;
     return <HomePage />;

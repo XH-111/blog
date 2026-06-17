@@ -96,7 +96,22 @@ const API_ERROR_MESSAGES: Record<string, string> = {
   content_required: "请输入内容",
   name_required: "请输入名称",
   invalid_status: "状态不合法",
+  invalid_ai_tool: "AI 功能类型不支持",
+  ai_content_required: "请先填写标题或正文内容",
+  ai_not_configured: "请先在 backend/.env 配置千问 API Key，并重启后端",
+  ai_provider_error: "AI 模型调用失败，请稍后重试或检查 Key 配置",
+  ai_timeout: "AI 模型响应超时，请稍后重试",
+  ai_empty_result: "AI 没有返回内容，请稍后重试",
+  ai_web_search_disabled: "后端未启用 AI 联网核查，请检查 AI_WEB_SEARCH_ENABLED 配置",
 };
+
+function isAbortError(error: unknown) {
+  if (error instanceof DOMException && error.name === "AbortError") return true;
+  if (error instanceof Error && error.name === "AbortError") return true;
+  if (typeof error === "object" && error !== null && "code" in error && (error as { code?: unknown }).code === 20) return true;
+  if (error instanceof Error && /aborted/i.test(error.message)) return true;
+  return false;
+}
 
 async function requestJson<T>(path: string, fallback: T, init?: RequestInit): Promise<T> {
   const controller = new AbortController();
@@ -116,14 +131,17 @@ async function requestJson<T>(path: string, fallback: T, init?: RequestInit): Pr
   }
 }
 
-async function requestStrictJson<T>(path: string, init?: RequestInit): Promise<T> {
+type ApiRequestInit = RequestInit & { timeoutMs?: number };
+
+async function requestStrictJson<T>(path: string, init?: ApiRequestInit): Promise<T> {
+  const { timeoutMs = 5000, ...requestInit } = init ?? {};
   const controller = new AbortController();
-  const timer = window.setTimeout(() => controller.abort(), 5000);
+  const timer = window.setTimeout(() => controller.abort(), timeoutMs);
   try {
     const response = await fetch(`${API_BASE}${path}`, {
-      ...init,
+      ...requestInit,
       signal: controller.signal,
-      headers: requestHeaders(path, init),
+      headers: requestHeaders(path, requestInit),
     });
     const text = await response.text();
     const body = (text ? JSON.parse(text) : {}) as T & { message?: string; error?: string; code?: string };
@@ -135,8 +153,8 @@ async function requestStrictJson<T>(path: string, init?: RequestInit): Promise<T
     return body as T;
   } catch (error) {
     if (error instanceof ApiError) throw error;
-    if (error instanceof DOMException && error.name === "AbortError") {
-      throw new ApiError("请求超时，请确认后端服务是否可用");
+    if (isAbortError(error)) {
+      throw new ApiError("请求超时或被中断，请稍后重试");
     }
     throw new ApiError("无法连接后端服务，请确认本地后端已启动");
   } finally {
@@ -146,6 +164,7 @@ async function requestStrictJson<T>(path: string, init?: RequestInit): Promise<T
 
 export function getApiErrorMessage(error: unknown) {
   if (error instanceof ApiError) return error.message;
+  if (isAbortError(error)) return "请求超时或被中断，请稍后重试";
   if (error instanceof Error) return error.message;
   return "操作失败，请稍后重试";
 }
@@ -379,9 +398,28 @@ export type AdminAiStatus = {
   enabled: boolean;
   mode: "mock" | "api";
   provider: string | null;
+  model?: string | null;
+  responsesModel?: string | null;
+  webSearchEnabled?: boolean;
   tasksTableReady: boolean;
   tasksCount: number;
   message: string;
+};
+
+export type AdminAiTool = "summary" | "polish" | "comment";
+export type AdminAiReviewFocus = "knowledge" | "structure" | "suggestions" | "all";
+
+export type AdminAiRunResult = {
+  ok: boolean;
+  tool: AdminAiTool;
+  label?: string;
+  result: string;
+  notes?: string;
+  sources?: Array<{ title: string; url: string }>;
+  provider: string;
+  model: string;
+  enableWebSearch?: boolean;
+  taskId?: number;
 };
 
 type BackendMedia = {
@@ -725,7 +763,7 @@ const defaultAboutPageSettings: AboutPageSettings = {
     { label: "Bilibili", url: "https://www.bilibili.com" },
     { label: "微信公众号", url: "" },
   ],
-  writingTopics: ["后端开发", "前端开发", "全栈实践", "项目复盘", "算法与数据结构", "工具推荐", "成长思考", "面试总结"].map((label) => ({ label, url: `/archive?tag=${encodeURIComponent(label)}` })),
+  writingTopics: ["后端开发", "前端开发", "全栈实践", "项目复盘", "算法与数据结构", "工具推荐", "成长思考", "面试总结"].map((label) => ({ label, url: `/posts?tag=${encodeURIComponent(label)}` })),
   timeline: [
     { year: "2021", title: "计算机科学与技术 本科毕业", description: "在校期间热爱编程，参与多个项目开发。" },
     { year: "2022", title: "全栈开发工程师", description: "参与企业级系统开发，积累全栈开发经验。" },
@@ -750,13 +788,13 @@ function normalizeAboutPageSettings(input?: Partial<AboutPageSettings>): AboutPa
     skills: Array.isArray(source.skills) ? source.skills : defaultAboutPageSettings.skills,
     projects: Array.isArray(source.projects) ? source.projects.map((item) => ({ ...item, projectUrl: item.projectUrl ?? "", demoUrl: item.demoUrl ?? "", tags: Array.isArray(item.tags) ? item.tags : [] })) : defaultAboutPageSettings.projects,
     socials: Array.isArray(source.socials) ? source.socials : defaultAboutPageSettings.socials,
-    writingTopics: Array.isArray(source.writingTopics) ? source.writingTopics.map((item) => typeof item === "string" ? { label: item, url: `/archive?tag=${encodeURIComponent(item)}` } : { label: item.label, url: item.url ?? "" }).filter((item) => item.label) : defaultAboutPageSettings.writingTopics,
+    writingTopics: Array.isArray(source.writingTopics) ? source.writingTopics.map((item) => typeof item === "string" ? { label: item, url: `/posts?tag=${encodeURIComponent(item)}` } : { label: item.label, url: item.url ?? "" }).filter((item) => item.label) : defaultAboutPageSettings.writingTopics,
     timeline: Array.isArray(source.timeline) ? source.timeline : defaultAboutPageSettings.timeline,
   };
 }
 
 export const api = {
-  getHome: async (options: { pageSize?: number; sort?: "latest" | "hot"; category?: string; tag?: string; keyword?: string; year?: string } = {}) => {
+  getPublicPosts: async (options: { pageSize?: number; sort?: "latest" | "hot"; category?: string; tag?: string; keyword?: string; year?: string } = {}) => {
     const fallback = { articles };
     const params = new URLSearchParams();
     if (options.pageSize) params.set("pageSize", String(options.pageSize));
@@ -873,6 +911,11 @@ export const api = {
     const data = await requestStrictJson<{ ok?: boolean; id?: DbId; status?: "draft" | "published" | "scheduled" | "archived"; item?: BackendPost }>(`/admin/posts/${id}/status`, { method: "PUT", body: JSON.stringify({ status }) });
     const item = data.item ? mapAdminPost(data.item) : undefined;
     return { ok: data.ok ?? true, id: toNumberId(data.item?.id ?? data.id ?? id), status: item?.status ?? data.status ?? status, item, source: "api" as const };
+  },
+  updatePostFeatured: async (id: number, isFeatured: boolean) => {
+    const data = await requestStrictJson<{ ok?: boolean; id?: DbId; isFeatured?: boolean; item?: BackendPost }>(`/admin/posts/${id}/featured`, { method: "PUT", body: JSON.stringify({ isFeatured }) });
+    const item = data.item ? mapAdminPost(data.item) : undefined;
+    return { ok: data.ok ?? true, id: toNumberId(data.item?.id ?? data.id ?? id), isFeatured: item?.featured ?? data.isFeatured ?? isFeatured, item, source: "api" as const };
   },
   deletePost: async (id: number) => {
     const data = await requestStrictJson<{ ok?: boolean; id?: DbId; deleted?: boolean; status?: "archived" }>(`/admin/posts/${id}`, { method: "DELETE" });
@@ -1066,9 +1109,31 @@ export const api = {
       enabled: Boolean(data.enabled),
       mode: data.mode === "api" ? "api" : "mock",
       provider: data.provider ?? null,
+      model: data.model ?? null,
+      responsesModel: data.responsesModel ?? null,
+      webSearchEnabled: Boolean(data.webSearchEnabled),
       tasksTableReady: Boolean(data.tasksTableReady),
       tasksCount: Number(data.tasksCount ?? 0),
       message: data.message ?? "AI 模型服务尚未接入；当前仅支持前端模拟预览。",
+    };
+  },
+  runAiTool: async (payload: { tool: AdminAiTool; title?: string; summary?: string; content?: string; postId?: number; scope?: "document" | "selection"; userInstruction?: string; reviewFocus?: AdminAiReviewFocus; enableWebSearch?: boolean }): Promise<AdminAiRunResult> => {
+    const data = await requestStrictJson<AdminAiRunResult>("/admin/ai/run", {
+      method: "POST",
+      body: JSON.stringify(payload),
+      timeoutMs: 45000,
+    });
+    return {
+      ok: data.ok ?? true,
+      tool: data.tool,
+      label: data.label,
+      result: data.result ?? "",
+      notes: data.notes ?? "",
+      sources: data.sources ?? [],
+      provider: data.provider ?? "qwen",
+      model: data.model ?? "",
+      enableWebSearch: Boolean(data.enableWebSearch),
+      taskId: data.taskId,
     };
   },
   formatCount,

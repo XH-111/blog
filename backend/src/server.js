@@ -9,6 +9,31 @@ const uploadRoot = path.resolve(process.cwd(), "public", "uploads");
 const COMMENT_CONTENT_MAX_LENGTH = 1000;
 const MESSAGE_CONTENT_MAX_LENGTH = 2000;
 const ABOUT_SETTING_KEY = "about_page";
+const AI_INPUT_MAX_CHARS = 12000;
+const AI_INSTRUCTION_MAX_CHARS = 800;
+const AI_COMMENT_FOCUS_LABELS = {
+  knowledge: "知识性错误、概念准确性和技术事实",
+  structure: "文章结构、论证层次和段落组织",
+  suggestions: "可执行的优化建议，但不要吹毛求疵",
+  all: "知识性严谨性、结构性问题和关键优化建议",
+};
+const AI_TOOL_DEFINITIONS = {
+  summary: {
+    label: "AI 摘要",
+    system: "你是个人博客的中文编辑助手，擅长把技术文章提炼成清晰、克制、适合展示在文章卡片里的摘要。",
+    instruction: "请基于标题和正文生成一段中文摘要，控制在 120 到 180 个汉字内。只输出摘要正文，不要添加标题、列表或解释。",
+  },
+  polish: {
+    label: "AI 润色",
+    system: "你是个人博客的中文技术写作编辑，擅长优化表达、逻辑和可读性，同时尊重作者原意。",
+    instruction: "请润色下面的 Markdown 正文，保留原有标题层级、代码块、表格和链接结构。请严格输出 JSON 对象，格式为：{\"polishedMarkdown\":\"润色后的 Markdown 正文\",\"notes\":\"用 2 到 4 条简要说明原文主要问题和本次润色做了什么\"}。不要输出 JSON 之外的解释。",
+  },
+  comment: {
+    label: "AI 评论",
+    system: "你是严谨但克制的技术文章事实校对助手，重点关注知识性、概念准确性、技术事实和逻辑严谨性。",
+    instruction: "请检查这篇文章是否存在明显的知识性错误、概念混淆、技术事实不准确、因果逻辑不严谨或容易误导读者的表述。不要吹毛求疵，不要为了凑数量评价写作风格、措辞偏好或无关紧要的小问题。若发现问题，最多输出 3 到 5 条，每条包含：问题、原因、建议改法。若未发现明显知识性或严谨性问题，只输出：未发现明显知识性或严谨性问题。",
+  },
+};
 
 const DEFAULT_ABOUT_PAGE = {
   title: "关于我",
@@ -1167,7 +1192,7 @@ async function handleAdminPosts(req, res, url) {
       LEFT JOIN tags t ON t.id = pt.tag_id
       ${where.length ? `WHERE ${where.join(" AND ")}` : ""}
       GROUP BY p.id, c.id
-      ORDER BY p.updated_at DESC
+      ORDER BY p.is_featured DESC, p.updated_at DESC
     `,
     params,
   );
@@ -1262,6 +1287,23 @@ async function handleAdminStatusPost(req, res, id) {
   if (!result.rowCount) return sendJson(res, 404, { error: "post_not_found" }, corsHeaders(req));
   const item = await getPostDetail(id);
   sendJson(res, 200, { id, ok: true, status, item }, corsHeaders(req));
+}
+
+async function handleAdminFeaturedPost(req, res, id) {
+  const body = await readBody(req);
+  const rawFeatured = body.isFeatured ?? body.featured;
+  const isFeatured = rawFeatured === true || rawFeatured === "true" || rawFeatured === 1 || rawFeatured === "1";
+  const result = await query(
+    `UPDATE posts
+     SET is_featured = $1,
+         updated_at = now()
+     WHERE id = $2
+     RETURNING id`,
+    [isFeatured, id],
+  );
+  if (!result.rowCount) return sendJson(res, 404, { error: "post_not_found" }, corsHeaders(req));
+  const item = await getPostDetail(id);
+  sendJson(res, 200, { id, ok: true, isFeatured, item }, corsHeaders(req));
 }
 
 async function handleAdminDeletePost(req, res, id) {
@@ -1672,16 +1714,285 @@ async function handleAdminReplyMessage(req, res, id) {
   sendJson(res, 201, { item: result.rows[0], ok: true }, corsHeaders(req));
 }
 
+function trimAiInput(value) {
+  const text = String(value || "").trim();
+  return text.length > AI_INPUT_MAX_CHARS ? `${text.slice(0, AI_INPUT_MAX_CHARS)}\n\n[内容过长，已截断后续部分]` : text;
+}
+
+function trimAiInstruction(value) {
+  const text = String(value || "").trim();
+  return text.length > AI_INSTRUCTION_MAX_CHARS ? text.slice(0, AI_INSTRUCTION_MAX_CHARS) : text;
+}
+
+function buildAiMessages(tool, body) {
+  const definition = AI_TOOL_DEFINITIONS[tool];
+  const title = String(body.title || "").trim() || "未命名文章";
+  const summary = String(body.summary || "").trim();
+  const scope = body.scope === "selection" ? "选中片段" : "全文";
+  const userInstruction = trimAiInstruction(body.userInstruction || body.instruction);
+  const reviewFocus = AI_COMMENT_FOCUS_LABELS[body.reviewFocus] || AI_COMMENT_FOCUS_LABELS.knowledge;
+  const content = trimAiInput(body.content);
+  const userParts = [
+    `任务：${definition.label}`,
+    tool === "polish" ? `润色范围：${scope}` : "",
+    tool === "comment" ? `评论重点：${reviewFocus}` : "",
+    tool === "comment" && body.enableWebSearch ? "已启用联网核查：请优先基于搜索到的最新资料判断可变事实；如果资料不足，请明确说明不确定；输出末尾请列出可用的参考来源链接。" : "",
+    userInstruction ? `本次补充要求：${userInstruction}` : "",
+    `标题：${title}`,
+    summary ? `当前摘要：${summary}` : "",
+    `正文：\n${content}`,
+    definition.instruction,
+  ].filter(Boolean);
+  return [
+    { role: "system", content: definition.system },
+    { role: "user", content: userParts.join("\n\n") },
+  ];
+}
+
+async function callQwenChat(messages) {
+  const apiKey = config.qwenApiKey.trim();
+  if (!apiKey) {
+    const error = new Error("Qwen API key is not configured");
+    error.code = "ai_not_configured";
+    throw error;
+  }
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), config.qwenTimeoutMs);
+  try {
+    const response = await fetch(`${config.qwenBaseUrl.replace(/\/+$/, "")}/chat/completions`, {
+      method: "POST",
+      signal: controller.signal,
+      headers: {
+        authorization: `Bearer ${apiKey}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        model: config.qwenModel,
+        messages,
+        temperature: 0.35,
+      }),
+    });
+    const text = await response.text();
+    const data = text ? JSON.parse(text) : {};
+    if (!response.ok) {
+      const message = data?.error?.message || data?.message || `Qwen request failed (${response.status})`;
+      const error = new Error(message);
+      error.code = "ai_provider_error";
+      error.details = data;
+      throw error;
+    }
+    const result = String(data?.choices?.[0]?.message?.content || "").trim();
+    if (!result) {
+      const error = new Error("Qwen returned empty content");
+      error.code = "ai_empty_result";
+      throw error;
+    }
+    return result;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+function extractResponseText(data) {
+  if (typeof data?.output_text === "string" && data.output_text.trim()) return data.output_text.trim();
+  const pieces = [];
+  const visit = (value) => {
+    if (!value) return;
+    if (Array.isArray(value)) {
+      value.forEach(visit);
+      return;
+    }
+    if (typeof value !== "object") return;
+    if (typeof value.text === "string" && value.text.trim()) pieces.push(value.text.trim());
+    if (typeof value.content === "string" && value.content.trim()) pieces.push(value.content.trim());
+    if (value.content && typeof value.content !== "string") visit(value.content);
+    if (value.output) visit(value.output);
+  };
+  visit(data?.output);
+  visit(data?.choices?.[0]?.message?.content);
+  return pieces.join("\n").trim();
+}
+
+function extractResponseSources(data) {
+  const sources = [];
+  const seen = new Set();
+  const visit = (value) => {
+    if (!value) return;
+    if (Array.isArray(value)) {
+      value.forEach(visit);
+      return;
+    }
+    if (typeof value !== "object") return;
+    const url = typeof value.url === "string" ? value.url : typeof value.link === "string" ? value.link : "";
+    if (url && /^https?:\/\//i.test(url) && !seen.has(url)) {
+      seen.add(url);
+      sources.push({
+        title: String(value.title || value.name || value.text || url).slice(0, 120),
+        url,
+      });
+    }
+    Object.values(value).forEach(visit);
+  };
+  visit(data);
+  return sources.slice(0, 8);
+}
+
+function parsePolishResult(text) {
+  const raw = String(text || "").trim();
+  if (!raw) return { result: "", notes: "" };
+  const jsonText = raw.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "").trim();
+  try {
+    const parsed = JSON.parse(jsonText);
+    const result = String(parsed.polishedMarkdown || parsed.result || "").trim();
+    const notes = Array.isArray(parsed.notes) ? parsed.notes.join("\n") : String(parsed.notes || "").trim();
+    if (result) return { result, notes };
+  } catch {
+    // Fall back to treating the full response as polished markdown.
+  }
+  return { result: raw, notes: "模型未返回结构化说明，已保留润色后的正文结果。" };
+}
+
+async function callQwenResponses(messages) {
+  const apiKey = config.qwenApiKey.trim();
+  if (!apiKey) {
+    const error = new Error("Qwen API key is not configured");
+    error.code = "ai_not_configured";
+    throw error;
+  }
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), config.qwenResponsesTimeoutMs);
+  try {
+    const response = await fetch(`${config.qwenBaseUrl.replace(/\/+$/, "")}/responses`, {
+      method: "POST",
+      signal: controller.signal,
+      headers: {
+        authorization: `Bearer ${apiKey}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        model: config.qwenResponsesModel,
+        input: messages,
+        tools: [
+          { type: "web_search" },
+        ],
+      }),
+    });
+    const text = await response.text();
+    const data = text ? JSON.parse(text) : {};
+    if (!response.ok) {
+      const message = data?.error?.message || data?.message || `Qwen responses request failed (${response.status})`;
+      const error = new Error(message);
+      error.code = "ai_provider_error";
+      error.details = data;
+      throw error;
+    }
+    const result = extractResponseText(data);
+    if (!result) {
+      const error = new Error("Qwen responses returned empty content");
+      error.code = "ai_empty_result";
+      throw error;
+    }
+    return { result, sources: extractResponseSources(data), raw: data };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function createAiTask(req, tool, body) {
+  try {
+    const result = await query(
+      `INSERT INTO ai_tasks(task_type, source_type, source_id, input_text, result_json, status, created_by)
+       VALUES ($1,$2,$3,$4,$5,'running',$6)
+       RETURNING id`,
+      [
+        tool,
+        "post",
+        Number(body.postId || body.post_id || 0) || null,
+        trimAiInput(body.content),
+        JSON.stringify({ title: body.title || "", summary: body.summary || "", provider: "qwen", model: body.enableWebSearch ? config.qwenResponsesModel : config.qwenModel, enableWebSearch: Boolean(body.enableWebSearch), userInstruction: trimAiInstruction(body.userInstruction || body.instruction), reviewFocus: body.reviewFocus || null }),
+        req.adminUser?.id ?? null,
+      ],
+    );
+    return result.rows[0]?.id;
+  } catch (error) {
+    console.warn("Failed to create ai task", error);
+    return undefined;
+  }
+}
+
+async function finishAiTask(taskId, status, resultJson) {
+  if (!taskId) return;
+  try {
+    await query(
+      `UPDATE ai_tasks SET status = $1, result_json = $2, updated_at = now() WHERE id = $3`,
+      [status, JSON.stringify(resultJson), taskId],
+    );
+  } catch (error) {
+    console.warn("Failed to update ai task", error);
+  }
+}
+
 async function handleAdminAiStatus(req, res) {
   const tasks = await query("SELECT count(*)::integer AS count FROM ai_tasks");
+  const enabled = Boolean(config.qwenApiKey.trim());
   sendJson(res, 200, {
-    enabled: false,
-    mode: "mock",
-    provider: null,
+    enabled,
+    mode: enabled ? "api" : "mock",
+    provider: enabled ? "qwen" : null,
+    model: enabled ? config.qwenModel : null,
+    responsesModel: enabled ? config.qwenResponsesModel : null,
+    webSearchEnabled: enabled && config.aiWebSearchEnabled,
     tasksTableReady: true,
     tasksCount: tasks.rows[0]?.count ?? 0,
-    message: "AI model service is not connected yet; current editor AI features are frontend mock only.",
+    message: enabled ? `千问已接入，当前模型：${config.qwenModel}` : "请在 backend/.env 配置 DASHSCOPE_API_KEY 后重启后端，AI 功能才会调用千问。",
   }, corsHeaders(req));
+}
+
+async function handleAdminAiRun(req, res) {
+  const body = await readBody(req);
+  const tool = String(body.tool || "").trim();
+  const definition = AI_TOOL_DEFINITIONS[tool];
+  if (!definition) return sendJson(res, 400, { error: "invalid_ai_tool", message: "Unsupported AI tool" }, corsHeaders(req));
+
+  const title = String(body.title || "").trim();
+  const content = String(body.content || "").trim();
+  if (!title && !content) {
+    return sendJson(res, 400, { error: "ai_content_required", message: "Title or content is required" }, corsHeaders(req));
+  }
+  if (!config.qwenApiKey.trim()) {
+    return sendJson(res, 400, { error: "ai_not_configured", message: "请在 backend/.env 配置 DASHSCOPE_API_KEY 后重启后端。" }, corsHeaders(req));
+  }
+
+  const useWebSearch = tool === "comment" && body.enableWebSearch === true;
+  if (useWebSearch && !config.aiWebSearchEnabled) {
+    return sendJson(res, 400, { error: "ai_web_search_disabled", message: "AI web search is disabled on the backend." }, corsHeaders(req));
+  }
+
+  const taskId = await createAiTask(req, tool, body);
+  try {
+    const response = useWebSearch
+      ? await callQwenResponses(buildAiMessages(tool, body))
+      : { result: await callQwenChat(buildAiMessages(tool, body)), sources: [] };
+    const polishResult = tool === "polish" ? parsePolishResult(response.result) : { result: response.result, notes: "" };
+    const model = useWebSearch ? config.qwenResponsesModel : config.qwenModel;
+    await finishAiTask(taskId, "succeeded", { result: polishResult.result, notes: polishResult.notes, sources: response.sources, provider: "qwen", model, enableWebSearch: useWebSearch });
+    sendJson(res, 200, {
+      ok: true,
+      tool,
+      label: definition.label,
+      result: polishResult.result,
+      notes: polishResult.notes,
+      sources: response.sources,
+      provider: "qwen",
+      model,
+      enableWebSearch: useWebSearch,
+      taskId,
+    }, corsHeaders(req));
+  } catch (error) {
+    const code = error?.code === "ai_not_configured" ? "ai_not_configured" : error?.name === "AbortError" ? "ai_timeout" : "ai_provider_error";
+    await finishAiTask(taskId, "failed", { error: code, message: error.message });
+    sendJson(res, code === "ai_not_configured" ? 400 : 502, { error: code, message: error.message }, corsHeaders(req));
+  }
 }
 
 async function handleRequest(req, res) {
@@ -1752,6 +2063,9 @@ async function handleRequest(req, res) {
     const adminStatus = url.pathname.match(/^\/api\/admin\/posts\/(\d+)\/status$/);
     if (req.method === "PUT" && adminStatus) return handleAdminStatusPost(req, res, Number(adminStatus[1]));
 
+    const adminFeatured = url.pathname.match(/^\/api\/admin\/posts\/(\d+)\/featured$/);
+    if (req.method === "PUT" && adminFeatured) return handleAdminFeaturedPost(req, res, Number(adminFeatured[1]));
+
     if (req.method === "GET" && url.pathname === "/api/admin/dashboard") return handleAdminDashboard(req, res);
     if (req.method === "GET" && url.pathname === "/api/admin/about-settings") return handleAdminAboutSettings(req, res);
     if (req.method === "PUT" && url.pathname === "/api/admin/about-settings") return handleAdminUpdateAboutSettings(req, res);
@@ -1773,6 +2087,7 @@ async function handleRequest(req, res) {
     if (req.method === "GET" && url.pathname === "/api/admin/comments") return handleAdminComments(req, res);
     if (req.method === "GET" && url.pathname === "/api/admin/messages") return handleAdminMessages(req, res);
     if (req.method === "GET" && url.pathname === "/api/admin/ai/status") return handleAdminAiStatus(req, res);
+    if (req.method === "POST" && url.pathname === "/api/admin/ai/run") return handleAdminAiRun(req, res);
 
     const adminComment = url.pathname.match(/^\/api\/admin\/comments\/(\d+)$/);
     if (req.method === "PUT" && adminComment) return handleAdminUpdateComment(req, res, Number(adminComment[1]));
