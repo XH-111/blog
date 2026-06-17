@@ -501,9 +501,14 @@ pre button { position: absolute; right: 12px; top: 10px; color: #fff; border: 1p
 .preview-doc em { color: #334155; }
 .preview-doc .note { margin: 14px 0 18px; padding: 14px 16px; border-radius: 7px; color: #526273; background: #f2f5f7; }
 .preview-doc blockquote { margin: 14px 0; padding: 10px 14px; border-left: 3px solid var(--teal); color: #425466; background: #eefaf8; }
-.preview-doc pre { overflow: auto; padding: 14px; border-radius: 7px; color: #e9f5f5; background: #102337; }
+.preview-doc pre, .code-block { overflow: auto; padding: 14px; border-radius: 7px; color: #e9f5f5; background: #102337; }
 .preview-doc code { font-family: Consolas, "SFMono-Regular", monospace; }
 .preview-doc p code, .preview-doc li code, .preview-doc blockquote code { padding: 2px 6px; border-radius: 5px; color: #0f766e; background: #e8f7f5; }
+.code-block { position: relative; display: grid; gap: 10px; max-width: 100%; }
+.code-block-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; color: #b7d8d8; font-size: 12px; font-family: inherit; }
+.code-block-head b { text-transform: uppercase; letter-spacing: .04em; }
+.code-block-head button { min-height: 30px; padding: 0 10px; border: 1px solid rgba(255,255,255,.18); border-radius: 6px; color: #e9f5f5; background: rgba(255,255,255,.08); font-weight: 800; }
+.code-block code { display: block; min-width: max-content; font-family: Consolas, "SFMono-Regular", monospace; white-space: pre; }
 .preview-inline-image { display: block; max-width: 100%; max-height: 220px; margin: 12px 0; border-radius: 7px; border: 1px solid var(--line); object-fit: cover; }
 .markdown-image-button { display: block; width: fit-content; max-width: 100%; margin: 12px 0; padding: 0; border: 0; border-radius: 7px; background: transparent; cursor: zoom-in; }
 .markdown-image-button .preview-inline-image { margin: 0; transition: box-shadow .18s ease, transform .18s ease; }

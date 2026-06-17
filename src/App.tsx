@@ -401,6 +401,28 @@ function PublicDataNotice({ show, surface }: { show: boolean; surface: string })
   return show ? <div className="note">当前{surface}展示的是前端 mock 兜底数据；后端可用时会自动读取 PostgreSQL。</div> : null;
 }
 
+function CodeBlock({ code, language }: { code: string; language?: string }) {
+  const [copied, setCopied] = useState(false);
+  async function copyCode() {
+    try {
+      await navigator.clipboard?.writeText(code);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1600);
+    } catch {
+      setCopied(false);
+    }
+  }
+  return (
+    <pre className="code-block">
+      <span className="code-block-head">
+        <b>{language || "code"}</b>
+        <button type="button" onClick={copyCode}>{copied ? "已复制" : "复制"}</button>
+      </span>
+      <code>{code}</code>
+    </pre>
+  );
+}
+
 function StatsCard() {
   return <Card title="站点数据"><div className="stat-grid">{[["文章总数", "--"], ["访问量 (PV)", "--"], ["评论数", "--"], ["点赞数", "--"]].map(([k, v]) => <div key={k}><Icon name="doc" /><span>{k}</span><b>{v}</b></div>)}</div></Card>;
 }
@@ -584,7 +606,7 @@ function ArticlePage({ articleId }: { articleId: number }) {
               );
             })}
             {articleSource === "mock" && <div className="note">💡 当前为前端 mock 文章详情，后端不可用或文章不存在时使用兜底数据。</div>}
-            {article.codeSample && <><h3>示例代码</h3><pre><button onClick={() => navigator.clipboard?.writeText(article.codeSample ?? "")}>复制代码</button><code>{article.codeSample}</code></pre></>}
+            {article.codeSample && <><h3>示例代码</h3><CodeBlock code={article.codeSample} language="typescript" /></>}
             <Pager article={article} />
             <CommentBox articleId={article.id} value={comment} onChange={setComment} enabled={articleSource === "api" && article.allowComment !== false} disabledReason={articleSource !== "api" ? "当前为 mock 文章，评论不会写入数据库。" : undefined} />
           </div>
@@ -2635,6 +2657,7 @@ function renderArticleMarkdown(markdown: string, keyPrefix: string, options: Mar
   const lines = markdown.split("\n");
   let inCode = false;
   let code: string[] = [];
+  let codeLanguage = "";
   let list: ReactNode[] = [];
   let checklist: ReactNode[] = [];
 
@@ -2654,10 +2677,12 @@ function renderArticleMarkdown(markdown: string, keyPrefix: string, options: Mar
 
     if (line.startsWith("```")) {
       if (inCode) {
-        blocks.push(<pre key={`${keyPrefix}-code-${index}`}><code>{code.join("\n")}</code></pre>);
+        blocks.push(<CodeBlock key={`${keyPrefix}-code-${index}`} code={code.join("\n")} language={codeLanguage} />);
         code = [];
+        codeLanguage = "";
       } else {
         flushList(index);
+        codeLanguage = line.replace(/^```/, "").trim();
       }
       inCode = !inCode;
       continue;
@@ -2694,7 +2719,7 @@ function renderArticleMarkdown(markdown: string, keyPrefix: string, options: Mar
 
   flushList(lines.length);
   if (inCode && code.length) {
-    blocks.push(<pre key={`${keyPrefix}-code-tail`}><code>{code.join("\n")}</code></pre>);
+    blocks.push(<CodeBlock key={`${keyPrefix}-code-tail`} code={code.join("\n")} language={codeLanguage} />);
   }
   return blocks;
 }
@@ -2704,12 +2729,16 @@ function MarkdownPreview({ title, summary, markdown }: { title: string; summary:
   const lines = markdown.split("\n");
   let inCode = false;
   let code: string[] = [];
+  let codeLanguage = "";
   for (let index = 0; index < lines.length; index += 1) {
     const line = lines[index];
     if (line.startsWith("```")) {
       if (inCode) {
-        blocks.push(<pre key={`code-${index}`}><code>{code.join("\n")}</code></pre>);
+        blocks.push(<CodeBlock key={`code-${index}`} code={code.join("\n")} language={codeLanguage} />);
         code = [];
+        codeLanguage = "";
+      } else {
+        codeLanguage = line.replace(/^```/, "").trim();
       }
       inCode = !inCode;
       continue;
@@ -2740,6 +2769,7 @@ function MarkdownPreview({ title, summary, markdown }: { title: string; summary:
       blocks.push(<p key={index}>{renderInlineMarkdown(line, `p-${index}`)}</p>);
     }
   }
+  if (inCode && code.length) blocks.push(<CodeBlock key="code-tail" code={code.join("\n")} language={codeLanguage} />);
 
   return (
     <div className="preview-doc">
