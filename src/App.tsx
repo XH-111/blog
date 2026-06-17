@@ -19,6 +19,8 @@ const defaultHomeSettings: HomePageSettings = {
   primaryButtonUrl: "/posts",
   secondaryButtonText: "了解我",
   secondaryButtonUrl: "/about",
+  primaryButtonColor: "#079b95",
+  secondaryButtonColor: "#ffffff",
   titleColor: "#081827",
   subtitleColor: "#173047",
   descriptionColor: "#405669",
@@ -28,6 +30,7 @@ const defaultHomeSettings: HomePageSettings = {
   coverPositionX: 50,
   coverPositionY: 50,
   coverZoom: 100,
+  coverOverlayOpacity: 0,
   entryCards: [
     { title: "精选文章", description: "保留少量高质量技术文章，适合从这里开始阅读。", actionText: "立即阅读", icon: "doc", href: "/posts", visible: true },
     { title: "项目作品", description: "沉淀全栈项目实践、开发复盘和可复用经验。", actionText: "查看项目", icon: "cube", href: "/about", visible: true },
@@ -109,6 +112,19 @@ function homeVideoStyle(config: Pick<HomePageSettings, "coverPositionX" | "cover
     objectPosition: `${config.coverPositionX}% ${config.coverPositionY}%`,
     transform: `scale(${config.coverZoom / 100})`,
   };
+}
+
+function homeOverlayStyle(config: Pick<HomePageSettings, "coverOverlayOpacity">) {
+  return { opacity: config.coverOverlayOpacity / 100 };
+}
+
+function contrastTextColor(hexColor: string) {
+  const color = validHexColor(hexColor, "#ffffff").replace("#", "");
+  const red = parseInt(color.slice(0, 2), 16);
+  const green = parseInt(color.slice(2, 4), 16);
+  const blue = parseInt(color.slice(4, 6), 16);
+  const brightness = (red * 299 + green * 587 + blue * 114) / 1000;
+  return brightness > 150 ? "#173047" : "#ffffff";
 }
 
 function Icon({ name }: { name: string }) {
@@ -209,13 +225,14 @@ function HomePage() {
             <div className="home-hero-orbit two" />
             <div className="home-hero-horizon" />
           </div>
+          {(homeConfig.coverUrl || isVideoCover) && <div className="home-hero-overlay" style={homeOverlayStyle(homeConfig)} aria-hidden="true" />}
           <div className="home-hero-content">
             {homeConfig.title && <h1 style={{ color: homeConfig.titleColor }}>{homeConfig.title}</h1>}
             {homeConfig.subtitle && <p className="home-hero-subtitle" style={{ color: homeConfig.subtitleColor }}>{homeConfig.subtitle}</p>}
             {homeConfig.description && <p className="home-hero-copy" style={{ color: homeConfig.descriptionColor }}>{homeConfig.description}</p>}
             <div className="home-hero-actions">
-              <button className="home-primary-action" onClick={() => navigateConfiguredUrl(homeConfig.primaryButtonUrl)}>{homeConfig.primaryButtonText}</button>
-              <button className="home-secondary-action" onClick={() => navigateConfiguredUrl(homeConfig.secondaryButtonUrl)}>{homeConfig.secondaryButtonText}</button>
+              <button className="home-primary-action" style={{ background: homeConfig.primaryButtonColor, color: contrastTextColor(homeConfig.primaryButtonColor) }} onClick={() => navigateConfiguredUrl(homeConfig.primaryButtonUrl)}>{homeConfig.primaryButtonText}</button>
+              <button className="home-secondary-action" style={{ background: homeConfig.secondaryButtonColor, color: contrastTextColor(homeConfig.secondaryButtonColor), borderColor: homeConfig.secondaryButtonColor }} onClick={() => navigateConfiguredUrl(homeConfig.secondaryButtonUrl)}>{homeConfig.secondaryButtonText}</button>
             </div>
           </div>
         </section>
@@ -1050,8 +1067,10 @@ function HomeSettingsPage() {
               <label className="wide">介绍文案<textarea value={config.description} onChange={(event) => updateField("description", event.target.value)} /></label>
               <label>介绍文案颜色<span className="color-field"><input type="color" value={validHexColor(config.descriptionColor, defaultHomeSettings.descriptionColor)} onChange={(event) => updateField("descriptionColor", event.target.value)} /><input value={config.descriptionColor} onChange={(event) => updateField("descriptionColor", event.target.value)} /></span></label>
               <label>主按钮文字<input value={config.primaryButtonText} onChange={(event) => updateField("primaryButtonText", event.target.value)} /></label>
+              <label>主按钮颜色<span className="color-field"><input type="color" value={validHexColor(config.primaryButtonColor, defaultHomeSettings.primaryButtonColor)} onChange={(event) => updateField("primaryButtonColor", event.target.value)} /><input value={config.primaryButtonColor} onChange={(event) => updateField("primaryButtonColor", event.target.value)} /></span></label>
               <label>主按钮链接<input value={config.primaryButtonUrl} onChange={(event) => updateField("primaryButtonUrl", event.target.value)} placeholder="/posts" /></label>
               <label>副按钮文字<input value={config.secondaryButtonText} onChange={(event) => updateField("secondaryButtonText", event.target.value)} /></label>
+              <label>副按钮颜色<span className="color-field"><input type="color" value={validHexColor(config.secondaryButtonColor, defaultHomeSettings.secondaryButtonColor)} onChange={(event) => updateField("secondaryButtonColor", event.target.value)} /><input value={config.secondaryButtonColor} onChange={(event) => updateField("secondaryButtonColor", event.target.value)} /></span></label>
               <label>副按钮链接<input value={config.secondaryButtonUrl} onChange={(event) => updateField("secondaryButtonUrl", event.target.value)} placeholder="/about" /></label>
             </div>
           </div>
@@ -1074,10 +1093,15 @@ function HomeSettingsPage() {
               onWheel={zoomCover}
             >
               {config.coverType === "video" && config.coverVideoUrl && <video className="home-cover-preview-video" src={config.coverVideoUrl} style={homeVideoStyle(config)} autoPlay muted loop playsInline />}
+              {activeCoverUrl && <span className="home-cover-preview-overlay" style={homeOverlayStyle(config)} aria-hidden="true" />}
               <div>
                 {config.title ? <b style={{ color: config.titleColor }}>{config.title}</b> : <b className="muted-preview-text">标题已隐藏</b>}
                 {config.subtitle && <span style={{ color: config.subtitleColor }}>{config.subtitle}</span>}
                 {config.description && <small style={{ color: config.descriptionColor }}>{config.description}</small>}
+                <p className="home-cover-preview-actions">
+                  <i style={{ background: config.primaryButtonColor, color: contrastTextColor(config.primaryButtonColor) }}>{config.primaryButtonText || "主按钮"}</i>
+                  <i style={{ background: config.secondaryButtonColor, color: contrastTextColor(config.secondaryButtonColor) }}>{config.secondaryButtonText || "副按钮"}</i>
+                </p>
                 {activeCoverUrl && <small>拖动调整位置，滚轮或滑块缩放，保存前可实时预览</small>}
               </div>
             </div>
@@ -1091,6 +1115,7 @@ function HomeSettingsPage() {
                 <label>水平位置 <b>{config.coverPositionX}%</b><input type="range" min="0" max="100" value={config.coverPositionX} onChange={(event) => updateField("coverPositionX", Number(event.target.value))} /></label>
                 <label>垂直位置 <b>{config.coverPositionY}%</b><input type="range" min="0" max="100" value={config.coverPositionY} onChange={(event) => updateField("coverPositionY", Number(event.target.value))} /></label>
                 <label>缩放比例 <b>{config.coverZoom}%</b><input type="range" min="100" max="180" step="5" value={config.coverZoom} onChange={(event) => updateField("coverZoom", Number(event.target.value))} /></label>
+                <label>遮罩透明度 <b>{config.coverOverlayOpacity}%</b><input type="range" min="0" max="70" step="5" value={config.coverOverlayOpacity} onChange={(event) => updateField("coverOverlayOpacity", Number(event.target.value))} /></label>
               </div>
             )}
             <div className="home-cover-actions">

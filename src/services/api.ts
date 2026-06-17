@@ -395,6 +395,8 @@ export type HomePageSettings = {
   primaryButtonUrl: string;
   secondaryButtonText: string;
   secondaryButtonUrl: string;
+  primaryButtonColor: string;
+  secondaryButtonColor: string;
   titleColor: string;
   subtitleColor: string;
   descriptionColor: string;
@@ -404,6 +406,7 @@ export type HomePageSettings = {
   coverPositionX: number;
   coverPositionY: number;
   coverZoom: number;
+  coverOverlayOpacity: number;
   entryCards: HomeEntryCardSetting[];
 };
 
@@ -813,6 +816,8 @@ const defaultHomePageSettings: HomePageSettings = {
   primaryButtonUrl: "/posts",
   secondaryButtonText: "了解我",
   secondaryButtonUrl: "/about",
+  primaryButtonColor: "#079b95",
+  secondaryButtonColor: "#ffffff",
   titleColor: "#081827",
   subtitleColor: "#173047",
   descriptionColor: "#405669",
@@ -822,6 +827,7 @@ const defaultHomePageSettings: HomePageSettings = {
   coverPositionX: 50,
   coverPositionY: 50,
   coverZoom: 100,
+  coverOverlayOpacity: 0,
   entryCards: [
     { title: "精选文章", description: "保留少量高质量技术文章，适合从这里开始阅读。", actionText: "立即阅读", icon: "doc", href: "/posts", visible: true },
     { title: "项目作品", description: "沉淀全栈项目实践、开发复盘和可复用经验。", actionText: "查看项目", icon: "cube", href: "/about", visible: true },
@@ -844,6 +850,11 @@ function normalizeHomePageSettings(input?: Partial<HomePageSettings>): HomePageS
     if (!Number.isFinite(number)) return fallback;
     return Math.max(100, Math.min(180, Math.round(number)));
   };
+  const clampOverlay = (value: unknown, fallback = 0) => {
+    const number = Number(value);
+    if (!Number.isFinite(number)) return fallback;
+    return Math.max(0, Math.min(70, Math.round(number)));
+  };
   return {
     ...defaultHomePageSettings,
     ...source,
@@ -854,6 +865,8 @@ function normalizeHomePageSettings(input?: Partial<HomePageSettings>): HomePageS
     primaryButtonUrl: source.primaryButtonUrl ?? defaultHomePageSettings.primaryButtonUrl,
     secondaryButtonText: source.secondaryButtonText ?? defaultHomePageSettings.secondaryButtonText,
     secondaryButtonUrl: source.secondaryButtonUrl ?? defaultHomePageSettings.secondaryButtonUrl,
+    primaryButtonColor: color(source.primaryButtonColor, defaultHomePageSettings.primaryButtonColor),
+    secondaryButtonColor: color(source.secondaryButtonColor, defaultHomePageSettings.secondaryButtonColor),
     titleColor: color(source.titleColor, defaultHomePageSettings.titleColor),
     subtitleColor: color(source.subtitleColor, defaultHomePageSettings.subtitleColor),
     descriptionColor: color(source.descriptionColor, defaultHomePageSettings.descriptionColor),
@@ -863,6 +876,7 @@ function normalizeHomePageSettings(input?: Partial<HomePageSettings>): HomePageS
     coverPositionX: clampPercent(source.coverPositionX, defaultHomePageSettings.coverPositionX),
     coverPositionY: clampPercent(source.coverPositionY, defaultHomePageSettings.coverPositionY),
     coverZoom: clampZoom(source.coverZoom, defaultHomePageSettings.coverZoom),
+    coverOverlayOpacity: clampOverlay(source.coverOverlayOpacity, defaultHomePageSettings.coverOverlayOpacity),
     entryCards: entryCards.map((item, index) => ({
       title: item?.title ?? defaultHomePageSettings.entryCards[index]?.title ?? "入口",
       description: item?.description ?? defaultHomePageSettings.entryCards[index]?.description ?? "",

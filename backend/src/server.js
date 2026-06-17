@@ -79,6 +79,8 @@ const DEFAULT_HOME_PAGE = {
   primaryButtonUrl: "/posts",
   secondaryButtonText: "了解我",
   secondaryButtonUrl: "/about",
+  primaryButtonColor: "#079b95",
+  secondaryButtonColor: "#ffffff",
   titleColor: "#081827",
   subtitleColor: "#173047",
   descriptionColor: "#405669",
@@ -88,6 +90,7 @@ const DEFAULT_HOME_PAGE = {
   coverPositionX: 50,
   coverPositionY: 50,
   coverZoom: 100,
+  coverOverlayOpacity: 0,
   entryCards: [
     { title: "精选文章", description: "保留少量高质量技术文章，适合从这里开始阅读。", actionText: "立即阅读", icon: "doc", href: "/posts", visible: true },
     { title: "项目作品", description: "沉淀全栈项目实践、开发复盘和可复用经验。", actionText: "查看项目", icon: "cube", href: "/about", visible: true },
@@ -978,6 +981,11 @@ function normalizeHomePage(value = {}) {
     if (!Number.isFinite(number)) return fallback;
     return Math.max(100, Math.min(180, Math.round(number)));
   };
+  const clampOverlay = (value, fallback = 0) => {
+    const number = Number(value);
+    if (!Number.isFinite(number)) return fallback;
+    return Math.max(0, Math.min(70, Math.round(number)));
+  };
   return {
     title: text(next.title, DEFAULT_HOME_PAGE.title),
     subtitle: text(next.subtitle, DEFAULT_HOME_PAGE.subtitle),
@@ -986,6 +994,8 @@ function normalizeHomePage(value = {}) {
     primaryButtonUrl: String(next.primaryButtonUrl || DEFAULT_HOME_PAGE.primaryButtonUrl).trim(),
     secondaryButtonText: String(next.secondaryButtonText || DEFAULT_HOME_PAGE.secondaryButtonText).trim(),
     secondaryButtonUrl: String(next.secondaryButtonUrl || DEFAULT_HOME_PAGE.secondaryButtonUrl).trim(),
+    primaryButtonColor: color(next.primaryButtonColor, DEFAULT_HOME_PAGE.primaryButtonColor),
+    secondaryButtonColor: color(next.secondaryButtonColor, DEFAULT_HOME_PAGE.secondaryButtonColor),
     titleColor: color(next.titleColor, DEFAULT_HOME_PAGE.titleColor),
     subtitleColor: color(next.subtitleColor, DEFAULT_HOME_PAGE.subtitleColor),
     descriptionColor: color(next.descriptionColor, DEFAULT_HOME_PAGE.descriptionColor),
@@ -995,6 +1005,7 @@ function normalizeHomePage(value = {}) {
     coverPositionX: clampPercent(next.coverPositionX, DEFAULT_HOME_PAGE.coverPositionX),
     coverPositionY: clampPercent(next.coverPositionY, DEFAULT_HOME_PAGE.coverPositionY),
     coverZoom: clampZoom(next.coverZoom, DEFAULT_HOME_PAGE.coverZoom),
+    coverOverlayOpacity: clampOverlay(next.coverOverlayOpacity, DEFAULT_HOME_PAGE.coverOverlayOpacity),
     entryCards: list(next.entryCards, DEFAULT_HOME_PAGE.entryCards).map((item, index) => ({
       title: text(item?.title, DEFAULT_HOME_PAGE.entryCards[index]?.title || "入口"),
       description: text(item?.description, DEFAULT_HOME_PAGE.entryCards[index]?.description || ""),
