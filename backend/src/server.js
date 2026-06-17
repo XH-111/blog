@@ -88,6 +88,11 @@ const DEFAULT_HOME_PAGE = {
   coverPositionX: 50,
   coverPositionY: 50,
   coverZoom: 100,
+  entryCards: [
+    { title: "精选文章", description: "保留少量高质量技术文章，适合从这里开始阅读。", actionText: "立即阅读", icon: "doc", href: "/posts", visible: true },
+    { title: "项目作品", description: "沉淀全栈项目实践、开发复盘和可复用经验。", actionText: "查看项目", icon: "cube", href: "/about", visible: true },
+    { title: "关于我", description: "了解我的技术栈与经历，也欢迎交流与合作。", actionText: "了解更多", icon: "user", href: "/about", visible: true },
+  ],
 };
 
 const scrypt = crypto.scrypt;
@@ -962,6 +967,7 @@ function normalizeHomePage(value = {}) {
   const next = { ...DEFAULT_HOME_PAGE, ...(value && typeof value === "object" ? value : {}) };
   const text = (value, fallback = "") => value === undefined || value === null ? fallback : String(value).trim();
   const color = (value, fallback) => /^#[0-9a-f]{6}$/i.test(String(value || "")) ? String(value).trim() : fallback;
+  const list = (items, fallback) => Array.isArray(items) ? items : fallback;
   const clampPercent = (value, fallback = 50) => {
     const number = Number(value);
     if (!Number.isFinite(number)) return fallback;
@@ -989,6 +995,14 @@ function normalizeHomePage(value = {}) {
     coverPositionX: clampPercent(next.coverPositionX, DEFAULT_HOME_PAGE.coverPositionX),
     coverPositionY: clampPercent(next.coverPositionY, DEFAULT_HOME_PAGE.coverPositionY),
     coverZoom: clampZoom(next.coverZoom, DEFAULT_HOME_PAGE.coverZoom),
+    entryCards: list(next.entryCards, DEFAULT_HOME_PAGE.entryCards).map((item, index) => ({
+      title: text(item?.title, DEFAULT_HOME_PAGE.entryCards[index]?.title || "入口"),
+      description: text(item?.description, DEFAULT_HOME_PAGE.entryCards[index]?.description || ""),
+      actionText: text(item?.actionText, DEFAULT_HOME_PAGE.entryCards[index]?.actionText || "查看"),
+      icon: ["doc", "cube", "user"].includes(item?.icon) ? item.icon : DEFAULT_HOME_PAGE.entryCards[index]?.icon || "doc",
+      href: text(item?.href, DEFAULT_HOME_PAGE.entryCards[index]?.href || "/"),
+      visible: item?.visible !== false,
+    })).filter((item) => item.title || item.description || item.actionText),
   };
 }
 

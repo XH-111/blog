@@ -1,7 +1,7 @@
 ﻿import { ChangeEvent, FormEvent, ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { api, getApiErrorMessage } from "./services/api";
 import type { ClipboardEvent, PointerEvent, WheelEvent } from "react";
-import type { AboutPageSettings, AdminAiReviewFocus, AdminAiStatus, AdminAiTool, AdminCategoryItem, AdminCommentItem, AdminDashboardData, AdminMediaItem, AdminMessageItem, AdminPostListItem, AdminTagItem, HomePageSettings, PublicCommentItem, PublicSiteStats } from "./services/api";
+import type { AboutPageSettings, AdminAiReviewFocus, AdminAiStatus, AdminAiTool, AdminCategoryItem, AdminCommentItem, AdminDashboardData, AdminMediaItem, AdminMessageItem, AdminPostListItem, AdminTagItem, HomeEntryCardSetting, HomePageSettings, PublicCommentItem, PublicSiteStats } from "./services/api";
 import type { Article, Message } from "./types";
 
 const nav = [
@@ -28,13 +28,12 @@ const defaultHomeSettings: HomePageSettings = {
   coverPositionX: 50,
   coverPositionY: 50,
   coverZoom: 100,
+  entryCards: [
+    { title: "精选文章", description: "保留少量高质量技术文章，适合从这里开始阅读。", actionText: "立即阅读", icon: "doc", href: "/posts", visible: true },
+    { title: "项目作品", description: "沉淀全栈项目实践、开发复盘和可复用经验。", actionText: "查看项目", icon: "cube", href: "/about", visible: true },
+    { title: "关于我", description: "了解我的技术栈与经历，也欢迎交流与合作。", actionText: "了解更多", icon: "user", href: "/about", visible: true },
+  ],
 };
-
-const homeEntryCards = [
-  { title: "精选文章", desc: "保留少量高质量技术文章，适合从这里开始阅读。", action: "立即阅读", icon: "doc", href: "/posts" },
-  { title: "项目作品", desc: "沉淀全栈项目实践、开发复盘和可复用经验。", action: "查看项目", icon: "cube", href: "/about" },
-  { title: "关于我", desc: "了解我的技术栈与经历，也欢迎交流与合作。", action: "了解更多", icon: "user", href: "/about" },
-] as const;
 
 const COMMENT_CONTENT_MAX_LENGTH = 1000;
 const MESSAGE_CONTENT_MAX_LENGTH = 2000;
@@ -184,6 +183,8 @@ function HomePage() {
   const [homeConfig, setHomeConfig] = useState<HomePageSettings>(defaultHomeSettings);
   const heroStyle = homeCoverStyle(homeConfig);
   const isVideoCover = homeConfig.coverType === "video" && Boolean(homeConfig.coverVideoUrl);
+  const visibleEntryCards = homeConfig.entryCards.filter((item) => item.visible);
+  const renderedEntryCards = visibleEntryCards.length ? visibleEntryCards : defaultHomeSettings.entryCards.filter((item) => item.visible);
 
   useEffect(() => {
     let alive = true;
@@ -220,13 +221,13 @@ function HomePage() {
         </section>
 
         <section className="home-entry-grid" aria-label="首页入口">
-          {homeEntryCards.map((item) => (
-            <button className="home-entry-card" key={item.title} onClick={() => go(item.href)}>
+          {renderedEntryCards.map((item) => (
+            <button className="home-entry-card" key={`${item.title}-${item.href}`} onClick={() => navigateConfiguredUrl(item.href)}>
               <span className={`home-entry-icon ${item.icon}`} aria-hidden="true" />
               <span>
                 <b>{item.title}</b>
-                <small>{item.desc}</small>
-                <em>{item.action} →</em>
+                <small>{item.description}</small>
+                <em>{item.actionText} →</em>
               </span>
             </button>
           ))}
@@ -910,6 +911,38 @@ function HomeSettingsPage() {
     setConfig((current) => ({ ...current, [key]: value }));
   }
 
+  function updateEntryCard(index: number, patch: Partial<HomeEntryCardSetting>) {
+    setConfig((current) => ({
+      ...current,
+      entryCards: current.entryCards.map((item, itemIndex) => itemIndex === index ? { ...item, ...patch } : item),
+    }));
+  }
+
+  function addEntryCard() {
+    setConfig((current) => ({
+      ...current,
+      entryCards: [...current.entryCards, { title: "新的入口", description: "写一句入口说明。", actionText: "查看", icon: "doc", href: "/", visible: true }],
+    }));
+  }
+
+  function removeEntryCard(index: number) {
+    setConfig((current) => ({ ...current, entryCards: current.entryCards.filter((_, itemIndex) => itemIndex !== index) }));
+  }
+
+  function moveEntryCard(index: number, direction: -1 | 1) {
+    setConfig((current) => {
+      const nextIndex = index + direction;
+      if (nextIndex < 0 || nextIndex >= current.entryCards.length) return current;
+      const nextCards = [...current.entryCards];
+      [nextCards[index], nextCards[nextIndex]] = [nextCards[nextIndex], nextCards[index]];
+      return { ...current, entryCards: nextCards };
+    });
+  }
+
+  function resetEntryCards() {
+    setConfig((current) => ({ ...current, entryCards: defaultHomeSettings.entryCards }));
+  }
+
   async function saveHomeSettings() {
     setSaving(true);
     setNotice("");
@@ -1062,6 +1095,39 @@ function HomeSettingsPage() {
             )}
             <div className="home-cover-actions">
               <button type="button" onClick={() => setConfig((current) => ({ ...current, coverUrl: "", coverVideoUrl: "", coverPositionX: 50, coverPositionY: 50, coverZoom: 100 }))}>清空封面</button>
+            </div>
+          </div>
+          <div className="settings-panel wide">
+            <div className="home-entry-editor">
+              <header>
+                <div>
+                  <b>首页入口卡片</b>
+                  <span>控制首页首屏下方的入口卡片，隐藏后前台不展示；全部隐藏时前台会使用默认入口兜底。</span>
+                </div>
+                <div className="entry-editor-actions">
+                  <button type="button" onClick={addEntryCard}>新增入口</button>
+                  <button type="button" onClick={resetEntryCards}>恢复默认</button>
+                </div>
+              </header>
+              {config.entryCards.map((card, index) => (
+                <article key={`${card.title}-${index}`}>
+                  <div className="project-card-head">
+                    <b>入口 {index + 1}</b>
+                    <div className="entry-card-actions">
+                      <button type="button" disabled={index === 0} onClick={() => moveEntryCard(index, -1)}>上移</button>
+                      <button type="button" disabled={index === config.entryCards.length - 1} onClick={() => moveEntryCard(index, 1)}>下移</button>
+                      <button className="project-remove" type="button" onClick={() => removeEntryCard(index)}>删除</button>
+                    </div>
+                  </div>
+                  <label className="switch">前台显示<input type="checkbox" checked={card.visible} onChange={(event) => updateEntryCard(index, { visible: event.target.checked })} /></label>
+                  <label>图标<select value={card.icon} onChange={(event) => updateEntryCard(index, { icon: event.target.value as HomeEntryCardSetting["icon"] })}><option value="doc">文章</option><option value="cube">项目</option><option value="user">个人</option></select></label>
+                  <label>标题<input value={card.title} onChange={(event) => updateEntryCard(index, { title: event.target.value })} /></label>
+                  <label>按钮文案<input value={card.actionText} onChange={(event) => updateEntryCard(index, { actionText: event.target.value })} /></label>
+                  <label className="wide">说明<textarea value={card.description} onChange={(event) => updateEntryCard(index, { description: event.target.value })} /></label>
+                  <label className="wide">跳转链接<input value={card.href} onChange={(event) => updateEntryCard(index, { href: event.target.value })} placeholder="/posts 或 https://example.com" /></label>
+                </article>
+              ))}
+              {!config.entryCards.length && <p className="soft-text">暂无自定义入口，前台会显示默认三张入口卡片。</p>}
             </div>
           </div>
         </section>

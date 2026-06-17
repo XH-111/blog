@@ -404,6 +404,16 @@ export type HomePageSettings = {
   coverPositionX: number;
   coverPositionY: number;
   coverZoom: number;
+  entryCards: HomeEntryCardSetting[];
+};
+
+export type HomeEntryCardSetting = {
+  title: string;
+  description: string;
+  actionText: string;
+  icon: "doc" | "cube" | "user";
+  href: string;
+  visible: boolean;
 };
 
 export type PublicSubscriptionItem = {
@@ -812,11 +822,18 @@ const defaultHomePageSettings: HomePageSettings = {
   coverPositionX: 50,
   coverPositionY: 50,
   coverZoom: 100,
+  entryCards: [
+    { title: "精选文章", description: "保留少量高质量技术文章，适合从这里开始阅读。", actionText: "立即阅读", icon: "doc", href: "/posts", visible: true },
+    { title: "项目作品", description: "沉淀全栈项目实践、开发复盘和可复用经验。", actionText: "查看项目", icon: "cube", href: "/about", visible: true },
+    { title: "关于我", description: "了解我的技术栈与经历，也欢迎交流与合作。", actionText: "了解更多", icon: "user", href: "/about", visible: true },
+  ],
 };
 
 function normalizeHomePageSettings(input?: Partial<HomePageSettings>): HomePageSettings {
   const source = input ?? {};
   const color = (value: unknown, fallback: string) => /^#[0-9a-f]{6}$/i.test(String(value ?? "")) ? String(value) : fallback;
+  const normalizeIcon = (value: unknown, fallback: HomeEntryCardSetting["icon"]): HomeEntryCardSetting["icon"] => value === "cube" || value === "user" || value === "doc" ? value : fallback;
+  const entryCards = Array.isArray(source.entryCards) ? source.entryCards : defaultHomePageSettings.entryCards;
   const clampPercent = (value: unknown, fallback = 50) => {
     const number = Number(value);
     if (!Number.isFinite(number)) return fallback;
@@ -846,6 +863,14 @@ function normalizeHomePageSettings(input?: Partial<HomePageSettings>): HomePageS
     coverPositionX: clampPercent(source.coverPositionX, defaultHomePageSettings.coverPositionX),
     coverPositionY: clampPercent(source.coverPositionY, defaultHomePageSettings.coverPositionY),
     coverZoom: clampZoom(source.coverZoom, defaultHomePageSettings.coverZoom),
+    entryCards: entryCards.map((item, index) => ({
+      title: item?.title ?? defaultHomePageSettings.entryCards[index]?.title ?? "入口",
+      description: item?.description ?? defaultHomePageSettings.entryCards[index]?.description ?? "",
+      actionText: item?.actionText ?? defaultHomePageSettings.entryCards[index]?.actionText ?? "查看",
+      icon: normalizeIcon(item?.icon, defaultHomePageSettings.entryCards[index]?.icon ?? "doc"),
+      href: item?.href ?? defaultHomePageSettings.entryCards[index]?.href ?? "/",
+      visible: item?.visible !== false,
+    })).filter((item) => item.title || item.description || item.actionText),
   };
 }
 
