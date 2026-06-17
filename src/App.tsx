@@ -419,6 +419,7 @@ function ArticlePage({ articleId }: { articleId: number }) {
   const [relatedArticles, setRelatedArticles] = useState<Article[]>([]);
   const [latestArticles, setLatestArticles] = useState<Article[]>([]);
   const [articleSideUsingMock, setArticleSideUsingMock] = useState(false);
+  const [previewImage, setPreviewImage] = useState<{ src: string; alt: string } | null>(null);
   const toc = article?.sections ?? [];
 
   useEffect(() => {
@@ -577,7 +578,7 @@ function ArticlePage({ articleId }: { articleId: number }) {
               return (
                 <section key={section.id} id={section.id} className="article-section">
                   <Heading>{section.title}</Heading>
-                  <div className="article-markdown">{renderArticleMarkdown(section.body, `article-${article.id}-${section.id}`)}</div>
+                  <div className="article-markdown">{renderArticleMarkdown(section.body, `article-${article.id}-${section.id}`, { onImageClick: (src, alt) => setPreviewImage({ src, alt }) })}</div>
                   {section.list && <ul>{section.list.map((item) => <li key={item}>{item}</li>)}</ul>}
                 </section>
               );
@@ -596,6 +597,14 @@ function ArticlePage({ articleId }: { articleId: number }) {
           <Card title="最新文章">{latestArticles.length ? <ol className="rank-list">{latestArticles.map((item) => <li key={item.id}>{item.title}<time>{item.date.slice(5)}</time></li>)}</ol> : <p className="soft-text">暂无最新文章</p>}</Card>
         </aside>
         <div className="float-actions"><button onClick={likeArticle} disabled={liking || articleSource !== "api"} title={articleSource !== "api" ? "mock 文章不支持点赞" : liked ? "已点赞" : "点赞"}>{liked ? "♥" : "♡"}</button><button onClick={() => document.querySelector(".comments")?.scrollIntoView({ behavior: "smooth", block: "start" })} title="跳到评论区">评</button><button onClick={copyArticleLink} title="复制文章链接">链</button><button onClick={() => scrollTo(0, 0)} title="回到顶部">↑</button></div>
+        {previewImage && (
+          <div className="media-modal article-image-modal" role="dialog" aria-modal="true" aria-label="文章图片预览" onClick={() => setPreviewImage(null)}>
+            <div className="media-modal-panel article-image-modal-panel" onClick={(event) => event.stopPropagation()}>
+              <header><b>{previewImage.alt || "文章图片"}</b><button type="button" onClick={() => setPreviewImage(null)}>关闭</button></header>
+              <img src={previewImage.src} alt={previewImage.alt || "文章图片"} />
+            </div>
+          </div>
+        )}
       </main>
       )}
     </>
@@ -2558,7 +2567,11 @@ function DashboardPage() {
   );
 }
 
-function renderInlineMarkdown(text: string, keyPrefix: string) {
+type MarkdownRenderOptions = {
+  onImageClick?: (src: string, alt: string) => void;
+};
+
+function renderInlineMarkdown(text: string, keyPrefix: string, options: MarkdownRenderOptions = {}) {
   const nodes: ReactNode[] = [];
   const tokenPattern = /(!\[[^\]]*]\([^)]+\)|\[[^\]]+]\([^)]+\)|`[^`]+`|\*\*[^*]+\*\*|\*[^*]+\*)/g;
   let lastIndex = 0;
@@ -2571,7 +2584,11 @@ function renderInlineMarkdown(text: string, keyPrefix: string) {
 
     if (token.startsWith("![")) {
       const image = token.match(/^!\[([^\]]*)]\(([^)]+)\)$/);
-      nodes.push(image ? <img className="preview-inline-image" key={key} src={image[2]} alt={image[1]} /> : token);
+      nodes.push(image ? (
+        options.onImageClick
+          ? <button className="markdown-image-button" key={key} type="button" onClick={() => options.onImageClick?.(image[2], image[1])}><img className="preview-inline-image" src={image[2]} alt={image[1]} /></button>
+          : <img className="preview-inline-image" key={key} src={image[2]} alt={image[1]} />
+      ) : token);
     } else if (token.startsWith("[")) {
       const link = token.match(/^\[([^\]]+)]\(([^)]+)\)$/);
       nodes.push(link ? <a key={key} href={link[2]} target="_blank" rel="noreferrer">{link[1]}</a> : token);
@@ -2594,7 +2611,7 @@ function isMarkdownTableStart(lines: string[], index: number) {
   return /^\s*\|.+\|\s*$/.test(lines[index] ?? "") && /^\s*\|?(\s*:?-{3,}:?\s*\|)+\s*$/.test(lines[index + 1] ?? "");
 }
 
-function collectMarkdownTable(lines: string[], startIndex: number, keyPrefix: string) {
+function collectMarkdownTable(lines: string[], startIndex: number, keyPrefix: string, options: MarkdownRenderOptions = {}) {
   const headers = lines[startIndex].split("|").slice(1, -1).map((cell) => cell.trim());
   const rows: string[][] = [];
   let index = startIndex + 2;
@@ -2606,14 +2623,14 @@ function collectMarkdownTable(lines: string[], startIndex: number, keyPrefix: st
     nextIndex: index - 1,
     node: (
       <table className="preview-table" key={`${keyPrefix}-table-${startIndex}`}>
-        <thead><tr>{headers.map((cell, cellIndex) => <th key={cellIndex}>{renderInlineMarkdown(cell, `${keyPrefix}-th-${startIndex}-${cellIndex}`)}</th>)}</tr></thead>
-        <tbody>{rows.map((row, rowIndex) => <tr key={rowIndex}>{row.map((cell, cellIndex) => <td key={cellIndex}>{renderInlineMarkdown(cell, `${keyPrefix}-td-${startIndex}-${rowIndex}-${cellIndex}`)}</td>)}</tr>)}</tbody>
+        <thead><tr>{headers.map((cell, cellIndex) => <th key={cellIndex}>{renderInlineMarkdown(cell, `${keyPrefix}-th-${startIndex}-${cellIndex}`, options)}</th>)}</tr></thead>
+        <tbody>{rows.map((row, rowIndex) => <tr key={rowIndex}>{row.map((cell, cellIndex) => <td key={cellIndex}>{renderInlineMarkdown(cell, `${keyPrefix}-td-${startIndex}-${rowIndex}-${cellIndex}`, options)}</td>)}</tr>)}</tbody>
       </table>
     ),
   };
 }
 
-function renderArticleMarkdown(markdown: string, keyPrefix: string) {
+function renderArticleMarkdown(markdown: string, keyPrefix: string, options: MarkdownRenderOptions = {}) {
   const blocks: ReactNode[] = [];
   const lines = markdown.split("\n");
   let inCode = false;
@@ -2658,20 +2675,20 @@ function renderArticleMarkdown(markdown: string, keyPrefix: string) {
 
     if (isMarkdownTableStart(lines, index)) {
       flushList(index);
-      const table = collectMarkdownTable(lines, index, keyPrefix);
+      const table = collectMarkdownTable(lines, index, keyPrefix, options);
       blocks.push(table.node);
       index = table.nextIndex;
     } else if (line.startsWith("> ")) {
       flushList(index);
-      blocks.push(<blockquote key={`${keyPrefix}-quote-${index}`}>{renderInlineMarkdown(line.replace(/^>\s+/, ""), `${keyPrefix}-quote-${index}`)}</blockquote>);
+      blocks.push(<blockquote key={`${keyPrefix}-quote-${index}`}>{renderInlineMarkdown(line.replace(/^>\s+/, ""), `${keyPrefix}-quote-${index}`, options)}</blockquote>);
     } else if (/^- \[[ x]\]/.test(line)) {
       const checked = line.includes("[x]");
-      checklist.push(<label className="preview-check" key={`${keyPrefix}-check-${index}`}><input type="checkbox" checked={checked} readOnly />{renderInlineMarkdown(line.replace(/^- \[[ x]\]\s*/, ""), `${keyPrefix}-check-${index}`)}</label>);
+      checklist.push(<label className="preview-check" key={`${keyPrefix}-check-${index}`}><input type="checkbox" checked={checked} readOnly />{renderInlineMarkdown(line.replace(/^- \[[ x]\]\s*/, ""), `${keyPrefix}-check-${index}`, options)}</label>);
     } else if (line.startsWith("- ")) {
-      list.push(<li key={`${keyPrefix}-li-${index}`}>{renderInlineMarkdown(line.replace(/^-\s+/, ""), `${keyPrefix}-li-${index}`)}</li>);
+      list.push(<li key={`${keyPrefix}-li-${index}`}>{renderInlineMarkdown(line.replace(/^-\s+/, ""), `${keyPrefix}-li-${index}`, options)}</li>);
     } else {
       flushList(index);
-      blocks.push(<p key={`${keyPrefix}-p-${index}`}>{renderInlineMarkdown(line, `${keyPrefix}-p-${index}`)}</p>);
+      blocks.push(<p key={`${keyPrefix}-p-${index}`}>{renderInlineMarkdown(line, `${keyPrefix}-p-${index}`, options)}</p>);
     }
   }
 

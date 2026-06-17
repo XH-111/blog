@@ -505,6 +505,9 @@ pre button { position: absolute; right: 12px; top: 10px; color: #fff; border: 1p
 .preview-doc code { font-family: Consolas, "SFMono-Regular", monospace; }
 .preview-doc p code, .preview-doc li code, .preview-doc blockquote code { padding: 2px 6px; border-radius: 5px; color: #0f766e; background: #e8f7f5; }
 .preview-inline-image { display: block; max-width: 100%; max-height: 220px; margin: 12px 0; border-radius: 7px; border: 1px solid var(--line); object-fit: cover; }
+.markdown-image-button { display: block; width: fit-content; max-width: 100%; margin: 12px 0; padding: 0; border: 0; border-radius: 7px; background: transparent; cursor: zoom-in; }
+.markdown-image-button .preview-inline-image { margin: 0; transition: box-shadow .18s ease, transform .18s ease; }
+.markdown-image-button:hover .preview-inline-image { transform: translateY(-1px); box-shadow: 0 16px 34px rgba(15,23,42,.14); }
 .preview-table { width: 100%; margin: 14px 0; border-collapse: collapse; overflow: hidden; border: 1px solid var(--line); border-radius: 7px; font-size: 14px; }
 .preview-table th, .preview-table td { padding: 10px 12px; border-bottom: 1px solid var(--line); text-align: left; }
 .preview-table th { color: #1f3348; background: #f5f8fa; font-weight: 800; }
@@ -639,6 +642,8 @@ pre button { position: absolute; right: 12px; top: 10px; color: #fff; border: 1p
 .media-modal-panel header button { border: 1px solid var(--line); border-radius: 7px; padding: 8px 12px; color: var(--teal-dark); background: #fff; }
 .media-modal-panel > img { max-width: 100%; max-height: 64vh; object-fit: contain; border-radius: 7px; background: #f3f6f8; }
 .media-modal-panel > p { margin: 0; color: var(--muted); overflow-wrap: anywhere; font-size: 13px; }
+.article-image-modal-panel { width: min(1080px, 94vw); }
+.article-image-modal-panel > img { max-height: 76vh; }
 .qr-modal-panel { width: min(360px, 92vw); }
 .qr-modal-panel > img { width: 100%; max-height: none; aspect-ratio: 1; object-fit: contain; }
 .media-picker-panel { width: min(760px, 92vw); }
