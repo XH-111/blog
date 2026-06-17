@@ -766,6 +766,7 @@ function PostsPage() {
   const initialSearch = initialParams.get("q") ?? "";
   const initialView = initialParams.get("view");
   const [search, setSearch] = useState(initialSearch);
+  const [searchDraft, setSearchDraft] = useState(initialSearch);
   const [category, setCategory] = useState(initialCategory);
   const [listMode, setListMode] = useState<"featured" | "all" | "category" | "search">(
     initialSearch ? "search" : initialCategory !== "全部分类" ? "category" : initialView === "all" ? "all" : "featured"
@@ -780,6 +781,7 @@ function PostsPage() {
     const nextCategory = nextParams.get("category") ?? "全部分类";
     const nextView = nextParams.get("view");
     setSearch(nextSearch);
+    setSearchDraft(nextSearch);
     setCategory(nextCategory);
     setListMode(nextSearch ? "search" : nextCategory !== "全部分类" ? "category" : nextView === "all" ? "all" : "featured");
   }, [archiveRoute]);
@@ -825,6 +827,15 @@ function PostsPage() {
   function openCategory(nextCategory: string) {
     go(`/posts?category=${encodeURIComponent(nextCategory)}`);
   }
+  function submitArchiveSearch(event: FormEvent) {
+    event.preventDefault();
+    const keyword = searchDraft.trim();
+    go(keyword ? `/posts?q=${encodeURIComponent(keyword)}` : "/posts");
+  }
+  function clearArchiveSearch() {
+    setSearchDraft("");
+    go("/posts");
+  }
   return (
     <>
       <PublicHeader active="/posts" />
@@ -839,6 +850,27 @@ function PostsPage() {
         </aside>
         <section className="timeline-wrap archive-main">
           <PublicDataNotice show={archiveUsingMock} surface="归档页" />
+          <section className="archive-search-panel">
+            <form className="archive-search-form" onSubmit={submitArchiveSearch}>
+              <label htmlFor="archive-search-input">搜索文章</label>
+              <div>
+                <input
+                  id="archive-search-input"
+                  value={searchDraft}
+                  onChange={(event) => setSearchDraft(event.target.value)}
+                  placeholder="输入标题、摘要、分类或标签"
+                />
+                <button type="submit">搜索</button>
+                {listMode === "search" && <button className="ghost" type="button" onClick={clearArchiveSearch}>清空</button>}
+              </div>
+            </form>
+            {listMode === "search" && (
+              <p className="archive-active-filter">
+                正在搜索 <b>{search}</b>
+                <span>{currentArticles.length ? `找到 ${currentArticles.length} 篇文章` : "暂时没有匹配文章"}</span>
+              </p>
+            )}
+          </section>
           <div className="archive-hero">
             <div>
               <h1>{currentTitle}</h1>
@@ -850,7 +882,13 @@ function PostsPage() {
             <div className="archive-featured-grid">
               {visibleArticles.map((item) => <ArchiveArticleCard key={item.id} item={item} />)}
             </div>
-          ) : <section className="empty card">{listMode === "featured" ? "数据库暂无精选文章" : "没有找到匹配的文章"}</section>}
+          ) : (
+            <section className="archive-empty-state">
+              <h3>{listMode === "featured" ? "暂时还没有精选文章" : "没有找到匹配的文章"}</h3>
+              <p>{listMode === "search" ? "可以换一个关键词，或者清空搜索回到精选文章。" : "可以切换到全部文章，或者去后台把合适的文章设为精选。"}</p>
+              {listMode === "search" ? <button onClick={clearArchiveSearch}>清空搜索</button> : <button onClick={openAllArticles}>查看全部文章</button>}
+            </section>
+          )}
         </section>
       </main>
     </>
