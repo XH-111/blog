@@ -831,7 +831,7 @@ async function handlePublicPostDetail(req, res, id) {
       LEFT JOIN categories c ON c.id = p.category_id
       LEFT JOIN post_tags pt ON pt.post_id = p.id
       LEFT JOIN tags t ON t.id = pt.tag_id
-      WHERE p.id = $1 AND p.status = 'published'
+      WHERE p.id = $1 AND p.status = 'published' AND p.visibility = 'public'
       GROUP BY p.id, c.id
     `,
     [id],

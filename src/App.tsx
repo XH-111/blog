@@ -3415,6 +3415,9 @@ function EditorPage() {
               <option value="private">私密（仅管理员可见）</option>
               <option value="password">密码访问</option>
             </select>
+            <small className="field-help">
+              {visibility === "public" ? "公开文章会出现在前台列表，并允许通过详情页访问。" : visibility === "private" ? "私密文章只保存在后台，前台列表和详情页都不会展示。" : "密码访问页暂未开放，当前会按非公开文章处理，不会在前台展示。"}
+            </small>
           </label>
           <h3>SEO 设置</h3>
           <label>SEO 标题<input value={seoTitle} maxLength={80} onChange={(event) => setSeoTitle(event.target.value)} placeholder="输入搜索结果标题" /></label>
