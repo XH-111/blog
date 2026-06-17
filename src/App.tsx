@@ -1,7 +1,7 @@
 ﻿import { ChangeEvent, FormEvent, ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { api, getApiErrorMessage } from "./services/api";
-import type { ClipboardEvent } from "react";
-import type { AboutPageSettings, AdminAiReviewFocus, AdminAiStatus, AdminAiTool, AdminCategoryItem, AdminCommentItem, AdminDashboardData, AdminMediaItem, AdminMessageItem, AdminPostListItem, AdminTagItem, PublicCommentItem, PublicSiteStats } from "./services/api";
+import type { ClipboardEvent, PointerEvent, WheelEvent } from "react";
+import type { AboutPageSettings, AdminAiReviewFocus, AdminAiStatus, AdminAiTool, AdminCategoryItem, AdminCommentItem, AdminDashboardData, AdminMediaItem, AdminMessageItem, AdminPostListItem, AdminTagItem, HomePageSettings, PublicCommentItem, PublicSiteStats } from "./services/api";
 import type { Article, Message } from "./types";
 
 const nav = [
@@ -11,7 +11,24 @@ const nav = [
   ["留言板", "/messages"],
 ] as const;
 
-const HOME_HERO_BACKGROUND_URL = "";
+const defaultHomeSettings: HomePageSettings = {
+  title: "全栈博客创作平台",
+  subtitle: "记录 · 分享 · 成长",
+  description: "记录技术探索与项目经验，分享思考与实践，在代码与生活之间持续学习与成长。",
+  primaryButtonText: "开始阅读",
+  primaryButtonUrl: "/posts",
+  secondaryButtonText: "了解我",
+  secondaryButtonUrl: "/about",
+  titleColor: "#081827",
+  subtitleColor: "#173047",
+  descriptionColor: "#405669",
+  coverType: "image",
+  coverUrl: "",
+  coverVideoUrl: "",
+  coverPositionX: 50,
+  coverPositionY: 50,
+  coverZoom: 100,
+};
 
 const homeEntryCards = [
   { title: "精选文章", desc: "保留少量高质量技术文章，适合从这里开始阅读。", action: "立即阅读", icon: "doc", href: "/posts" },
@@ -48,12 +65,51 @@ function replaceHash(path: string) {
   if (location.hash !== nextHash) history.replaceState(null, "", nextHash);
 }
 
+function navigateConfiguredUrl(url = "/") {
+  const target = url.trim();
+  if (!target) return;
+  if (/^https?:\/\//i.test(target)) {
+    window.open(target, "_blank", "noopener,noreferrer");
+    return;
+  }
+  go(target.startsWith("/") ? target : `/${target}`);
+}
+
 function emitAdminDataChanged() {
   window.dispatchEvent(new Event("admin-data-changed"));
 }
 
 function routeQuery() {
   return new URLSearchParams(location.hash.split("?")[1] ?? "");
+}
+
+function clampPercent(value: number) {
+  if (!Number.isFinite(value)) return 50;
+  return Math.max(0, Math.min(100, Math.round(value)));
+}
+
+function clampZoom(value: number) {
+  if (!Number.isFinite(value)) return 100;
+  return Math.max(100, Math.min(180, Math.round(value)));
+}
+
+function validHexColor(value: string, fallback: string) {
+  return /^#[0-9a-f]{6}$/i.test(value) ? value : fallback;
+}
+
+function homeCoverStyle(config: Pick<HomePageSettings, "coverUrl" | "coverPositionX" | "coverPositionY" | "coverZoom">) {
+  return config.coverUrl ? {
+    backgroundImage: `url(${config.coverUrl})`,
+    backgroundPosition: `${config.coverPositionX}% ${config.coverPositionY}%`,
+    backgroundSize: config.coverZoom === 100 ? "cover" : `${config.coverZoom}% auto`,
+  } : undefined;
+}
+
+function homeVideoStyle(config: Pick<HomePageSettings, "coverPositionX" | "coverPositionY" | "coverZoom">) {
+  return {
+    objectPosition: `${config.coverPositionX}% ${config.coverPositionY}%`,
+    transform: `scale(${config.coverZoom / 100})`,
+  };
 }
 
 function Icon({ name }: { name: string }) {
@@ -125,25 +181,40 @@ function Art({ type, wide = false, coverUrl }: { type: Article["image"]; wide?: 
 }
 
 function HomePage() {
-  const heroStyle = HOME_HERO_BACKGROUND_URL ? { backgroundImage: `url(${HOME_HERO_BACKGROUND_URL})` } : undefined;
+  const [homeConfig, setHomeConfig] = useState<HomePageSettings>(defaultHomeSettings);
+  const heroStyle = homeCoverStyle(homeConfig);
+  const isVideoCover = homeConfig.coverType === "video" && Boolean(homeConfig.coverVideoUrl);
+
+  useEffect(() => {
+    let alive = true;
+    api.getPublicHome()
+      .then((result) => {
+        if (alive) setHomeConfig(result.item);
+      })
+      .catch(() => undefined);
+    return () => {
+      alive = false;
+    };
+  }, []);
 
   return (
     <>
       <PublicHeader active="/" />
       <main className="home-landing">
         <section className="home-hero-shell">
-          <div className={`home-hero-blank ${HOME_HERO_BACKGROUND_URL ? "has-image" : ""}`} style={heroStyle} aria-hidden="true">
+          <div className={`home-hero-blank ${homeConfig.coverUrl && !isVideoCover ? "has-image" : ""} ${isVideoCover ? "has-video" : ""}`} style={isVideoCover ? undefined : heroStyle} aria-hidden="true">
+            {isVideoCover && <video className="home-hero-video" src={homeConfig.coverVideoUrl} style={homeVideoStyle(homeConfig)} autoPlay muted loop playsInline />}
             <div className="home-hero-orbit one" />
             <div className="home-hero-orbit two" />
             <div className="home-hero-horizon" />
           </div>
           <div className="home-hero-content">
-            <h1>全栈博客创作平台</h1>
-            <p className="home-hero-subtitle">记录 · 分享 · 成长</p>
-            <p className="home-hero-copy">记录技术探索与项目经验，分享思考与实践，在代码与生活之间持续学习与成长。</p>
+            {homeConfig.title && <h1 style={{ color: homeConfig.titleColor }}>{homeConfig.title}</h1>}
+            {homeConfig.subtitle && <p className="home-hero-subtitle" style={{ color: homeConfig.subtitleColor }}>{homeConfig.subtitle}</p>}
+            {homeConfig.description && <p className="home-hero-copy" style={{ color: homeConfig.descriptionColor }}>{homeConfig.description}</p>}
             <div className="home-hero-actions">
-              <button className="home-primary-action" onClick={() => go("/posts")}>开始阅读</button>
-              <button className="home-secondary-action" onClick={() => go("/about")}>了解我</button>
+              <button className="home-primary-action" onClick={() => navigateConfiguredUrl(homeConfig.primaryButtonUrl)}>{homeConfig.primaryButtonText}</button>
+              <button className="home-secondary-action" onClick={() => navigateConfiguredUrl(homeConfig.secondaryButtonUrl)}>{homeConfig.secondaryButtonText}</button>
             </div>
           </div>
         </section>
@@ -809,6 +880,215 @@ function textToTopics(text: string): AboutPageSettings["writingTopics"] {
   }).filter((item) => item.label);
 }
 
+function HomeSettingsPage() {
+  const [config, setConfig] = useState<HomePageSettings>(defaultHomeSettings);
+  const [notice, setNotice] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [mediaPickerOpen, setMediaPickerOpen] = useState(false);
+  const [mediaLoading, setMediaLoading] = useState(false);
+  const [homeMediaItems, setHomeMediaItems] = useState<AdminMediaItem[]>([]);
+  const coverDragRef = useRef<{ startX: number; startY: number; originX: number; originY: number; width: number; height: number } | null>(null);
+
+  useEffect(() => {
+    let alive = true;
+    api.getAdminHomeSettings()
+      .then((result) => {
+        if (alive) setConfig(result.item);
+      })
+      .catch((error) => {
+        if (!alive) return;
+        const message = getApiErrorMessage(error);
+        setNotice(message);
+        if (message.includes("登录")) api.logout();
+      });
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  function updateField<K extends keyof HomePageSettings>(key: K, value: HomePageSettings[K]) {
+    setConfig((current) => ({ ...current, [key]: value }));
+  }
+
+  async function saveHomeSettings() {
+    setSaving(true);
+    setNotice("");
+    try {
+      const result = await api.updateAdminHomeSettings(config);
+      setConfig(result.item);
+      setNotice("首页配置已保存，刷新首页即可看到最新内容。");
+    } catch (error) {
+      setNotice(getApiErrorMessage(error));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function openHomeMediaPicker() {
+    setMediaPickerOpen(true);
+    setMediaLoading(true);
+    setNotice("");
+    try {
+      const result = await api.getAdminMedia();
+      setHomeMediaItems(result.items.filter((item) => item.mimeType.startsWith("image/") || item.mimeType.startsWith("video/")));
+    } catch (error) {
+      setNotice(getApiErrorMessage(error));
+    } finally {
+      setMediaLoading(false);
+    }
+  }
+
+  function selectHomeMedia(item: AdminMediaItem) {
+    const isVideo = item.mimeType.startsWith("video/");
+    setConfig((current) => ({
+      ...current,
+      coverType: isVideo ? "video" : "image",
+      coverUrl: isVideo ? current.coverUrl : item.url,
+      coverVideoUrl: isVideo ? item.url : current.coverVideoUrl,
+      coverPositionX: 50,
+      coverPositionY: 50,
+      coverZoom: 100,
+    }));
+    setMediaPickerOpen(false);
+    setNotice(`已选择首页封面：${mediaDisplayName(item)}`);
+  }
+
+  function updateCoverPosition(x: number, y: number) {
+    setConfig((current) => ({ ...current, coverPositionX: clampPercent(x), coverPositionY: clampPercent(y) }));
+  }
+
+  function startCoverDrag(event: PointerEvent<HTMLDivElement>) {
+    if (!activeCoverUrl) return;
+    const rect = event.currentTarget.getBoundingClientRect();
+    coverDragRef.current = {
+      startX: event.clientX,
+      startY: event.clientY,
+      originX: config.coverPositionX,
+      originY: config.coverPositionY,
+      width: Math.max(1, rect.width),
+      height: Math.max(1, rect.height),
+    };
+    event.currentTarget.setPointerCapture(event.pointerId);
+  }
+
+  function moveCoverDrag(event: PointerEvent<HTMLDivElement>) {
+    const drag = coverDragRef.current;
+    if (!drag) return;
+    const nextX = drag.originX + ((event.clientX - drag.startX) / drag.width) * 100;
+    const nextY = drag.originY + ((event.clientY - drag.startY) / drag.height) * 100;
+    updateCoverPosition(nextX, nextY);
+  }
+
+  function endCoverDrag(event: PointerEvent<HTMLDivElement>) {
+    coverDragRef.current = null;
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
+  }
+
+  function zoomCover(event: WheelEvent<HTMLDivElement>) {
+    if (config.coverType === "image" && !config.coverUrl) return;
+    if (config.coverType === "video" && !config.coverVideoUrl) return;
+    event.preventDefault();
+    const step = event.deltaY < 0 ? 5 : -5;
+    updateField("coverZoom", clampZoom(config.coverZoom + step));
+  }
+
+  const activeCoverUrl = config.coverType === "video" ? config.coverVideoUrl : config.coverUrl;
+
+  return (
+    <>
+      <AdminTop />
+      <div className="admin-content admin-placeholder">
+        <div className="title-row">
+          <h1>首页配置</h1>
+          <div className="title-actions"><button onClick={saveHomeSettings} disabled={saving}>{saving ? "保存中..." : "保存配置"}</button><button onClick={() => go("/")}>预览首页</button></div>
+        </div>
+        {notice && <p className="admin-hint">{notice}</p>}
+        <section className="card home-config">
+          <div className="settings-panel">
+            <header>
+              <b>首屏文案</b>
+              <span>控制首页标题、副标题、介绍文案和两个行动按钮。</span>
+            </header>
+            <div className="settings-grid">
+              <label>主标题<input value={config.title} onChange={(event) => updateField("title", event.target.value)} /></label>
+              <label>主标题颜色<span className="color-field"><input type="color" value={validHexColor(config.titleColor, defaultHomeSettings.titleColor)} onChange={(event) => updateField("titleColor", event.target.value)} /><input value={config.titleColor} onChange={(event) => updateField("titleColor", event.target.value)} /></span></label>
+              <label>副标题<input value={config.subtitle} onChange={(event) => updateField("subtitle", event.target.value)} /></label>
+              <label>副标题颜色<span className="color-field"><input type="color" value={validHexColor(config.subtitleColor, defaultHomeSettings.subtitleColor)} onChange={(event) => updateField("subtitleColor", event.target.value)} /><input value={config.subtitleColor} onChange={(event) => updateField("subtitleColor", event.target.value)} /></span></label>
+              <label className="wide">介绍文案<textarea value={config.description} onChange={(event) => updateField("description", event.target.value)} /></label>
+              <label>介绍文案颜色<span className="color-field"><input type="color" value={validHexColor(config.descriptionColor, defaultHomeSettings.descriptionColor)} onChange={(event) => updateField("descriptionColor", event.target.value)} /><input value={config.descriptionColor} onChange={(event) => updateField("descriptionColor", event.target.value)} /></span></label>
+              <label>主按钮文字<input value={config.primaryButtonText} onChange={(event) => updateField("primaryButtonText", event.target.value)} /></label>
+              <label>主按钮链接<input value={config.primaryButtonUrl} onChange={(event) => updateField("primaryButtonUrl", event.target.value)} placeholder="/posts" /></label>
+              <label>副按钮文字<input value={config.secondaryButtonText} onChange={(event) => updateField("secondaryButtonText", event.target.value)} /></label>
+              <label>副按钮链接<input value={config.secondaryButtonUrl} onChange={(event) => updateField("secondaryButtonUrl", event.target.value)} placeholder="/about" /></label>
+            </div>
+          </div>
+          <div className="settings-panel">
+            <header>
+              <b>首页封面</b>
+              <span>可从媒体库选择图片或视频，拖动和滚轮缩放会在保存前实时预览。</span>
+            </header>
+            <div className="seg home-cover-type">
+              <button className={config.coverType === "image" ? "active" : ""} type="button" onClick={() => updateField("coverType", "image")}>图片</button>
+              <button className={config.coverType === "video" ? "active" : ""} type="button" onClick={() => updateField("coverType", "video")}>视频</button>
+            </div>
+            <div
+              className={`home-cover-preview ${activeCoverUrl ? "has-image draggable" : ""} ${config.coverType === "video" && config.coverVideoUrl ? "has-video" : ""}`}
+              style={config.coverType === "image" ? homeCoverStyle(config) : undefined}
+              onPointerDown={startCoverDrag}
+              onPointerMove={moveCoverDrag}
+              onPointerUp={endCoverDrag}
+              onPointerCancel={endCoverDrag}
+              onWheel={zoomCover}
+            >
+              {config.coverType === "video" && config.coverVideoUrl && <video className="home-cover-preview-video" src={config.coverVideoUrl} style={homeVideoStyle(config)} autoPlay muted loop playsInline />}
+              <div>
+                {config.title ? <b style={{ color: config.titleColor }}>{config.title}</b> : <b className="muted-preview-text">标题已隐藏</b>}
+                {config.subtitle && <span style={{ color: config.subtitleColor }}>{config.subtitle}</span>}
+                {config.description && <small style={{ color: config.descriptionColor }}>{config.description}</small>}
+                {activeCoverUrl && <small>拖动调整位置，滚轮或滑块缩放，保存前可实时预览</small>}
+              </div>
+            </div>
+            <div className="settings-grid single">
+              {config.coverType === "image"
+                ? <label>图片封面 URL<div className="inline-picker"><input value={config.coverUrl} onChange={(event) => updateField("coverUrl", event.target.value)} placeholder="留空则使用默认空白背景" /><button type="button" onClick={openHomeMediaPicker}>媒体库</button></div></label>
+                : <label>视频封面 URL<div className="inline-picker"><input value={config.coverVideoUrl} onChange={(event) => updateField("coverVideoUrl", event.target.value)} placeholder="/uploads/2026/06/18/cover.mp4" /><button type="button" onClick={openHomeMediaPicker}>媒体库</button></div></label>}
+            </div>
+            {activeCoverUrl && (
+              <div className="home-cover-position">
+                <label>水平位置 <b>{config.coverPositionX}%</b><input type="range" min="0" max="100" value={config.coverPositionX} onChange={(event) => updateField("coverPositionX", Number(event.target.value))} /></label>
+                <label>垂直位置 <b>{config.coverPositionY}%</b><input type="range" min="0" max="100" value={config.coverPositionY} onChange={(event) => updateField("coverPositionY", Number(event.target.value))} /></label>
+                <label>缩放比例 <b>{config.coverZoom}%</b><input type="range" min="100" max="180" step="5" value={config.coverZoom} onChange={(event) => updateField("coverZoom", Number(event.target.value))} /></label>
+              </div>
+            )}
+            <div className="home-cover-actions">
+              <button type="button" onClick={() => setConfig((current) => ({ ...current, coverUrl: "", coverVideoUrl: "", coverPositionX: 50, coverPositionY: 50, coverZoom: 100 }))}>清空封面</button>
+            </div>
+          </div>
+        </section>
+        {mediaPickerOpen && (
+          <div className="media-modal" role="dialog" aria-modal="true" aria-label="选择首页封面" onClick={() => setMediaPickerOpen(false)}>
+            <div className="media-modal-panel media-picker-panel" onClick={(event) => event.stopPropagation()}>
+              <header><b>选择首页封面</b><button type="button" onClick={() => setMediaPickerOpen(false)}>关闭</button></header>
+              {mediaLoading ? <p className="soft-text">正在读取媒体库...</p> : homeMediaItems.length ? (
+                <div className="media-picker-grid">
+                  {homeMediaItems.map((item) => (
+                    <button type="button" key={item.id} onClick={() => selectHomeMedia(item)}>
+                      {item.mimeType.startsWith("video/")
+                        ? <video src={item.url} muted playsInline />
+                        : <img src={item.url} alt={item.altText || item.originalName} />}
+                      <span>{item.mimeType.startsWith("video/") ? "视频 · " : ""}{mediaDisplayName(item)}</span>
+                    </button>
+                  ))}
+                </div>
+              ) : <p className="soft-text">媒体库暂无图片或视频</p>}
+            </div>
+          </div>
+        )}
+      </div>
+    </>
+  );
+}
+
 function AboutSettingsPage() {
   const [config, setConfig] = useState<AboutPageSettings>(defaultAboutSettings);
   const [skillsText, setSkillsText] = useState(listToText(defaultAboutSettings.skills));
@@ -1391,7 +1671,7 @@ const defaultAboutSettings: AboutPageSettings = {
 
 function AdminShell({ editor = false, page = "dashboard" }: { editor?: boolean; page?: string }) {
   const active = editor ? "文章管理" : adminRoutes[page]?.label ?? "仪表盘";
-  return <main className={`admin-app ${editor ? "admin-editor-app" : ""}`}><AdminSidebar active={active} /><section className="admin-main">{editor ? <EditorPage /> : page === "dashboard" ? <DashboardPage /> : page === "about" ? <AboutSettingsPage /> : <AdminPlaceholder page={page} />}</section></main>;
+  return <main className={`admin-app ${editor ? "admin-editor-app" : ""}`}><AdminSidebar active={active} /><section className="admin-main">{editor ? <EditorPage /> : page === "dashboard" ? <DashboardPage /> : page === "about" ? <AboutSettingsPage /> : page === "home" ? <HomeSettingsPage /> : <AdminPlaceholder page={page} />}</section></main>;
 }
 
 function AdminSidebar({ active }: { active: string }) {
@@ -2016,7 +2296,7 @@ function AdminPlaceholder({ page }: { page: string }) {
           <div className="admin-hint media-upload-strip">
             <button type="button" onClick={() => mediaInputRef.current?.click()}>上传图片</button>
             <span>可一次选择多张图片；上传后会写入 media_assets，并可作为文章封面使用。</span>
-            <input ref={mediaInputRef} className="visually-hidden" type="file" accept="image/*" multiple onChange={uploadMediaFile} />
+            <input ref={mediaInputRef} className="visually-hidden" type="file" accept="image/*,video/*" multiple onChange={uploadMediaFile} />
           </div>
         )}
         <section className="card admin-table">

@@ -387,6 +387,25 @@ export type AboutPageSettings = {
   cooperateUrl: string;
 };
 
+export type HomePageSettings = {
+  title: string;
+  subtitle: string;
+  description: string;
+  primaryButtonText: string;
+  primaryButtonUrl: string;
+  secondaryButtonText: string;
+  secondaryButtonUrl: string;
+  titleColor: string;
+  subtitleColor: string;
+  descriptionColor: string;
+  coverType: "image" | "video";
+  coverUrl: string;
+  coverVideoUrl: string;
+  coverPositionX: number;
+  coverPositionY: number;
+  coverZoom: number;
+};
+
 export type PublicSubscriptionItem = {
   id: number;
   email: string;
@@ -776,6 +795,60 @@ const defaultAboutPageSettings: AboutPageSettings = {
   cooperateUrl: "/messages",
 };
 
+const defaultHomePageSettings: HomePageSettings = {
+  title: "全栈博客创作平台",
+  subtitle: "记录 · 分享 · 成长",
+  description: "记录技术探索与项目经验，分享思考与实践，在代码与生活之间持续学习与成长。",
+  primaryButtonText: "开始阅读",
+  primaryButtonUrl: "/posts",
+  secondaryButtonText: "了解我",
+  secondaryButtonUrl: "/about",
+  titleColor: "#081827",
+  subtitleColor: "#173047",
+  descriptionColor: "#405669",
+  coverType: "image",
+  coverUrl: "",
+  coverVideoUrl: "",
+  coverPositionX: 50,
+  coverPositionY: 50,
+  coverZoom: 100,
+};
+
+function normalizeHomePageSettings(input?: Partial<HomePageSettings>): HomePageSettings {
+  const source = input ?? {};
+  const color = (value: unknown, fallback: string) => /^#[0-9a-f]{6}$/i.test(String(value ?? "")) ? String(value) : fallback;
+  const clampPercent = (value: unknown, fallback = 50) => {
+    const number = Number(value);
+    if (!Number.isFinite(number)) return fallback;
+    return Math.max(0, Math.min(100, Math.round(number)));
+  };
+  const clampZoom = (value: unknown, fallback = 100) => {
+    const number = Number(value);
+    if (!Number.isFinite(number)) return fallback;
+    return Math.max(100, Math.min(180, Math.round(number)));
+  };
+  return {
+    ...defaultHomePageSettings,
+    ...source,
+    title: source.title ?? defaultHomePageSettings.title,
+    subtitle: source.subtitle ?? defaultHomePageSettings.subtitle,
+    description: source.description ?? defaultHomePageSettings.description,
+    primaryButtonText: source.primaryButtonText ?? defaultHomePageSettings.primaryButtonText,
+    primaryButtonUrl: source.primaryButtonUrl ?? defaultHomePageSettings.primaryButtonUrl,
+    secondaryButtonText: source.secondaryButtonText ?? defaultHomePageSettings.secondaryButtonText,
+    secondaryButtonUrl: source.secondaryButtonUrl ?? defaultHomePageSettings.secondaryButtonUrl,
+    titleColor: color(source.titleColor, defaultHomePageSettings.titleColor),
+    subtitleColor: color(source.subtitleColor, defaultHomePageSettings.subtitleColor),
+    descriptionColor: color(source.descriptionColor, defaultHomePageSettings.descriptionColor),
+    coverType: source.coverType === "video" ? "video" : "image",
+    coverUrl: source.coverUrl ?? defaultHomePageSettings.coverUrl,
+    coverVideoUrl: source.coverVideoUrl ?? defaultHomePageSettings.coverVideoUrl,
+    coverPositionX: clampPercent(source.coverPositionX, defaultHomePageSettings.coverPositionX),
+    coverPositionY: clampPercent(source.coverPositionY, defaultHomePageSettings.coverPositionY),
+    coverZoom: clampZoom(source.coverZoom, defaultHomePageSettings.coverZoom),
+  };
+}
+
 function normalizeAboutPageSettings(input?: Partial<AboutPageSettings>): AboutPageSettings {
   const source = input ?? {};
   const legacyGithubUrl = Array.isArray(source.socials) ? source.socials.find((item) => item.label?.toLowerCase() === "github")?.url : "";
@@ -843,6 +916,10 @@ export const api = {
       comments: toNumber(data.commentsCount ?? data.comments_count),
       source: "api",
     };
+  },
+  getPublicHome: async () => {
+    const data = await requestJson<{ item?: Partial<HomePageSettings>; source?: "mock" }>("/public/home", { item: defaultHomePageSettings, source: "mock" });
+    return { item: normalizeHomePageSettings(data.item), source: data.source === "mock" ? "mock" as const : "api" as const };
   },
   getPublicAbout: async () => {
     const data = await requestJson<{ item?: Partial<AboutPageSettings>; source?: "mock" }>("/public/about", { item: defaultAboutPageSettings, source: "mock" });
@@ -1098,6 +1175,17 @@ export const api = {
       body: JSON.stringify({ item }),
     });
     return { ok: data.ok ?? true, item: normalizeAboutPageSettings(data.item), source: "api" as const };
+  },
+  getAdminHomeSettings: async () => {
+    const data = await requestStrictJson<{ item?: Partial<HomePageSettings> }>("/admin/home-settings");
+    return { item: normalizeHomePageSettings(data.item), source: "api" as const };
+  },
+  updateAdminHomeSettings: async (item: HomePageSettings) => {
+    const data = await requestStrictJson<{ ok?: boolean; item?: Partial<HomePageSettings> }>("/admin/home-settings", {
+      method: "PUT",
+      body: JSON.stringify({ item }),
+    });
+    return { ok: data.ok ?? true, item: normalizeHomePageSettings(data.item), source: "api" as const };
   },
   getDashboard: async () => {
     const data = await requestStrictJson<BackendDashboard>("/admin/dashboard");

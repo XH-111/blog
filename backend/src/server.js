@@ -9,6 +9,7 @@ const uploadRoot = path.resolve(process.cwd(), "public", "uploads");
 const COMMENT_CONTENT_MAX_LENGTH = 1000;
 const MESSAGE_CONTENT_MAX_LENGTH = 2000;
 const ABOUT_SETTING_KEY = "about_page";
+const HOME_SETTING_KEY = "home_page";
 const AI_INPUT_MAX_CHARS = 12000;
 const AI_INSTRUCTION_MAX_CHARS = 800;
 const AI_COMMENT_FOCUS_LABELS = {
@@ -68,6 +69,25 @@ const DEFAULT_ABOUT_PAGE = {
   cooperateText: "如果你有任何问题、建议，或者想一起交流技术，欢迎在留言板给我留言。",
   cooperateButtonText: "去留言",
   cooperateUrl: "/messages",
+};
+
+const DEFAULT_HOME_PAGE = {
+  title: "全栈博客创作平台",
+  subtitle: "记录 · 分享 · 成长",
+  description: "记录技术探索与项目经验，分享思考与实践，在代码与生活之间持续学习与成长。",
+  primaryButtonText: "开始阅读",
+  primaryButtonUrl: "/posts",
+  secondaryButtonText: "了解我",
+  secondaryButtonUrl: "/about",
+  titleColor: "#081827",
+  subtitleColor: "#173047",
+  descriptionColor: "#405669",
+  coverType: "image",
+  coverUrl: "",
+  coverVideoUrl: "",
+  coverPositionX: 50,
+  coverPositionY: 50,
+  coverZoom: 100,
 };
 
 const scrypt = crypto.scrypt;
@@ -618,6 +638,9 @@ function extensionForMime(mimeType) {
   if (mimeType === "image/png") return ".png";
   if (mimeType === "image/webp") return ".webp";
   if (mimeType === "image/gif") return ".gif";
+  if (mimeType === "video/mp4") return ".mp4";
+  if (mimeType === "video/webm") return ".webm";
+  if (mimeType === "video/ogg") return ".ogv";
   return "";
 }
 
@@ -642,7 +665,7 @@ function safeUploadBaseName(originalName) {
 
 function safeUploadExtension(file) {
   const originalExt = path.extname(file.originalName).toLowerCase();
-  const allowed = new Set([".jpg", ".jpeg", ".png", ".webp", ".gif"]);
+  const allowed = new Set([".jpg", ".jpeg", ".png", ".webp", ".gif", ".mp4", ".webm", ".ogv"]);
   if (allowed.has(originalExt)) return originalExt === ".jpeg" ? ".jpg" : originalExt;
   return extensionForMime(file.mimeType) || ".bin";
 }
@@ -662,6 +685,9 @@ function contentTypeForFile(filePath) {
   if (ext === ".png") return "image/png";
   if (ext === ".webp") return "image/webp";
   if (ext === ".gif") return "image/gif";
+  if (ext === ".mp4") return "video/mp4";
+  if (ext === ".webm") return "video/webm";
+  if (ext === ".ogv" || ext === ".ogg") return "video/ogg";
   return "application/octet-stream";
 }
 
@@ -930,6 +956,69 @@ async function handlePublicStats(req, res) {
     likes_count: row.likes_count ?? 0,
     comments_count: row.comments_count ?? 0,
   }, corsHeaders(req));
+}
+
+function normalizeHomePage(value = {}) {
+  const next = { ...DEFAULT_HOME_PAGE, ...(value && typeof value === "object" ? value : {}) };
+  const text = (value, fallback = "") => value === undefined || value === null ? fallback : String(value).trim();
+  const color = (value, fallback) => /^#[0-9a-f]{6}$/i.test(String(value || "")) ? String(value).trim() : fallback;
+  const clampPercent = (value, fallback = 50) => {
+    const number = Number(value);
+    if (!Number.isFinite(number)) return fallback;
+    return Math.max(0, Math.min(100, Math.round(number)));
+  };
+  const clampZoom = (value, fallback = 100) => {
+    const number = Number(value);
+    if (!Number.isFinite(number)) return fallback;
+    return Math.max(100, Math.min(180, Math.round(number)));
+  };
+  return {
+    title: text(next.title, DEFAULT_HOME_PAGE.title),
+    subtitle: text(next.subtitle, DEFAULT_HOME_PAGE.subtitle),
+    description: text(next.description, DEFAULT_HOME_PAGE.description),
+    primaryButtonText: String(next.primaryButtonText || DEFAULT_HOME_PAGE.primaryButtonText).trim(),
+    primaryButtonUrl: String(next.primaryButtonUrl || DEFAULT_HOME_PAGE.primaryButtonUrl).trim(),
+    secondaryButtonText: String(next.secondaryButtonText || DEFAULT_HOME_PAGE.secondaryButtonText).trim(),
+    secondaryButtonUrl: String(next.secondaryButtonUrl || DEFAULT_HOME_PAGE.secondaryButtonUrl).trim(),
+    titleColor: color(next.titleColor, DEFAULT_HOME_PAGE.titleColor),
+    subtitleColor: color(next.subtitleColor, DEFAULT_HOME_PAGE.subtitleColor),
+    descriptionColor: color(next.descriptionColor, DEFAULT_HOME_PAGE.descriptionColor),
+    coverType: next.coverType === "video" ? "video" : "image",
+    coverUrl: String(next.coverUrl || "").trim(),
+    coverVideoUrl: String(next.coverVideoUrl || "").trim(),
+    coverPositionX: clampPercent(next.coverPositionX, DEFAULT_HOME_PAGE.coverPositionX),
+    coverPositionY: clampPercent(next.coverPositionY, DEFAULT_HOME_PAGE.coverPositionY),
+    coverZoom: clampZoom(next.coverZoom, DEFAULT_HOME_PAGE.coverZoom),
+  };
+}
+
+async function getHomePageSettings() {
+  const result = await query("SELECT value_json FROM site_settings WHERE key = $1", [HOME_SETTING_KEY]);
+  return normalizeHomePage(result.rows[0]?.value_json);
+}
+
+async function handlePublicHome(req, res) {
+  const item = await getHomePageSettings();
+  sendJson(res, 200, { item, source: "api" }, corsHeaders(req));
+}
+
+async function handleAdminHomeSettings(req, res) {
+  const item = await getHomePageSettings();
+  sendJson(res, 200, { item, source: "api" }, corsHeaders(req));
+}
+
+async function handleAdminUpdateHomeSettings(req, res) {
+  const body = await readBody(req);
+  const item = normalizeHomePage(body.item ?? body);
+  const result = await query(
+    `INSERT INTO site_settings(key, value_json, updated_at)
+     VALUES ($1, $2::jsonb, now())
+     ON CONFLICT (key)
+     DO UPDATE SET value_json = EXCLUDED.value_json, updated_at = now()
+     RETURNING value_json`,
+    [HOME_SETTING_KEY, JSON.stringify(item)],
+  );
+  sendJson(res, 200, { item: normalizeHomePage(result.rows[0]?.value_json), ok: true, source: "api" }, corsHeaders(req));
 }
 
 function normalizeAboutPage(value = {}) {
@@ -1429,12 +1518,15 @@ async function handleAdminUploadMedia(req, res) {
   const body = await readBuffer(req);
   const { fields, files } = parseMultipart(req, body);
   const file = files.find((item) => item.fieldName === "file") ?? files[0];
-  if (!file) return sendJson(res, 400, { error: "file_required", message: "璇烽€夋嫨瑕佷笂浼犵殑鍥剧墖" }, corsHeaders(req));
-  if (!file.mimeType.startsWith("image/")) {
-    return sendJson(res, 400, { error: "invalid_file_type", message: "Only image files are supported" }, corsHeaders(req));
+  if (!file) return sendJson(res, 400, { error: "file_required", message: "Please choose an image or video file" }, corsHeaders(req));
+  const isImage = file.mimeType.startsWith("image/");
+  const isVideo = file.mimeType.startsWith("video/");
+  if (!isImage && !isVideo) {
+    return sendJson(res, 400, { error: "invalid_file_type", message: "Only image or video files are supported" }, corsHeaders(req));
   }
-  if (file.buffer.length > 5 * 1024 * 1024) {
-    return sendJson(res, 413, { error: "file_too_large", message: "鍥剧墖涓嶈兘瓒呰繃 5MB" }, corsHeaders(req));
+  const maxSize = isVideo ? 50 * 1024 * 1024 : 5 * 1024 * 1024;
+  if (file.buffer.length > maxSize) {
+    return sendJson(res, 413, { error: "file_too_large", message: isVideo ? "Video files cannot exceed 50MB" : "Image files cannot exceed 5MB" }, corsHeaders(req));
   }
 
   const [year, month, day] = uploadDateParts();
@@ -2021,6 +2113,7 @@ async function handleRequest(req, res) {
     }
     if (req.method === "GET" && url.pathname === "/api/public/posts") return handlePublicPosts(req, res, url);
     if (req.method === "GET" && url.pathname === "/api/public/stats") return handlePublicStats(req, res);
+    if (req.method === "GET" && url.pathname === "/api/public/home") return handlePublicHome(req, res);
     if (req.method === "GET" && url.pathname === "/api/public/about") return handlePublicAbout(req, res);
     if (req.method === "GET" && url.pathname === "/api/public/archive") return handleArchive(req, res);
     if (req.method === "GET" && url.pathname === "/api/public/messages") return handlePublicMessages(req, res);
@@ -2067,6 +2160,8 @@ async function handleRequest(req, res) {
     if (req.method === "PUT" && adminFeatured) return handleAdminFeaturedPost(req, res, Number(adminFeatured[1]));
 
     if (req.method === "GET" && url.pathname === "/api/admin/dashboard") return handleAdminDashboard(req, res);
+    if (req.method === "GET" && url.pathname === "/api/admin/home-settings") return handleAdminHomeSettings(req, res);
+    if (req.method === "PUT" && url.pathname === "/api/admin/home-settings") return handleAdminUpdateHomeSettings(req, res);
     if (req.method === "GET" && url.pathname === "/api/admin/about-settings") return handleAdminAboutSettings(req, res);
     if (req.method === "PUT" && url.pathname === "/api/admin/about-settings") return handleAdminUpdateAboutSettings(req, res);
     if (req.method === "GET" && url.pathname === "/api/admin/media") return handleAdminMedia(req, res);
