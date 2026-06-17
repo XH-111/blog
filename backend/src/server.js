@@ -1535,7 +1535,7 @@ async function handleAdminDashboard(req, res) {
 }
 
 async function handleAdminMedia(req, res) {
-  const existing = await query("SELECT id, file_name, original_name, mime_type, url, width, height, alt_text, created_at FROM media_assets ORDER BY created_at DESC LIMIT 50");
+  const existing = await query("SELECT id, file_name, original_name, mime_type, file_size, url, width, height, alt_text, created_at FROM media_assets ORDER BY created_at DESC LIMIT 50");
   sendJson(res, 200, { items: existing.rows }, corsHeaders(req));
 }
 

@@ -1811,15 +1811,27 @@ function cleanMediaText(value = "") {
 }
 
 function mediaDisplayName(item: AdminMediaItem) {
-  return cleanMediaText(item.altText ?? "") || cleanMediaText(item.originalName) || cleanMediaText(mediaUrlFileName(item.url)) || `图片 #${item.id}`;
+  return cleanMediaText(item.altText ?? "") || cleanMediaText(item.originalName) || cleanMediaText(mediaUrlFileName(item.url)) || `媒体 #${item.id}`;
+}
+
+function isVideoMedia(item: AdminMediaItem) {
+  return item.mimeType.startsWith("video/");
+}
+
+function formatMediaFileSize(value?: number) {
+  if (!value) return "";
+  if (value >= 1024 * 1024) return `${(value / 1024 / 1024).toFixed(1).replace(".0", "")} MB`;
+  if (value >= 1024) return `${Math.round(value / 1024)} KB`;
+  return `${value} B`;
 }
 
 function mediaMetaText(item: AdminMediaItem) {
   const displayName = mediaDisplayName(item);
   const originalName = cleanMediaText(item.originalName);
   return [
-    item.mimeType.replace(/^image\//, "").toUpperCase(),
+    item.mimeType.replace(/^(image|video)\//, "").toUpperCase(),
     item.width && item.height ? `${item.width}x${item.height}` : "",
+    formatMediaFileSize(item.fileSize),
     originalName && originalName !== displayName ? originalName : "",
   ].filter(Boolean).join(" · ");
 }
@@ -2297,7 +2309,7 @@ function AdminPlaceholder({ page }: { page: string }) {
           href: "",
           media: item,
           actions: [
-            { label: "查看", title: "预览这张图片", run: () => setPreviewMedia(item) },
+            { label: "查看", title: isVideoMedia(item) ? "预览这个视频" : "预览这张图片", run: () => setPreviewMedia(item) },
             { label: "编辑说明", title: "更新媒体 alt_text，保存到 media_assets", run: () => updateMediaAlt(item.id, item.altText ?? "") },
             { label: "删除", title: "删除媒体数据库记录，并尝试删除本地上传文件", run: () => deleteMedia(item.id) },
           ],
@@ -2485,8 +2497,8 @@ function AdminPlaceholder({ page }: { page: string }) {
         {actionNotice && <p className="admin-hint">{actionNotice}</p>}
         {page === "media" && (
           <div className="admin-hint media-upload-strip">
-            <button type="button" onClick={() => mediaInputRef.current?.click()}>上传图片</button>
-            <span>可一次选择多张图片；上传后会写入 media_assets，并可作为文章封面使用。</span>
+            <button type="button" onClick={() => mediaInputRef.current?.click()}>上传媒体</button>
+            <span>可一次选择多张图片或视频；上传后会写入 media_assets，并可作为文章封面使用。</span>
             <input ref={mediaInputRef} className="visually-hidden" type="file" accept="image/*,video/*" multiple onChange={uploadMediaFile} />
           </div>
         )}
@@ -2509,13 +2521,16 @@ function AdminPlaceholder({ page }: { page: string }) {
               </div>
             </div>
           )}
-          {loading ? <p className="soft-text">正在读取数据...</p> : rows.length ? rows.map((row) => <div className={`admin-row ${row.href ? "clickable" : ""} ${row.media ? "media-row" : ""} ${selectedKeys.includes(row.key) ? "selected" : ""}`} key={row.key} onClick={() => row.href && go(row.href)}>{batchMode && <label className="row-check" onClick={(event) => event.stopPropagation()}><input type="checkbox" checked={selectedKeys.includes(row.key)} onChange={(event) => setRowSelected(row.key, event.target.checked)} /><span className="visually-hidden">选择 {row.text}</span></label>}{row.media && <button className="media-thumb" type="button" style={{ backgroundImage: `url(${row.media.url})` }} onClick={(event) => { event.stopPropagation(); setPreviewMedia(row.media!); }} aria-label={`查看 ${row.text}`} />}{row.media ? <span className="media-text"><b>{row.text}</b><small>{mediaMetaText(row.media)}</small></span> : <span>{row.text}</span>}<div className="admin-row-actions"><small>{row.status}</small>{row.actions?.map((action) => <button key={action.label} title={action.title} onClick={(event) => { event.stopPropagation(); if (action.href) go(action.href); action.run?.(); }}>{action.label}</button>)}{row.review && row.review.status !== "approved" && <button onClick={(event) => { event.stopPropagation(); reviewRow(row.review!.kind, row.review!.id, "approved"); }}>通过</button>}{row.review && row.review.status !== "rejected" && <button onClick={(event) => { event.stopPropagation(); reviewRow(row.review!.kind, row.review!.id, "rejected"); }}>驳回</button>}</div></div>) : <p className="soft-text">暂无{info.label}数据。</p>}
+          {loading ? <p className="soft-text">正在读取数据...</p> : rows.length ? rows.map((row) => <div className={`admin-row ${row.href ? "clickable" : ""} ${row.media ? "media-row" : ""} ${selectedKeys.includes(row.key) ? "selected" : ""}`} key={row.key} onClick={() => row.href && go(row.href)}>{batchMode && <label className="row-check" onClick={(event) => event.stopPropagation()}><input type="checkbox" checked={selectedKeys.includes(row.key)} onChange={(event) => setRowSelected(row.key, event.target.checked)} /><span className="visually-hidden">选择 {row.text}</span></label>}{row.media && <button className={`media-thumb ${isVideoMedia(row.media) ? "video-thumb" : ""}`} type="button" style={isVideoMedia(row.media) ? undefined : { backgroundImage: `url(${row.media.url})` }} onClick={(event) => { event.stopPropagation(); setPreviewMedia(row.media!); }} aria-label={`查看 ${row.text}`}>{isVideoMedia(row.media) && <><video src={row.media.url} muted preload="metadata" /><span>视频</span></>}</button>}{row.media ? <span className="media-text"><b>{row.text}</b><small>{mediaMetaText(row.media)}</small></span> : <span>{row.text}</span>}<div className="admin-row-actions"><small>{row.status}</small>{row.actions?.map((action) => <button key={action.label} title={action.title} onClick={(event) => { event.stopPropagation(); if (action.href) go(action.href); action.run?.(); }}>{action.label}</button>)}{row.review && row.review.status !== "approved" && <button onClick={(event) => { event.stopPropagation(); reviewRow(row.review!.kind, row.review!.id, "approved"); }}>通过</button>}{row.review && row.review.status !== "rejected" && <button onClick={(event) => { event.stopPropagation(); reviewRow(row.review!.kind, row.review!.id, "rejected"); }}>驳回</button>}</div></div>) : <p className="soft-text">暂无{info.label}数据。</p>}
         </section>
         {previewMedia && (
-          <div className="media-modal" role="dialog" aria-modal="true" aria-label="图片预览" onClick={() => setPreviewMedia(null)}>
+          <div className="media-modal" role="dialog" aria-modal="true" aria-label={isVideoMedia(previewMedia) ? "视频预览" : "图片预览"} onClick={() => setPreviewMedia(null)}>
             <div className="media-modal-panel" onClick={(event) => event.stopPropagation()}>
               <header><b>{previewMedia.originalName}</b><button type="button" onClick={() => setPreviewMedia(null)}>关闭</button></header>
-              <img src={previewMedia.url} alt={previewMedia.altText || previewMedia.originalName} />
+              {isVideoMedia(previewMedia)
+                ? <video className="media-preview-video" src={previewMedia.url} controls preload="metadata" />
+                : <img src={previewMedia.url} alt={previewMedia.altText || previewMedia.originalName} />}
+              <p>{mediaMetaText(previewMedia)}</p>
               <p>{previewMedia.url}</p>
             </div>
           </div>

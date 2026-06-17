@@ -653,6 +653,9 @@ pre button { position: absolute; right: 12px; top: 10px; color: #fff; border: 1p
 .media-text b { font-size: 14px; color: var(--ink); line-height: 1.35; overflow-wrap: anywhere; }
 .media-text small { color: var(--muted); font-size: 12px; line-height: 1.35; overflow-wrap: anywhere; }
 .media-thumb { width: 72px; height: 54px; flex: 0 0 auto; border: 1px solid var(--line); border-radius: 7px; background-color: #f3f6f8; background-position: center; background-size: cover; background-repeat: no-repeat; }
+.media-thumb.video-thumb { position: relative; overflow: hidden; display: block; background: #111827; }
+.media-thumb.video-thumb video { width: 100%; height: 100%; object-fit: cover; opacity: .78; }
+.media-thumb.video-thumb span { position: absolute; right: 5px; bottom: 5px; padding: 2px 5px; border-radius: 5px; color: #fff; background: rgba(15,23,42,.76); font-size: 11px; font-weight: 800; }
 .admin-row.clickable { cursor: pointer; }
 .admin-row.clickable:hover > span { color: var(--teal-dark); }
 .admin-row-actions { display: inline-flex; align-items: center; justify-content: flex-end; gap: 8px; flex-shrink: 0; }
@@ -665,6 +668,7 @@ pre button { position: absolute; right: 12px; top: 10px; color: #fff; border: 1p
 .media-modal-panel header { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
 .media-modal-panel header button { border: 1px solid var(--line); border-radius: 7px; padding: 8px 12px; color: var(--teal-dark); background: #fff; }
 .media-modal-panel > img { max-width: 100%; max-height: 64vh; object-fit: contain; border-radius: 7px; background: #f3f6f8; }
+.media-preview-video { width: 100%; max-height: 64vh; border-radius: 7px; background: #111827; }
 .media-modal-panel > p { margin: 0; color: var(--muted); overflow-wrap: anywhere; font-size: 13px; }
 .article-image-modal-panel { width: min(1080px, 94vw); }
 .article-image-modal-panel > img { max-height: 76vh; }
