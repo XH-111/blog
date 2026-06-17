@@ -15,6 +15,7 @@ export type Article = {
   category: string;
   tags: string[];
   reads: string;
+  viewsCount?: number;
   likes: number;
   comments: number;
   readingMinutes: number;

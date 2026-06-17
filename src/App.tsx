@@ -765,9 +765,11 @@ function PostsPage() {
   const initialCategory = initialParams.get("category") ?? "全部分类";
   const initialSearch = initialParams.get("q") ?? "";
   const initialView = initialParams.get("view");
+  const initialSort = initialParams.get("sort") === "hot" ? "hot" : "latest";
   const [search, setSearch] = useState(initialSearch);
   const [searchDraft, setSearchDraft] = useState(initialSearch);
   const [category, setCategory] = useState(initialCategory);
+  const [sortMode, setSortMode] = useState<"latest" | "hot">(initialSort);
   const [listMode, setListMode] = useState<"featured" | "all" | "category" | "search">(
     initialSearch ? "search" : initialCategory !== "全部分类" ? "category" : initialView === "all" ? "all" : "featured"
   );
@@ -780,9 +782,11 @@ function PostsPage() {
     const nextSearch = nextParams.get("q") ?? "";
     const nextCategory = nextParams.get("category") ?? "全部分类";
     const nextView = nextParams.get("view");
+    const nextSort = nextParams.get("sort") === "hot" ? "hot" : "latest";
     setSearch(nextSearch);
     setSearchDraft(nextSearch);
     setCategory(nextCategory);
+    setSortMode(nextSort);
     setListMode(nextSearch ? "search" : nextCategory !== "全部分类" ? "category" : nextView === "all" ? "all" : "featured");
   }, [archiveRoute]);
   useEffect(() => {
@@ -808,7 +812,13 @@ function PostsPage() {
     const matchCategory = category === "全部分类" || item.category === category;
     return matchSearch && matchCategory;
   });
-  const currentArticles = listMode === "featured" ? featuredArticles : filteredArticles;
+  const sortArticles = (items: Article[]) => [...items].sort((a, b) => {
+    if (sortMode === "hot") {
+      return (b.viewsCount ?? 0) - (a.viewsCount ?? 0) || b.likes - a.likes || b.comments - a.comments || b.id - a.id;
+    }
+    return new Date(b.date || 0).getTime() - new Date(a.date || 0).getTime() || b.id - a.id;
+  });
+  const currentArticles = sortArticles(listMode === "featured" ? featuredArticles : filteredArticles);
   const visibleArticles = currentArticles.slice(0, ARCHIVE_PAGE_SIZE);
   const currentTitle = listMode === "featured" ? "精选文章" : listMode === "all" ? "全部文章" : listMode === "search" ? "搜索结果" : `${category} 分类文章`;
   const currentDescription = listMode === "featured"
@@ -818,23 +828,39 @@ function PostsPage() {
       : listMode === "search"
         ? `包含关键词“${search}”的文章共 ${currentArticles.length} 篇，本页最多显示 ${ARCHIVE_PAGE_SIZE} 篇。`
         : `该分类下共有 ${currentArticles.length} 篇文章，本页最多显示 ${ARCHIVE_PAGE_SIZE} 篇。`;
+  const currentSortLabel = sortMode === "hot" ? "热门优先" : "最新优先";
+  function buildPostsPath(nextMode: typeof listMode, options: { nextSearch?: string; nextCategory?: string; nextSort?: "latest" | "hot" } = {}) {
+    const params = new URLSearchParams();
+    const targetSort = options.nextSort ?? sortMode;
+    if (nextMode === "search" && options.nextSearch?.trim()) params.set("q", options.nextSearch.trim());
+    if (nextMode === "category" && options.nextCategory) params.set("category", options.nextCategory);
+    if (nextMode === "all") params.set("view", "all");
+    if (targetSort === "hot") params.set("sort", "hot");
+    const query = params.toString();
+    return query ? `/posts?${query}` : "/posts";
+  }
   function openFeaturedArticles() {
-    go("/posts");
+    go(buildPostsPath("featured"));
   }
   function openAllArticles() {
-    go("/posts?view=all");
+    go(buildPostsPath("all"));
   }
   function openCategory(nextCategory: string) {
-    go(`/posts?category=${encodeURIComponent(nextCategory)}`);
+    go(buildPostsPath("category", { nextCategory }));
   }
   function submitArchiveSearch(event: FormEvent) {
     event.preventDefault();
     const keyword = searchDraft.trim();
-    go(keyword ? `/posts?q=${encodeURIComponent(keyword)}` : "/posts");
+    go(keyword ? buildPostsPath("search", { nextSearch: keyword }) : buildPostsPath("featured"));
   }
   function clearArchiveSearch() {
     setSearchDraft("");
-    go("/posts");
+    go(buildPostsPath("featured"));
+  }
+  function changeSort(nextSort: "latest" | "hot") {
+    if (listMode === "search") go(buildPostsPath("search", { nextSearch: search, nextSort }));
+    else if (listMode === "category") go(buildPostsPath("category", { nextCategory: category, nextSort }));
+    else go(buildPostsPath(listMode, { nextSort }));
   }
   return (
     <>
@@ -874,9 +900,14 @@ function PostsPage() {
           <div className="archive-hero">
             <div>
               <h1>{currentTitle}</h1>
-              <p>{currentDescription}</p>
+              <p>{currentDescription} 当前排序：{currentSortLabel}。</p>
             </div>
             {listMode === "featured" ? <button onClick={openAllArticles}>查看全部文章</button> : <button onClick={openFeaturedArticles}>返回精选</button>}
+          </div>
+          <div className="archive-sort-toolbar" aria-label="文章排序">
+            <span>排序</span>
+            <button className={sortMode === "latest" ? "active" : ""} onClick={() => changeSort("latest")}>最新</button>
+            <button className={sortMode === "hot" ? "active" : ""} onClick={() => changeSort("hot")}>热门</button>
           </div>
           {visibleArticles.length ? (
             <div className="archive-featured-grid">

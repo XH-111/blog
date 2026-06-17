@@ -571,6 +571,7 @@ function mapBackendPost(post: BackendPost): Article {
     category: post.category?.name ?? "未分类",
     tags: post.tags?.map((tag) => tag.name) ?? [],
     reads: formatReads(toNumber(post.viewsCount)),
+    viewsCount: toNumber(post.viewsCount),
     likes: toNumber(post.likesCount),
     comments: toNumber(post.commentsCount),
     readingMinutes: toNumber(post.readingMinutes) || 1,
