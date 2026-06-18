@@ -1125,10 +1125,16 @@ export const api = {
     const data = await requestStrictJson<{ ok?: boolean; id?: DbId; deleted?: boolean; status?: "archived" }>(`/admin/posts/${id}`, { method: "DELETE" });
     return { ok: data.ok ?? true, id: toNumberId(data.id ?? id), deleted: data.deleted ?? false, status: data.status ?? "archived", source: "api" as const };
   },
-  getAdminMedia: async () => {
-    const data = await requestStrictJson<{ items?: BackendMedia[] }>("/admin/media");
+  getAdminMedia: async (options: { page?: number; pageSize?: number; type?: "all" | "image" | "video"; keyword?: string } = {}) => {
+    const params = new URLSearchParams();
+    if (options.page) params.set("page", String(options.page));
+    if (options.pageSize) params.set("pageSize", String(options.pageSize));
+    if (options.type && options.type !== "all") params.set("type", options.type);
+    if (options.keyword?.trim()) params.set("q", options.keyword.trim());
+    const query = params.toString() ? `?${params.toString()}` : "";
+    const data = await requestStrictJson<{ items?: BackendMedia[]; page?: number | string; pageSize?: number | string; total?: number | string; hasMore?: boolean }>(`/admin/media${query}`);
     if (!Array.isArray(data.items)) throw new ApiError("后端没有返回媒体列表");
-    return { items: data.items.map(mapBackendMedia), source: "api" as const };
+    return { items: data.items.map(mapBackendMedia), page: toNumber(data.page) || options.page || 1, pageSize: toNumber(data.pageSize) || options.pageSize || data.items.length, total: toNumber(data.total), hasMore: Boolean(data.hasMore), source: "api" as const };
   },
   uploadMedia: async (file: File, altText?: string) => {
     const formData = new FormData();

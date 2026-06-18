@@ -1290,7 +1290,7 @@ function HomeSettingsPage() {
     setMediaLoading(true);
     setNotice("");
     try {
-      const result = await api.getAdminMedia();
+      const result = await api.getAdminMedia({ pageSize: 100 });
       setHomeMediaItems(result.items.filter((item) => item.mimeType.startsWith("image/") || item.mimeType.startsWith("video/")));
     } catch (error) {
       setNotice(getApiErrorMessage(error));
@@ -1606,7 +1606,7 @@ function AboutSettingsPage() {
     setMediaLoading(true);
     setNotice("");
     try {
-      const result = await api.getAdminMedia();
+      const result = await api.getAdminMedia({ pageSize: 100 });
       setAboutMediaItems(result.items.filter((item) => item.mimeType.startsWith("image/")));
     } catch (error) {
       setNotice(getApiErrorMessage(error));
@@ -2230,6 +2230,8 @@ function AdminPlaceholder({ page }: { page: string }) {
   const [selectedKeys, setSelectedKeys] = useState<string[]>([]);
   const [mediaTypeFilter, setMediaTypeFilter] = useState<"all" | "image" | "video">("all");
   const [mediaSearch, setMediaSearch] = useState("");
+  const [mediaPage, setMediaPage] = useState(1);
+  const [mediaPagination, setMediaPagination] = useState({ page: 1, pageSize: 20, total: 0, hasMore: false });
   const [mediaUploading, setMediaUploading] = useState(false);
   const mediaInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -2249,9 +2251,10 @@ function AdminPlaceholder({ page }: { page: string }) {
             setLoading(false);
           }
         } else if (page === "media") {
-          const result = await api.getAdminMedia();
+          const result = await api.getAdminMedia({ page: mediaPage, pageSize: 20, type: mediaTypeFilter, keyword: mediaSearch });
           if (alive) {
             setAdminMedia(result.items);
+            setMediaPagination({ page: result.page, pageSize: result.pageSize, total: result.total, hasMore: result.hasMore });
             setSource(result.source);
             setLoading(false);
           }
@@ -2300,7 +2303,7 @@ function AdminPlaceholder({ page }: { page: string }) {
     return () => {
       alive = false;
     };
-  }, [page]);
+  }, [page, mediaPage, mediaTypeFilter, mediaSearch]);
 
   async function reviewRow(kind: "comment" | "message", id: number, status: "approved" | "rejected") {
     try {
@@ -2403,7 +2406,9 @@ function AdminPlaceholder({ page }: { page: string }) {
       setMediaUploading(false);
     }
     if (uploaded.length) {
+      setMediaPage(1);
       setAdminMedia((items) => [...uploaded.reverse(), ...items]);
+      setMediaPagination((current) => ({ ...current, page: 1, total: current.total + uploaded.length, hasMore: current.total + uploaded.length > current.pageSize }));
       setSource("api");
       emitAdminDataChanged();
     }
@@ -2434,6 +2439,7 @@ function AdminPlaceholder({ page }: { page: string }) {
     try {
       const result = await api.deleteMedia(id);
       setAdminMedia((items) => items.filter((item) => item.id !== result.id));
+      setMediaPagination((current) => ({ ...current, total: Math.max(0, current.total - 1) }));
       setActionNotice("媒体文件已从数据库删除。");
       emitAdminDataChanged();
     } catch (error) {
@@ -2724,6 +2730,7 @@ function AdminPlaceholder({ page }: { page: string }) {
     runBatch("批量删除媒体", async (row) => {
       const result = await api.deleteMedia(row.id);
       setAdminMedia((items) => items.filter((item) => item.id !== result.id));
+      setMediaPagination((current) => ({ ...current, total: Math.max(0, current.total - 1) }));
     });
   }
 
@@ -2810,7 +2817,7 @@ function AdminPlaceholder({ page }: { page: string }) {
                   key={value}
                   type="button"
                   className={mediaTypeFilter === value ? "active" : ""}
-                  onClick={() => { setMediaTypeFilter(value as "all" | "image" | "video"); setSelectedKeys([]); }}
+                  onClick={() => { setMediaTypeFilter(value as "all" | "image" | "video"); setMediaPage(1); setSelectedKeys([]); }}
                 >
                   {label}
                 </button>
@@ -2818,9 +2825,9 @@ function AdminPlaceholder({ page }: { page: string }) {
             </div>
             <label>
               <span className="visually-hidden">搜索媒体</span>
-              <input value={mediaSearch} onChange={(event) => { setMediaSearch(event.target.value); setSelectedKeys([]); }} placeholder="搜索文件名、说明或类型" />
+              <input value={mediaSearch} onChange={(event) => { setMediaSearch(event.target.value); setMediaPage(1); setSelectedKeys([]); }} placeholder="搜索文件名、说明或类型" />
             </label>
-            {mediaHasActiveFilter && <button type="button" className="media-clear-filter" onClick={() => { setMediaTypeFilter("all"); setMediaSearch(""); setSelectedKeys([]); }}>清空</button>}
+            {mediaHasActiveFilter && <button type="button" className="media-clear-filter" onClick={() => { setMediaTypeFilter("all"); setMediaSearch(""); setMediaPage(1); setSelectedKeys([]); }}>清空</button>}
           </div>
         )}
         <section className="card admin-table">
@@ -2843,6 +2850,13 @@ function AdminPlaceholder({ page }: { page: string }) {
             </div>
           )}
           {loading ? <p className="soft-text">正在读取数据...</p> : rows.length ? rows.map((row) => <div className={`admin-row ${row.href ? "clickable" : ""} ${row.media ? "media-row" : ""} ${selectedKeys.includes(row.key) ? "selected" : ""}`} key={row.key} onClick={() => row.href && go(row.href)}>{batchMode && <label className="row-check" onClick={(event) => event.stopPropagation()}><input type="checkbox" checked={selectedKeys.includes(row.key)} onChange={(event) => setRowSelected(row.key, event.target.checked)} /><span className="visually-hidden">选择 {row.text}</span></label>}{row.media && <button className={`media-thumb ${isVideoMedia(row.media) ? "video-thumb" : ""}`} type="button" style={isVideoMedia(row.media) ? undefined : { backgroundImage: `url(${row.media.url})` }} onClick={(event) => { event.stopPropagation(); setPreviewMedia(row.media!); }} aria-label={`查看 ${row.text}`}>{isVideoMedia(row.media) && <><video src={row.media.url} muted preload="metadata" /><span>视频</span></>}</button>}{row.media ? <span className="media-text"><b>{row.text}</b><small>{mediaMetaText(row.media)}</small></span> : <span>{row.text}</span>}<div className="admin-row-actions"><small>{row.status}</small>{row.actions?.map((action) => <button key={action.label} title={action.title} onClick={(event) => { event.stopPropagation(); if (action.href) go(action.href); action.run?.(); }}>{action.label}</button>)}{row.review && row.review.status !== "approved" && <button onClick={(event) => { event.stopPropagation(); reviewRow(row.review!.kind, row.review!.id, "approved"); }}>通过</button>}{row.review && row.review.status !== "rejected" && <button onClick={(event) => { event.stopPropagation(); reviewRow(row.review!.kind, row.review!.id, "rejected"); }}>驳回</button>}</div></div>) : <p className="soft-text">{emptyText}</p>}
+          {page === "media" && !loading && (
+            <div className="admin-pagination">
+              <button disabled={mediaPage <= 1} onClick={() => { setMediaPage((value) => Math.max(1, value - 1)); setSelectedKeys([]); }}>上一页</button>
+              <span>第 {mediaPagination.page} 页 · 共 {mediaPagination.total} 个媒体</span>
+              <button disabled={!mediaPagination.hasMore} onClick={() => { setMediaPage((value) => value + 1); setSelectedKeys([]); }}>下一页</button>
+            </div>
+          )}
         </section>
         {previewMedia && (
           <div className="media-modal" role="dialog" aria-modal="true" aria-label={isVideoMedia(previewMedia) ? "视频预览" : "图片预览"} onClick={() => setPreviewMedia(null)}>
@@ -3475,7 +3489,7 @@ function EditorPage() {
     setMediaPickerOpen(true);
     setMediaPickerLoading(true);
     try {
-      const result = await api.getAdminMedia();
+      const result = await api.getAdminMedia({ pageSize: 100 });
       setEditorMediaItems(result.items.filter((item) => item.mimeType.startsWith("image/")));
       setNotice(target === "cover" ? "请选择一张媒体库图片作为封面" : "请选择一张媒体库图片插入正文");
     } catch (error) {

@@ -1704,9 +1704,33 @@ async function handleAdminDashboard(req, res) {
   }, corsHeaders(req));
 }
 
-async function handleAdminMedia(req, res) {
-  const existing = await query("SELECT id, file_name, original_name, mime_type, file_size, url, width, height, alt_text, created_at FROM media_assets ORDER BY created_at DESC LIMIT 50");
-  sendJson(res, 200, { items: existing.rows }, corsHeaders(req));
+async function handleAdminMedia(req, res, url) {
+  const pageSize = Math.min(Math.max(Number(url.searchParams.get("pageSize") || 20), 1), 100);
+  const page = Math.max(Number(url.searchParams.get("page") || 1), 1);
+  const type = String(url.searchParams.get("type") || "all");
+  const keyword = String(url.searchParams.get("q") || "").trim().toLowerCase();
+  const params = [];
+  const where = [];
+  if (type === "image" || type === "video") {
+    params.push(`${type}/%`);
+    where.push(`mime_type LIKE $${params.length}`);
+  }
+  if (keyword) {
+    params.push(`%${keyword}%`);
+    where.push(`(lower(file_name) LIKE $${params.length} OR lower(original_name) LIKE $${params.length} OR lower(COALESCE(alt_text, '')) LIKE $${params.length} OR lower(mime_type) LIKE $${params.length})`);
+  }
+  params.push(pageSize, (page - 1) * pageSize);
+  const existing = await query(
+    `SELECT count(*) OVER()::integer AS total_count,
+            id, file_name, original_name, mime_type, file_size, url, width, height, alt_text, created_at
+     FROM media_assets
+     ${where.length ? `WHERE ${where.join(" AND ")}` : ""}
+     ORDER BY created_at DESC
+     LIMIT $${params.length - 1} OFFSET $${params.length}`,
+    params,
+  );
+  const total = Number(existing.rows[0]?.total_count ?? 0);
+  sendJson(res, 200, { items: existing.rows, page, pageSize, total, hasMore: page * pageSize < total }, corsHeaders(req));
 }
 
 async function handleAdminUploadMedia(req, res) {
@@ -2368,7 +2392,7 @@ async function handleRequest(req, res) {
     if (req.method === "PUT" && url.pathname === "/api/admin/home-settings") return handleAdminUpdateHomeSettings(req, res);
     if (req.method === "GET" && url.pathname === "/api/admin/about-settings") return handleAdminAboutSettings(req, res);
     if (req.method === "PUT" && url.pathname === "/api/admin/about-settings") return handleAdminUpdateAboutSettings(req, res);
-    if (req.method === "GET" && url.pathname === "/api/admin/media") return handleAdminMedia(req, res);
+    if (req.method === "GET" && url.pathname === "/api/admin/media") return handleAdminMedia(req, res, url);
     if (req.method === "POST" && url.pathname === "/api/admin/media") return handleAdminUploadMedia(req, res);
     const adminMedia = url.pathname.match(/^\/api\/admin\/media\/(\d+)$/);
     if (req.method === "PUT" && adminMedia) return handleAdminUpdateMedia(req, res, Number(adminMedia[1]));

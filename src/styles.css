@@ -669,6 +669,10 @@ pre button { position: absolute; right: 12px; top: 10px; color: #fff; border: 1p
 .batch-toolbar button.danger { color: #d33f49; }
 .batch-toolbar button.danger:hover:not(:disabled) { background: #fff0f2; border-color: rgba(211, 63, 73, .28); }
 .batch-toolbar button:disabled { color: #a8b2bd; background: #f4f7f8; cursor: not-allowed; }
+.admin-pagination { display: flex; justify-content: center; align-items: center; gap: 12px; padding: 16px 0 4px; }
+.admin-pagination button { min-height: 36px; padding: 0 14px; border: 1px solid var(--line); border-radius: 7px; color: var(--teal-dark); background: #fff; font-weight: 800; }
+.admin-pagination button:not(:disabled):hover { border-color: rgba(7,155,149,.4); background: #e9fbf8; }
+.admin-pagination span { color: #5d6d7e; font-size: 13px; font-weight: 700; }
 .admin-row { display: flex; justify-content: space-between; align-items: center; gap: 18px; padding: 14px 4px; border-bottom: 1px solid var(--line); text-align: left; }
 .admin-row.selected { background: #f2fbf9; }
 .admin-row > span { min-width: 0; flex: 1; overflow-wrap: anywhere; }
