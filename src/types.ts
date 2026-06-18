@@ -23,6 +23,7 @@ export type Article = {
   coverUrl?: string;
   allowComment?: boolean;
   featured?: boolean;
+  featuredOrder?: number;
   visibility?: "public" | "private" | "password";
   passwordRequired?: boolean;
   passwordHint?: string;

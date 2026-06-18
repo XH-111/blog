@@ -77,6 +77,7 @@ CREATE TABLE IF NOT EXISTS posts (
   access_password_hash text,
   password_hint text,
   is_featured boolean NOT NULL DEFAULT false,
+  featured_order integer NOT NULL DEFAULT 0,
   allow_comment boolean NOT NULL DEFAULT true,
   require_comment_review boolean NOT NULL DEFAULT true,
   reading_minutes integer NOT NULL DEFAULT 1,
@@ -94,6 +95,7 @@ CREATE TABLE IF NOT EXISTS posts (
 CREATE INDEX IF NOT EXISTS idx_posts_status_published_at ON posts(status, published_at DESC);
 CREATE INDEX IF NOT EXISTS idx_posts_category_id ON posts(category_id);
 CREATE INDEX IF NOT EXISTS idx_posts_is_featured ON posts(is_featured);
+CREATE INDEX IF NOT EXISTS idx_posts_featured_order ON posts(is_featured, featured_order);
 
 CREATE TABLE IF NOT EXISTS post_tags (
   post_id bigint NOT NULL REFERENCES posts(id) ON DELETE CASCADE,

@@ -222,6 +222,7 @@ type BackendPost = {
   coverUrl?: string;
   allowComment?: boolean;
   isFeatured?: boolean;
+  featuredOrder?: number | string;
   sections?: Array<{ id: string; title: string; level: 2 | 3; body: string }>;
   previousPost?: { id: DbId; title: string } | null;
   nextPost?: { id: DbId; title: string } | null;
@@ -644,6 +645,7 @@ function mapBackendPost(post: BackendPost): Article {
     coverUrl: resolveBackendAssetUrl(post.coverUrl),
     allowComment: post.allowComment ?? true,
     featured: post.isFeatured ?? false,
+    featuredOrder: toNumber(post.featuredOrder),
     visibility: post.visibility,
     passwordRequired: post.passwordRequired ?? post.visibility === "password",
     passwordHint: post.passwordHint ?? "",
@@ -1165,6 +1167,11 @@ export const api = {
     const data = await requestStrictJson<{ ok?: boolean; id?: DbId; isFeatured?: boolean; item?: BackendPost }>(`/admin/posts/${id}/featured`, { method: "PUT", body: JSON.stringify({ isFeatured }) });
     const item = data.item ? mapAdminPost(data.item) : undefined;
     return { ok: data.ok ?? true, id: toNumberId(data.item?.id ?? data.id ?? id), isFeatured: item?.featured ?? data.isFeatured ?? isFeatured, item, source: "api" as const };
+  },
+  updatePostFeaturedOrder: async (id: number, direction: "up" | "down") => {
+    const data = await requestStrictJson<{ ok?: boolean; id?: DbId; unchanged?: boolean; item?: BackendPost }>(`/admin/posts/${id}/featured-order`, { method: "PUT", body: JSON.stringify({ direction }) });
+    const item = data.item ? mapAdminPost(data.item) : undefined;
+    return { ok: data.ok ?? true, id: toNumberId(data.item?.id ?? data.id ?? id), unchanged: Boolean(data.unchanged), item, source: "api" as const };
   },
   duplicatePost: async (id: number) => {
     const data = await requestStrictJson<{ ok?: boolean; id?: DbId; item?: BackendPost }>(`/admin/posts/${id}/duplicate`, { method: "POST" });

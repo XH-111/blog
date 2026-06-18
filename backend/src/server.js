@@ -212,8 +212,10 @@ async function ensureRuntimeSchema() {
   await query(`
     ALTER TABLE posts
       ADD COLUMN IF NOT EXISTS access_password_hash text,
-      ADD COLUMN IF NOT EXISTS password_hint text
+      ADD COLUMN IF NOT EXISTS password_hint text,
+      ADD COLUMN IF NOT EXISTS featured_order integer NOT NULL DEFAULT 0
   `);
+  await normalizeFeaturedOrder();
   await query(`
     CREATE TABLE IF NOT EXISTS post_versions (
       id bigserial PRIMARY KEY,
@@ -229,6 +231,28 @@ async function ensureRuntimeSchema() {
     )
   `);
   await query("CREATE INDEX IF NOT EXISTS idx_post_versions_post_id_created_at ON post_versions(post_id, created_at DESC)");
+  await query("CREATE INDEX IF NOT EXISTS idx_posts_featured_order ON posts(is_featured, featured_order)");
+}
+
+async function normalizeFeaturedOrder(client = { query }) {
+  await client.query(`
+    WITH ranked AS (
+      SELECT id, row_number() OVER (
+        ORDER BY
+          NULLIF(featured_order, 0) ASC NULLS LAST,
+          published_at DESC NULLS LAST,
+          updated_at DESC,
+          id DESC
+      ) * 10 AS next_order
+      FROM posts
+      WHERE is_featured = true
+    )
+    UPDATE posts p
+    SET featured_order = ranked.next_order
+    FROM ranked
+    WHERE p.id = ranked.id
+      AND p.featured_order IS DISTINCT FROM ranked.next_order
+  `);
 }
 
 function getClientIp(req) {
@@ -279,7 +303,9 @@ function postListSql({ keyword, category, tag, year, sort, limit, offset, featur
     where.push("p.is_featured = true");
   }
 
-  const orderBy = sort === "hot" ? "p.views_count DESC, p.published_at DESC" : "p.published_at DESC";
+  const orderBy = featured
+    ? "p.featured_order ASC, p.published_at DESC"
+    : sort === "hot" ? "p.views_count DESC, p.published_at DESC" : "p.published_at DESC";
   params.push(limit, offset);
 
   return {
@@ -287,7 +313,7 @@ function postListSql({ keyword, category, tag, year, sort, limit, offset, featur
       SELECT
         count(*) OVER()::integer AS total_count,
         p.id, p.title, p.slug, p.excerpt, p.summary, p.cover_url, p.status, p.visibility, p.password_hint,
-        p.is_featured, p.allow_comment,
+        p.is_featured, p.featured_order, p.allow_comment,
         p.reading_minutes, p.views_count, p.likes_count, p.comments_count, p.published_at,
         c.id AS category_id, c.name AS category_name, c.slug AS category_slug,
         COALESCE(json_agg(json_build_object('id', t.id, 'name', t.name, 'slug', t.slug) ORDER BY t.name) FILTER (WHERE t.id IS NOT NULL), '[]') AS tags
@@ -320,6 +346,7 @@ function mapPost(row) {
     category: row.category_id ? { id: Number(row.category_id), name: row.category_name, slug: row.category_slug } : null,
     tags: row.tags ?? [],
     isFeatured: row.is_featured,
+    featuredOrder: row.featured_order ?? 0,
     readingMinutes: row.reading_minutes,
     viewsCount: row.views_count,
     likesCount: row.likes_count,
@@ -448,7 +475,7 @@ async function writePost(client, payload, id = null) {
   const contentMarkdown = String(payload.contentMarkdown || payload.content || "");
   const status = ["published", "scheduled", "draft"].includes(payload.status) ? payload.status : "draft";
   const visibility = ["public", "private", "password"].includes(payload.visibility) ? payload.visibility : "public";
-  const existing = id ? await client.query("SELECT access_password_hash FROM posts WHERE id = $1", [id]) : null;
+  const existing = id ? await client.query("SELECT access_password_hash, featured_order FROM posts WHERE id = $1", [id]) : null;
   const accessPassword = String(payload.accessPassword || payload.password || "").trim();
   const accessPasswordHash = visibility === "password"
     ? accessPassword ? await hashPassword(accessPassword) : existing?.rows[0]?.access_password_hash ?? null
@@ -462,6 +489,15 @@ async function writePost(client, payload, id = null) {
   const readingMinutes = payload.readingMinutes ?? estimateReadingMinutes(contentMarkdown);
   const publishedAt = status === "published" ? new Date() : null;
   const scheduledAt = parseScheduledAt(payload.scheduledAt);
+  const isFeatured = Boolean(payload.isFeatured);
+  let featuredOrder = 0;
+  if (isFeatured) {
+    featuredOrder = Number(existing?.rows[0]?.featured_order || 0);
+    if (!featuredOrder) {
+      const maxOrder = await client.query("SELECT COALESCE(MAX(featured_order), 0)::integer AS max_order FROM posts WHERE is_featured = true");
+      featuredOrder = Number(maxOrder.rows[0]?.max_order || 0) + 10;
+    }
+  }
 
   const values = [
     title,
@@ -472,7 +508,8 @@ async function writePost(client, payload, id = null) {
     payload.coverUrl || "/assets/article-cover.png",
     categoryId,
     status,
-    Boolean(payload.isFeatured),
+    isFeatured,
+    featuredOrder,
     visibility,
     accessPasswordHash,
     passwordHint,
@@ -495,26 +532,27 @@ async function writePost(client, payload, id = null) {
           category_id = $7,
           status = $8,
           is_featured = $9,
-          visibility = $10,
-          access_password_hash = $11,
-          password_hint = $12,
-          allow_comment = $13,
-          require_comment_review = $14,
-          reading_minutes = $15,
-          published_at = COALESCE($16, published_at),
-          scheduled_at = $17,
+          featured_order = $10,
+          visibility = $11,
+          access_password_hash = $12,
+          password_hint = $13,
+          allow_comment = $14,
+          require_comment_review = $15,
+          reading_minutes = $16,
+          published_at = COALESCE($17, published_at),
+          scheduled_at = $18,
           updated_at = now()
-         WHERE id = $18
+         WHERE id = $19
          RETURNING id`,
         [...values, id],
       )
     : await client.query(
         `INSERT INTO posts(
           title, slug, excerpt, summary, content_markdown, cover_url, category_id, status,
-          is_featured, visibility, access_password_hash, password_hint,
+          is_featured, featured_order, visibility, access_password_hash, password_hint,
           allow_comment, require_comment_review, reading_minutes, published_at, scheduled_at
         )
-        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)
         RETURNING id`,
         values,
       );
@@ -1563,7 +1601,7 @@ async function handleAdminPosts(req, res, url) {
     `
       SELECT
         p.id, p.title, p.slug, p.excerpt, p.summary, p.cover_url, p.status, p.visibility, p.password_hint,
-        p.access_password_hash, p.is_featured, p.allow_comment,
+        p.access_password_hash, p.is_featured, p.featured_order, p.allow_comment,
         p.reading_minutes, p.views_count, p.likes_count, p.comments_count, p.published_at,
         c.id AS category_id, c.name AS category_name, c.slug AS category_slug,
         COALESCE(json_agg(json_build_object('id', t.id, 'name', t.name, 'slug', t.slug) ORDER BY t.name) FILTER (WHERE t.id IS NOT NULL), '[]') AS tags
@@ -1573,7 +1611,7 @@ async function handleAdminPosts(req, res, url) {
       LEFT JOIN tags t ON t.id = pt.tag_id
       ${where.length ? `WHERE ${where.join(" AND ")}` : ""}
       GROUP BY p.id, c.id
-      ORDER BY p.is_featured DESC, p.updated_at DESC
+      ORDER BY p.is_featured DESC, p.featured_order ASC, p.updated_at DESC
     `,
     params,
   );
@@ -1731,17 +1769,54 @@ async function handleAdminFeaturedPost(req, res, id) {
   const body = await readBody(req);
   const rawFeatured = body.isFeatured ?? body.featured;
   const isFeatured = rawFeatured === true || rawFeatured === "true" || rawFeatured === 1 || rawFeatured === "1";
-  const result = await query(
-    `UPDATE posts
-     SET is_featured = $1,
-         updated_at = now()
-     WHERE id = $2
-     RETURNING id`,
-    [isFeatured, id],
-  );
+  const result = await transaction(async (client) => {
+    let featuredOrder = 0;
+    if (isFeatured) {
+      const current = await client.query("SELECT featured_order FROM posts WHERE id = $1", [id]);
+      if (!current.rowCount) return current;
+      featuredOrder = Number(current.rows[0]?.featured_order || 0);
+      if (!featuredOrder) {
+        const maxOrder = await client.query("SELECT COALESCE(MAX(featured_order), 0)::integer AS max_order FROM posts WHERE is_featured = true");
+        featuredOrder = Number(maxOrder.rows[0]?.max_order || 0) + 10;
+      }
+    }
+    const updated = await client.query(
+      `UPDATE posts
+       SET is_featured = $1,
+           featured_order = $2,
+           updated_at = now()
+       WHERE id = $3
+       RETURNING id`,
+      [isFeatured, featuredOrder, id],
+    );
+    if (updated.rowCount) await normalizeFeaturedOrder(client);
+    return updated;
+  });
   if (!result.rowCount) return sendJson(res, 404, { error: "post_not_found" }, corsHeaders(req));
   const item = await getPostDetail(id);
   sendJson(res, 200, { id, ok: true, isFeatured, item }, corsHeaders(req));
+}
+
+async function handleAdminFeaturedOrderPost(req, res, id) {
+  const body = await readBody(req);
+  const direction = body.direction === "down" ? "down" : "up";
+  const result = await transaction(async (client) => {
+    await normalizeFeaturedOrder(client);
+    const current = await client.query("SELECT id, featured_order FROM posts WHERE id = $1 AND is_featured = true", [id]);
+    if (!current.rowCount) return { missing: true };
+    const currentOrder = Number(current.rows[0].featured_order);
+    const target = direction === "up"
+      ? await client.query("SELECT id, featured_order FROM posts WHERE is_featured = true AND featured_order < $1 ORDER BY featured_order DESC LIMIT 1", [currentOrder])
+      : await client.query("SELECT id, featured_order FROM posts WHERE is_featured = true AND featured_order > $1 ORDER BY featured_order ASC LIMIT 1", [currentOrder]);
+    if (!target.rowCount) return { unchanged: true };
+    await client.query("UPDATE posts SET featured_order = $1, updated_at = now() WHERE id = $2", [target.rows[0].featured_order, id]);
+    await client.query("UPDATE posts SET featured_order = $1, updated_at = now() WHERE id = $2", [currentOrder, target.rows[0].id]);
+    return { ok: true };
+  });
+  if (result.missing) return sendJson(res, 400, { error: "post_not_featured", message: "Post must be featured before changing featured order" }, corsHeaders(req));
+  const item = await getPostDetail(id);
+  if (!item) return sendJson(res, 404, { error: "post_not_found" }, corsHeaders(req));
+  sendJson(res, 200, { id, ok: true, unchanged: Boolean(result.unchanged), item }, corsHeaders(req));
 }
 
 async function handleAdminDeletePost(req, res, id) {
@@ -2646,6 +2721,9 @@ async function handleRequest(req, res) {
 
     const adminStatus = url.pathname.match(/^\/api\/admin\/posts\/(\d+)\/status$/);
     if (req.method === "PUT" && adminStatus) return handleAdminStatusPost(req, res, Number(adminStatus[1]));
+
+    const adminFeaturedOrder = url.pathname.match(/^\/api\/admin\/posts\/(\d+)\/featured-order$/);
+    if (req.method === "PUT" && adminFeaturedOrder) return handleAdminFeaturedOrderPost(req, res, Number(adminFeaturedOrder[1]));
 
     const adminFeatured = url.pathname.match(/^\/api\/admin\/posts\/(\d+)\/featured$/);
     if (req.method === "PUT" && adminFeatured) return handleAdminFeaturedPost(req, res, Number(adminFeatured[1]));

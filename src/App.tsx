@@ -2426,6 +2426,18 @@ function AdminPlaceholder({ page }: { page: string }) {
     }
   }
 
+  async function movePostFeatured(id: number, direction: "up" | "down") {
+    try {
+      const result = await api.updatePostFeaturedOrder(id, direction);
+      const refreshed = await api.getAdminPosts(page === "drafts" ? "draft" : page === "trash" ? "archived" : undefined);
+      setAdminPosts(sortPostsForAdminList(refreshed.items));
+      setActionNotice(result.unchanged ? "这篇精选文章已经在当前方向的边界。" : "精选文章排序已更新，前台精选列表会按新顺序展示。");
+      emitAdminDataChanged();
+    } catch (error) {
+      setActionNotice(getApiErrorMessage(error));
+    }
+  }
+
   async function duplicatePost(id: number) {
     try {
       const result = await api.duplicatePost(id);
@@ -2633,7 +2645,12 @@ function AdminPlaceholder({ page }: { page: string }) {
   }
 
   function sortPostsForAdminList(items: AdminPostListItem[]) {
-    return [...items].sort((a, b) => Number(Boolean(b.featured)) - Number(Boolean(a.featured)));
+    return [...items].sort((a, b) => {
+      const featuredDiff = Number(Boolean(b.featured)) - Number(Boolean(a.featured));
+      if (featuredDiff) return featuredDiff;
+      if (a.featured && b.featured) return (a.featuredOrder ?? 0) - (b.featuredOrder ?? 0);
+      return 0;
+    });
   }
 
   function reviewStatus(status: string) {
@@ -2678,6 +2695,10 @@ function AdminPlaceholder({ page }: { page: string }) {
               ...(item.status === "published" ? [{ label: "下架为草稿", title: "前台不再展示，文章保留在草稿箱继续编辑", run: () => changePostStatus(item.id, "draft") }] : [{ label: "发布", title: "将草稿发布到前台公开显示", run: () => changePostStatus(item.id, "published") }]),
               { label: "复制", title: "复制文章内容、摘要、封面、分类和标签为一篇新草稿", run: () => duplicatePost(item.id) },
               { label: item.featured ? "取消精选" : "设为精选", title: item.featured ? "从前台精选文章列表移除" : "加入前台精选文章列表", run: () => togglePostFeatured(item.id, !item.featured) },
+              ...(item.featured ? [
+                { label: "上移精选", title: "提高这篇文章在前台精选列表中的展示顺序", run: () => movePostFeatured(item.id, "up") },
+                { label: "下移精选", title: "降低这篇文章在前台精选列表中的展示顺序", run: () => movePostFeatured(item.id, "down") },
+              ] : []),
               { label: "删除", title: "先移入回收站，之后可恢复或永久删除", run: () => deletePost(item.id) },
             ],
       }))
