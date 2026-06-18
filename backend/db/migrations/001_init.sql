@@ -74,6 +74,8 @@ CREATE TABLE IF NOT EXISTS posts (
   category_id bigint REFERENCES categories(id) ON DELETE SET NULL,
   status varchar(30) NOT NULL DEFAULT 'draft',
   visibility varchar(30) NOT NULL DEFAULT 'public',
+  access_password_hash text,
+  password_hint text,
   is_featured boolean NOT NULL DEFAULT false,
   allow_comment boolean NOT NULL DEFAULT true,
   require_comment_review boolean NOT NULL DEFAULT true,

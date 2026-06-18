@@ -78,6 +78,9 @@ const API_ERROR_MESSAGES: Record<string, string> = {
   invalid_session: "登录已失效，请重新登录",
   post_not_found: "文章不存在或已被删除",
   post_not_publishable: "发布文章必须填写标题和正文内容",
+  post_password_required: "密码文章必须填写访问密码",
+  invalid_post_password: "访问密码不正确",
+  post_password_unavailable: "这篇文章还没有配置访问密码",
   scheduled_requires_editor: "定时发布需要在编辑器填写发布时间后保存",
   media_not_found: "媒体文件不存在",
   category_not_found: "分类不存在",
@@ -186,6 +189,8 @@ type EditorPostMeta = {
   coverUrl?: string;
   status?: "draft" | "published" | "scheduled";
   visibility?: "public" | "private" | "password";
+  accessPassword?: string;
+  passwordHint?: string;
   scheduledAt?: string;
   seoTitle?: string;
   allowComment?: boolean;
@@ -200,6 +205,10 @@ type BackendPost = {
   contentMarkdown?: string;
   status?: "draft" | "published" | "scheduled" | "archived";
   visibility?: "public" | "private" | "password";
+  passwordHint?: string;
+  hasAccessPassword?: boolean;
+  passwordRequired?: boolean;
+  locked?: boolean;
   scheduledAt?: string;
   requireCommentReview?: boolean;
   category?: { name: string } | null;
@@ -231,6 +240,8 @@ export type EditorPostDetail = {
   tags: string[];
   status?: "draft" | "published" | "scheduled" | "archived";
   visibility?: "public" | "private" | "password";
+  passwordHint?: string;
+  hasAccessPassword?: boolean;
   scheduledAt?: string;
   isFeatured?: boolean;
   allowComment?: boolean;
@@ -591,6 +602,10 @@ function mapBackendPost(post: BackendPost): Article {
     coverUrl: resolveBackendAssetUrl(post.coverUrl),
     allowComment: post.allowComment ?? true,
     featured: post.isFeatured ?? false,
+    visibility: post.visibility,
+    passwordRequired: post.passwordRequired ?? post.visibility === "password",
+    passwordHint: post.passwordHint ?? "",
+    locked: Boolean(post.locked),
     sections: post.sections?.length ? post.sections : [{ id: "content", title: "正文", level: 2, body: post.summary ?? post.excerpt ?? "" }],
     previousId: post.previousPost ? toNumberId(post.previousPost.id) : undefined,
     previousTitle: post.previousPost?.title,
@@ -617,6 +632,8 @@ function mapEditorPost(post: BackendPost): EditorPostDetail {
     tags: post.tags?.map((item) => item.name) ?? [],
     status: post.status,
     visibility: post.visibility,
+    passwordHint: post.passwordHint ?? "",
+    hasAccessPassword: Boolean(post.hasAccessPassword),
     scheduledAt: post.scheduledAt,
     isFeatured: post.isFeatured ?? true,
     allowComment: post.allowComment ?? true,
@@ -1021,6 +1038,14 @@ export const api = {
       return wait({ article: fallbackArticle, source: "mock" as const, notFound: !fallbackArticle, message: getApiErrorMessage(error) });
     }
   },
+  unlockArticle: async (id: number, password: string) => {
+    const data = await requestStrictJson<BackendPost>(`/public/posts/${id}/unlock`, {
+      method: "POST",
+      headers: { "x-visitor-id": getVisitorId() },
+      body: JSON.stringify({ password }),
+    });
+    return { article: mapBackendPost(data), source: "api" as const };
+  },
   getComments: async (postId: number) => {
     const data = await requestJson<{ items?: BackendComment[]; source?: "mock" }>(`/public/posts/${postId}/comments`, { items: [], source: "mock" });
     if (data.source === "mock" || !Array.isArray(data.items)) return { items: [], source: "mock" as const };
@@ -1335,6 +1360,8 @@ export const api = {
       tags: meta?.tags?.length ? meta.tags : ["博客系统", "自建项目", "AI"],
       status: meta?.status ?? "draft",
       visibility: meta?.visibility ?? "public",
+      accessPassword: meta?.accessPassword,
+      passwordHint: meta?.passwordHint,
       scheduledAt: meta?.scheduledAt,
       isFeatured: meta?.isFeatured ?? true,
       allowComment: meta?.allowComment ?? true,

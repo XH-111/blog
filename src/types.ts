@@ -23,6 +23,10 @@ export type Article = {
   coverUrl?: string;
   allowComment?: boolean;
   featured?: boolean;
+  visibility?: "public" | "private" | "password";
+  passwordRequired?: boolean;
+  passwordHint?: string;
+  locked?: boolean;
   sections: ArticleSection[];
   codeSample?: string;
   previousId?: number;

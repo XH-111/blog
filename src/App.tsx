@@ -493,6 +493,9 @@ function ArticlePage({ articleId }: { articleId: number }) {
   const [articleSource, setArticleSource] = useState<"api" | "mock">("mock");
   const [articleLoading, setArticleLoading] = useState(true);
   const [articleNotice, setArticleNotice] = useState("");
+  const [articlePassword, setArticlePassword] = useState("");
+  const [unlockNotice, setUnlockNotice] = useState("");
+  const [unlocking, setUnlocking] = useState(false);
   const [relatedArticles, setRelatedArticles] = useState<Article[]>([]);
   const [latestArticles, setLatestArticles] = useState<Article[]>([]);
   const [articleSideUsingMock, setArticleSideUsingMock] = useState(false);
@@ -504,6 +507,8 @@ function ArticlePage({ articleId }: { articleId: number }) {
     setArticleLoading(true);
     setArticleNotice("");
     setArticle(null);
+    setArticlePassword("");
+    setUnlockNotice("");
     setRelatedArticles([]);
     setLatestArticles([]);
     setArticleSideUsingMock(false);
@@ -618,6 +623,29 @@ function ArticlePage({ articleId }: { articleId: number }) {
     }
   }
 
+  async function unlockArticle(event: FormEvent) {
+    event.preventDefault();
+    if (!article || unlocking) return;
+    if (!articlePassword.trim()) {
+      setUnlockNotice("请输入访问密码。");
+      return;
+    }
+    setUnlocking(true);
+    setUnlockNotice("正在验证密码...");
+    try {
+      const result = await api.unlockArticle(article.id, articlePassword);
+      setArticle(result.article);
+      setArticleSource(result.source);
+      setLikeCount(result.article.likes);
+      setArticlePassword("");
+      setUnlockNotice("密码正确，正文已解锁。");
+    } catch (error) {
+      setUnlockNotice(getApiErrorMessage(error));
+    } finally {
+      setUnlocking(false);
+    }
+  }
+
   return (
     <>
       <PublicHeader active={`/article/${article?.id ?? articleId}`} />
@@ -627,6 +655,21 @@ function ArticlePage({ articleId }: { articleId: number }) {
             <h1>{articleLoading ? "正在读取文章" : "文章不可用"}</h1>
             <p>{articleLoading ? "正在从后端数据库加载文章内容..." : articleNotice || "文章不存在或尚未发布。"}</p>
             <button onClick={() => go("/")}>返回首页</button>
+          </section>
+        </main>
+      ) : article.locked ? (
+        <main className="page-shell">
+          <section className="password-gate card">
+            <Tag tone="orange">密码访问</Tag>
+            <h1>{article.title}</h1>
+            <p>{article.summary || "这篇文章需要输入访问密码后才能阅读正文。"}</p>
+            {article.passwordHint && <p className="password-hint">提示：{article.passwordHint}</p>}
+            <form onSubmit={unlockArticle}>
+              <input value={articlePassword} type="password" onChange={(event) => setArticlePassword(event.target.value)} placeholder="输入访问密码" />
+              <button disabled={unlocking}>{unlocking ? "验证中..." : "解锁阅读"}</button>
+            </form>
+            {unlockNotice && <p className="form-notice">{unlockNotice}</p>}
+            <button className="text-link" onClick={() => go("/posts")}>返回文章页</button>
           </section>
         </main>
       ) : (
@@ -3146,6 +3189,9 @@ function EditorPage() {
   const [publishTiming, setPublishTiming] = useState<"now" | "scheduled">("now");
   const [scheduledAt, setScheduledAt] = useState(getDefaultScheduledAt);
   const [visibility, setVisibility] = useState<"public" | "private" | "password">("public");
+  const [accessPassword, setAccessPassword] = useState("");
+  const [passwordHint, setPasswordHint] = useState("");
+  const [hasAccessPassword, setHasAccessPassword] = useState(false);
   const [seoTitle, setSeoTitle] = useState(title.slice(0, 60));
   const [coverUrl, setCoverUrl] = useState(DEFAULT_EDITOR_COVER);
   const [coverName, setCoverName] = useState("editor-cover.png");
@@ -3201,6 +3247,8 @@ function EditorPage() {
     isFeatured: featured,
     coverUrl,
     visibility,
+    accessPassword,
+    passwordHint,
     scheduledAt: normalizedScheduledAt,
     seoTitle,
     allowComment,
@@ -3223,6 +3271,9 @@ function EditorPage() {
       setPublishTiming("now");
       setScheduledAt(getDefaultScheduledAt());
       setVisibility("public");
+      setAccessPassword("");
+      setPasswordHint("");
+      setHasAccessPassword(false);
       setSeoTitle(DEFAULT_EDITOR_TITLE.slice(0, 60));
       setCoverUrl(DEFAULT_EDITOR_COVER);
       setCoverName("editor-cover.png");
@@ -3268,6 +3319,9 @@ function EditorPage() {
         setAllowComment(item.allowComment ?? true);
         setReviewComment(item.requireCommentReview ?? true);
         setVisibility(item.visibility ?? "public");
+        setAccessPassword("");
+        setPasswordHint(item.passwordHint ?? "");
+        setHasAccessPassword(Boolean(item.hasAccessPassword));
         setSeoTitle(item.title.slice(0, 60));
         if (item.coverUrl) {
           setCoverUrl(item.coverUrl);
@@ -3686,9 +3740,16 @@ function EditorPage() {
               <option value="password">密码访问</option>
             </select>
             <small className="field-help">
-              {visibility === "public" ? "公开文章会出现在前台列表，并允许通过详情页访问。" : visibility === "private" ? "私密文章只保存在后台，前台列表和详情页都不会展示。" : "密码访问页暂未开放，当前会按非公开文章处理，不会在前台展示。"}
+              {visibility === "public" ? "公开文章会出现在前台列表，并允许通过详情页访问。" : visibility === "private" ? "私密文章只保存在后台，前台列表和详情页都不会展示。" : "密码文章会出现在前台列表，详情页输入正确密码后才能阅读正文。"}
             </small>
           </label>
+          {visibility === "password" && (
+            <>
+              <label>访问密码<input value={accessPassword} type="password" onChange={(event) => setAccessPassword(event.target.value)} placeholder={hasAccessPassword ? "留空则保留原密码" : "请输入访问密码"} /></label>
+              <label>密码提示<input value={passwordHint} maxLength={80} onChange={(event) => setPasswordHint(event.target.value)} placeholder="例如：我的英文名、项目代号等" /></label>
+              <small className="field-help">{hasAccessPassword ? "当前文章已设置访问密码；填写新密码会覆盖旧密码。" : "发布密码文章前必须设置访问密码，密码只会以哈希形式保存。"}</small>
+            </>
+          )}
           <h3>SEO 设置</h3>
           <label>SEO 标题<input value={seoTitle} maxLength={80} onChange={(event) => setSeoTitle(event.target.value)} placeholder="输入搜索结果标题" /></label>
           <h3>评论设置</h3>

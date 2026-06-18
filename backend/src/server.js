@@ -166,6 +166,11 @@ async function ensureRuntimeSchema() {
       UNIQUE (stat_date, visitor_id)
     )
   `);
+  await query(`
+    ALTER TABLE posts
+      ADD COLUMN IF NOT EXISTS access_password_hash text,
+      ADD COLUMN IF NOT EXISTS password_hint text
+  `);
 }
 
 function getClientIp(req) {
@@ -190,7 +195,7 @@ async function removeUploadedFile(storagePath) {
 
 function postListSql({ keyword, category, tag, year, sort, limit, offset }) {
   const params = [];
-  const where = ["p.status = 'published'", "p.visibility = 'public'"];
+  const where = ["p.status = 'published'", "p.visibility IN ('public', 'password')"];
 
   if (keyword) {
     params.push(`%${keyword.toLowerCase()}%`);
@@ -219,7 +224,8 @@ function postListSql({ keyword, category, tag, year, sort, limit, offset }) {
   return {
     text: `
       SELECT
-        p.id, p.title, p.slug, p.excerpt, p.summary, p.cover_url, p.status, p.is_featured, p.allow_comment,
+        p.id, p.title, p.slug, p.excerpt, p.summary, p.cover_url, p.status, p.visibility, p.password_hint,
+        p.is_featured, p.allow_comment,
         p.reading_minutes, p.views_count, p.likes_count, p.comments_count, p.published_at,
         c.id AS category_id, c.name AS category_name, c.slug AS category_slug,
         COALESCE(json_agg(json_build_object('id', t.id, 'name', t.name, 'slug', t.slug) ORDER BY t.name) FILTER (WHERE t.id IS NOT NULL), '[]') AS tags
@@ -245,6 +251,10 @@ function mapPost(row) {
     summary: row.summary,
     coverUrl: row.cover_url,
     allowComment: row.allow_comment,
+    visibility: row.visibility,
+    passwordRequired: row.visibility === "password",
+    passwordHint: row.visibility === "password" ? row.password_hint || "" : "",
+    hasAccessPassword: row.visibility === "password" ? Boolean(row.access_password_hash) : false,
     category: row.category_id ? { id: Number(row.category_id), name: row.category_name, slug: row.category_slug } : null,
     tags: row.tags ?? [],
     isFeatured: row.is_featured,
@@ -296,6 +306,17 @@ function validatePublishablePost(payload) {
   if (!title) return { error: "title_required", message: "鍙戝竷鏂囩珷蹇呴』濉啓鏍囬" };
   if (!content) return { error: "content_required", message: "鍙戝竷鏂囩珷蹇呴』濉啓姝ｆ枃鍐呭" };
   return null;
+}
+
+async function validatePostAccessPassword(payload, id = null) {
+  if (!["published", "scheduled"].includes(payload.status)) return null;
+  if (payload.visibility !== "password") return null;
+  if (String(payload.accessPassword || payload.password || "").trim()) return null;
+  if (id) {
+    const existing = await query("SELECT access_password_hash FROM posts WHERE id = $1", [id]);
+    if (existing.rows[0]?.access_password_hash) return null;
+  }
+  return { error: "post_password_required", message: "Password protected posts require an access password" };
 }
 
 function makeExcerpt(content, explicit) {
@@ -365,6 +386,12 @@ async function writePost(client, payload, id = null) {
   const contentMarkdown = String(payload.contentMarkdown || payload.content || "");
   const status = ["published", "scheduled", "draft"].includes(payload.status) ? payload.status : "draft";
   const visibility = ["public", "private", "password"].includes(payload.visibility) ? payload.visibility : "public";
+  const existing = id ? await client.query("SELECT access_password_hash FROM posts WHERE id = $1", [id]) : null;
+  const accessPassword = String(payload.accessPassword || payload.password || "").trim();
+  const accessPasswordHash = visibility === "password"
+    ? accessPassword ? await hashPassword(accessPassword) : existing?.rows[0]?.access_password_hash ?? null
+    : null;
+  const passwordHint = visibility === "password" ? String(payload.passwordHint || "").trim() : "";
   const baseSlug = payload.slug ? slugify(payload.slug) : slugify(title);
   const slug = id ? payload.slug ? baseSlug : null : `${baseSlug}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
   const excerpt = makeExcerpt(contentMarkdown, payload.excerpt);
@@ -385,6 +412,8 @@ async function writePost(client, payload, id = null) {
     status,
     Boolean(payload.isFeatured),
     visibility,
+    accessPasswordHash,
+    passwordHint,
     payload.allowComment !== false,
     payload.requireCommentReview !== false,
     readingMinutes,
@@ -405,22 +434,25 @@ async function writePost(client, payload, id = null) {
           status = $8,
           is_featured = $9,
           visibility = $10,
-          allow_comment = $11,
-          require_comment_review = $12,
-          reading_minutes = $13,
-          published_at = COALESCE($14, published_at),
-          scheduled_at = $15,
+          access_password_hash = $11,
+          password_hint = $12,
+          allow_comment = $13,
+          require_comment_review = $14,
+          reading_minutes = $15,
+          published_at = COALESCE($16, published_at),
+          scheduled_at = $17,
           updated_at = now()
-         WHERE id = $16
+         WHERE id = $18
          RETURNING id`,
         [...values, id],
       )
     : await client.query(
         `INSERT INTO posts(
           title, slug, excerpt, summary, content_markdown, cover_url, category_id, status,
-          is_featured, visibility, allow_comment, require_comment_review, reading_minutes, published_at, scheduled_at
+          is_featured, visibility, access_password_hash, password_hint,
+          allow_comment, require_comment_review, reading_minutes, published_at, scheduled_at
         )
-        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
         RETURNING id`,
         values,
       );
@@ -842,24 +874,36 @@ async function handlePublicPostDetail(req, res, id) {
       LEFT JOIN categories c ON c.id = p.category_id
       LEFT JOIN post_tags pt ON pt.post_id = p.id
       LEFT JOIN tags t ON t.id = pt.tag_id
-      WHERE p.id = $1 AND p.status = 'published' AND p.visibility = 'public'
+      WHERE p.id = $1 AND p.status = 'published' AND p.visibility IN ('public', 'password')
       GROUP BY p.id, c.id
     `,
     [id],
   );
   if (!result.rowCount) return sendJson(res, 404, { error: "post_not_found" }, corsHeaders(req));
+  const row = result.rows[0];
+  if (row.visibility === "password") {
+    return sendJson(res, 200, {
+      ...mapPost(row),
+      locked: true,
+      contentMarkdown: "",
+      contentHtml: "",
+      sections: [],
+    }, corsHeaders(req));
+  }
+  return sendPublicPostContent(req, res, row, id);
+}
 
+async function sendPublicPostContent(req, res, row, id) {
   const sections = await query(
     `SELECT anchor AS id, title, level, body FROM post_sections WHERE post_id = $1 ORDER BY sort_order ASC`,
     [id],
   );
-  const row = result.rows[0];
   const [previousPost, nextPost] = await Promise.all([
     query(
       `SELECT id, title
        FROM posts
        WHERE status = 'published'
-         AND visibility = 'public'
+         AND visibility IN ('public', 'password')
          AND (published_at, id) < ($1, $2)
        ORDER BY published_at DESC, id DESC
        LIMIT 1`,
@@ -869,7 +913,7 @@ async function handlePublicPostDetail(req, res, id) {
       `SELECT id, title
        FROM posts
        WHERE status = 'published'
-         AND visibility = 'public'
+         AND visibility IN ('public', 'password')
          AND (published_at, id) > ($1, $2)
        ORDER BY published_at ASC, id ASC
        LIMIT 1`,
@@ -917,6 +961,8 @@ async function getPostDetail(id, publicOnly = false) {
     ...mapPost(row),
     status: row.status,
     visibility: row.visibility,
+    passwordHint: row.visibility === "password" ? row.password_hint || "" : "",
+    hasAccessPassword: row.visibility === "password" ? Boolean(row.access_password_hash) : false,
     scheduledAt: row.scheduled_at,
     requireCommentReview: row.require_comment_review,
     contentMarkdown: row.content_markdown,
@@ -975,6 +1021,33 @@ async function handlePublicStats(req, res) {
     likes_count: row.likes_count ?? 0,
     comments_count: row.comments_count ?? 0,
   }, corsHeaders(req));
+}
+
+async function handleUnlockPublicPost(req, res, id) {
+  await publishDueScheduledPosts();
+  const body = await readBody(req);
+  const password = String(body.password || "").trim();
+  if (!password) return sendJson(res, 400, { error: "post_password_required", message: "Password is required" }, corsHeaders(req));
+  const result = await query(
+    `
+      SELECT
+        p.*, c.id AS category_id, c.name AS category_name, c.slug AS category_slug,
+        COALESCE(json_agg(DISTINCT jsonb_build_object('id', t.id, 'name', t.name, 'slug', t.slug)) FILTER (WHERE t.id IS NOT NULL), '[]') AS tags
+      FROM posts p
+      LEFT JOIN categories c ON c.id = p.category_id
+      LEFT JOIN post_tags pt ON pt.post_id = p.id
+      LEFT JOIN tags t ON t.id = pt.tag_id
+      WHERE p.id = $1 AND p.status = 'published' AND p.visibility = 'password'
+      GROUP BY p.id, c.id
+    `,
+    [id],
+  );
+  if (!result.rowCount) return sendJson(res, 404, { error: "post_not_found" }, corsHeaders(req));
+  const row = result.rows[0];
+  if (!row.access_password_hash) return sendJson(res, 403, { error: "post_password_unavailable", message: "This post has no access password configured" }, corsHeaders(req));
+  const valid = await verifyPassword(password, row.access_password_hash);
+  if (!valid) return sendJson(res, 401, { error: "invalid_post_password", message: "Invalid post password" }, corsHeaders(req));
+  return sendPublicPostContent(req, res, row, id);
 }
 
 function normalizeHomePage(value = {}) {
@@ -1350,7 +1423,8 @@ async function handleAdminPosts(req, res, url) {
   const result = await query(
     `
       SELECT
-        p.id, p.title, p.slug, p.excerpt, p.summary, p.cover_url, p.status, p.is_featured, p.allow_comment,
+        p.id, p.title, p.slug, p.excerpt, p.summary, p.cover_url, p.status, p.visibility, p.password_hint,
+        p.access_password_hash, p.is_featured, p.allow_comment,
         p.reading_minutes, p.views_count, p.likes_count, p.comments_count, p.published_at,
         c.id AS category_id, c.name AS category_name, c.slug AS category_slug,
         COALESCE(json_agg(json_build_object('id', t.id, 'name', t.name, 'slug', t.slug) ORDER BY t.name) FILTER (WHERE t.id IS NOT NULL), '[]') AS tags
@@ -1378,6 +1452,8 @@ async function handleAdminCreatePost(req, res) {
   const body = await readBody(req);
   const publishError = validatePublishablePost(body);
   if (publishError) return sendJson(res, 400, publishError, corsHeaders(req));
+  const passwordError = await validatePostAccessPassword(body);
+  if (passwordError) return sendJson(res, 400, passwordError, corsHeaders(req));
   const scheduleError = validatePostSchedule(body);
   if (scheduleError) return sendJson(res, 400, scheduleError, corsHeaders(req));
   const id = await transaction((client) => writePost(client, body));
@@ -1390,6 +1466,8 @@ async function handleAdminUpdatePost(req, res, id) {
   const body = await readBody(req);
   const publishError = validatePublishablePost(body);
   if (publishError) return sendJson(res, 400, publishError, corsHeaders(req));
+  const passwordError = await validatePostAccessPassword(body, id);
+  if (passwordError) return sendJson(res, 400, passwordError, corsHeaders(req));
   const scheduleError = validatePostSchedule(body);
   if (scheduleError) return sendJson(res, 400, scheduleError, corsHeaders(req));
   const postId = await transaction((client) => writePost(client, body, id));
@@ -1422,10 +1500,13 @@ async function handleAdminDuplicatePost(req, res, id) {
 
 async function handleAdminPublishPost(req, res, id) {
   const result = await transaction(async (client) => {
-    const current = await client.query("SELECT id, title, content_markdown FROM posts WHERE id = $1", [id]);
+    const current = await client.query("SELECT id, title, content_markdown, visibility, access_password_hash FROM posts WHERE id = $1", [id]);
     if (!current.rowCount) return { missing: true, rowCount: 0 };
     if (!String(current.rows[0].title || "").trim() || !String(current.rows[0].content_markdown || "").trim()) {
       return { invalid: true, rowCount: 0 };
+    }
+    if (current.rows[0].visibility === "password" && !current.rows[0].access_password_hash) {
+      return { passwordMissing: true, rowCount: 0 };
     }
     const updated = await client.query(
       `UPDATE posts
@@ -1439,6 +1520,7 @@ async function handleAdminPublishPost(req, res, id) {
   });
   if (result.missing) return sendJson(res, 404, { error: "post_not_found" }, corsHeaders(req));
   if (result.invalid) return sendJson(res, 400, { error: "post_not_publishable", message: "Post title and content are required" }, corsHeaders(req));
+  if (result.passwordMissing) return sendJson(res, 400, { error: "post_password_required", message: "Password protected posts require an access password" }, corsHeaders(req));
   if (!result.rowCount) return sendJson(res, 404, { error: "post_not_found" }, corsHeaders(req));
   const item = await getPostDetail(id);
   sendJson(res, 200, { id, ok: true, status: "published", item }, corsHeaders(req));
@@ -1453,10 +1535,13 @@ async function handleAdminStatusPost(req, res, id) {
   }
   const result = await transaction(async (client) => {
     if (status === "published") {
-      const current = await client.query("SELECT title, content_markdown FROM posts WHERE id = $1", [id]);
+      const current = await client.query("SELECT title, content_markdown, visibility, access_password_hash FROM posts WHERE id = $1", [id]);
       if (!current.rowCount) return { missing: true, rowCount: 0 };
       if (!String(current.rows[0].title || "").trim() || !String(current.rows[0].content_markdown || "").trim()) {
         return { invalid: true, rowCount: 0 };
+      }
+      if (current.rows[0].visibility === "password" && !current.rows[0].access_password_hash) {
+        return { passwordMissing: true, rowCount: 0 };
       }
     }
     const updated = await client.query(
@@ -1474,6 +1559,7 @@ async function handleAdminStatusPost(req, res, id) {
   });
   if (result.missing) return sendJson(res, 404, { error: "post_not_found" }, corsHeaders(req));
   if (result.invalid) return sendJson(res, 400, { error: "post_not_publishable", message: "Post title and content are required" }, corsHeaders(req));
+  if (result.passwordMissing) return sendJson(res, 400, { error: "post_password_required", message: "Password protected posts require an access password" }, corsHeaders(req));
   if (!result.rowCount) return sendJson(res, 404, { error: "post_not_found" }, corsHeaders(req));
   const item = await getPostDetail(id);
   sendJson(res, 200, { id, ok: true, status, item }, corsHeaders(req));
@@ -2227,6 +2313,9 @@ async function handleRequest(req, res) {
 
     const postDetail = url.pathname.match(/^\/api\/public\/posts\/(\d+)$/);
     if (req.method === "GET" && postDetail) return handlePublicPostDetail(req, res, Number(postDetail[1]));
+
+    const unlockPost = url.pathname.match(/^\/api\/public\/posts\/(\d+)\/unlock$/);
+    if (req.method === "POST" && unlockPost) return handleUnlockPublicPost(req, res, Number(unlockPost[1]));
 
     const likePost = url.pathname.match(/^\/api\/public\/posts\/(\d+)\/like$/);
     if (req.method === "POST" && likePost) return handleLikePost(req, res, Number(likePost[1]));

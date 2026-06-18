@@ -79,6 +79,14 @@ input:focus, textarea:focus, select:focus { border-color: var(--teal); box-shado
 .home-entry-card b { display: block; margin-top: 4px; color: #102033; font-size: 22px; }
 .home-entry-card small { display: block; margin-top: 10px; color: #5c6c7e; line-height: 1.75; }
 .home-entry-card em { display: inline-flex; margin-top: 22px; color: var(--teal-dark); font-style: normal; font-weight: 800; }
+.password-gate { width: min(720px, calc(100vw - 48px)); display: grid; gap: 16px; margin: 72px auto; padding: 34px; text-align: center; }
+.password-gate h1 { margin: 0; font-size: 32px; letter-spacing: 0; }
+.password-gate p { margin: 0; color: var(--muted); line-height: 1.8; }
+.password-gate .password-hint { color: #314359; font-weight: 700; }
+.password-gate form { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; max-width: 460px; margin: 0 auto; width: 100%; }
+.password-gate input { min-height: 44px; padding: 0 14px; }
+.password-gate form button { min-height: 44px; padding: 0 18px; border-radius: 7px; color: #fff; background: var(--teal); font-weight: 800; }
+.password-gate .text-link { justify-self: center; color: var(--teal-dark); font-weight: 800; }
 .home-entry-icon { position: relative; width: 56px; height: 56px; display: grid; place-items: center; border-radius: 8px; background: #e7f8f6; color: var(--teal); }
 .home-entry-icon::before { content: ""; width: 24px; height: 24px; display: block; border: 2px solid currentColor; border-radius: 6px; }
 .home-entry-icon.doc::after { content: ""; position: absolute; width: 18px; height: 2px; left: 19px; top: 24px; background: currentColor; box-shadow: 0 7px 0 currentColor; }
