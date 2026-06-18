@@ -1964,6 +1964,7 @@ function AdminPlaceholder({ page }: { page: string }) {
   const [selectedKeys, setSelectedKeys] = useState<string[]>([]);
   const [mediaTypeFilter, setMediaTypeFilter] = useState<"all" | "image" | "video">("all");
   const [mediaSearch, setMediaSearch] = useState("");
+  const [mediaUploading, setMediaUploading] = useState(false);
   const mediaInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
@@ -2100,36 +2101,41 @@ function AdminPlaceholder({ page }: { page: string }) {
   async function uploadMediaFile(event: ChangeEvent<HTMLInputElement>) {
     const files = Array.from(event.target.files ?? []);
     event.target.value = "";
-    if (!files.length) return;
-    const imageFiles = files.filter((file) => file.type.startsWith("image/"));
-    if (!imageFiles.length) {
-      setActionNotice("请选择图片文件。");
+    if (!files.length || mediaUploading) return;
+    const mediaFiles = files.filter((file) => file.type.startsWith("image/") || file.type.startsWith("video/"));
+    if (!mediaFiles.length) {
+      setActionNotice("请选择图片或视频文件。");
       return;
     }
 
     const uploaded: AdminMediaItem[] = [];
     const failed: string[] = [];
-    for (const [index, file] of imageFiles.entries()) {
-      try {
-        setActionNotice(`正在上传图片 ${index + 1}/${imageFiles.length}：${file.name}`);
-        const result = await api.uploadMedia(file, file.name);
-        uploaded.push(result.item);
-      } catch (error) {
-        failed.push(`${file.name}：${getApiErrorMessage(error)}`);
+    setMediaUploading(true);
+    try {
+      for (const [index, file] of mediaFiles.entries()) {
+        try {
+          setActionNotice(`正在上传媒体 ${index + 1}/${mediaFiles.length}：${file.name}`);
+          const result = await api.uploadMedia(file, file.name);
+          uploaded.push(result.item);
+        } catch (error) {
+          failed.push(`${file.name}：${getApiErrorMessage(error)}`);
+        }
       }
+    } finally {
+      setMediaUploading(false);
     }
     if (uploaded.length) {
       setAdminMedia((items) => [...uploaded.reverse(), ...items]);
       setSource("api");
       emitAdminDataChanged();
     }
-    const skipped = files.length - imageFiles.length;
+    const skipped = files.length - mediaFiles.length;
     const parts = [
-      uploaded.length ? `已上传 ${uploaded.length} 张图片` : "",
-      failed.length ? `失败 ${failed.length} 张：${failed[0]}` : "",
-      skipped ? `已跳过 ${skipped} 个非图片文件` : "",
+      uploaded.length ? `已上传 ${uploaded.length} 个媒体文件` : "",
+      failed.length ? `失败 ${failed.length} 个：${failed[0]}` : "",
+      skipped ? `已跳过 ${skipped} 个非图片/视频文件` : "",
     ].filter(Boolean);
-    setActionNotice(parts.join("；") || "没有上传图片。");
+    setActionNotice(parts.join("；") || "没有上传媒体文件。");
   }
 
   async function updateMediaAlt(id: number, currentAltText = "") {
@@ -2508,7 +2514,7 @@ function AdminPlaceholder({ page }: { page: string }) {
         {actionNotice && <p className="admin-hint">{actionNotice}</p>}
         {page === "media" && (
           <div className="admin-hint media-upload-strip">
-            <button type="button" onClick={() => mediaInputRef.current?.click()}>上传媒体</button>
+            <button type="button" disabled={mediaUploading} onClick={() => mediaInputRef.current?.click()}>{mediaUploading ? "上传中..." : "上传媒体"}</button>
             <span>可一次选择多张图片或视频；上传后会写入 media_assets，并可作为文章封面使用。</span>
             <input ref={mediaInputRef} className="visually-hidden" type="file" accept="image/*,video/*" multiple onChange={uploadMediaFile} />
           </div>
