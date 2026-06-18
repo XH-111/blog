@@ -16,18 +16,18 @@
 
 | 阶段 | 名称 | 状态 | Commit |
 | --- | --- | --- | --- |
-| 1 | 登录、评论、留言限流 | Done | this commit |
-| 2 | 生产配置和启动安全检查 | Done | this commit |
-| 3 | 数据库和上传目录备份闭环 | Done | this commit |
-| 4 | 移动端核心流程复验和修复 | Done | this commit |
-| 5 | 前台 mock 兜底和未接入提示收敛 | Done | this commit |
-| 6 | 媒体库视频基础信息增强 | Done | this commit |
-| 7 | AI 任务历史列表和结果复看 | Pending | - |
-| 8 | 精选文章排序配置 | Pending | - |
-| 9 | 文章目录和代码高亮阅读体验 | Pending | - |
-| 10 | 文章搜索体验继续增强 | Pending | - |
-| 11 | 作者卡片和关注残留处理 | Pending | - |
-| 12 | 最终文档和本地验收 | Pending | - |
+| 1 | 登录、评论、留言限流 | Done | facdf03 |
+| 2 | 生产配置和启动安全检查 | Done | cd506d1 |
+| 3 | 数据库和上传目录备份闭环 | Done | 4848aa6 |
+| 4 | 移动端核心流程复验和修复 | Done | bb2b7c8 |
+| 5 | 前台 mock 兜底和未接入提示收敛 | Done | 83b669c |
+| 6 | 媒体库视频基础信息增强 | Done | 0a671f5 |
+| 7 | AI 任务历史列表和结果复看 | Done | 4496357 |
+| 8 | 精选文章排序配置 | Done | 6e76a63 |
+| 9 | 文章目录和代码高亮阅读体验 | Done | 710972f |
+| 10 | 文章搜索体验继续增强 | Done | 4cd7a75 |
+| 11 | 作者卡片和关注残留处理 | Done | daad89c |
+| 12 | 最终文档和本地验收 | Done | this commit |
 
 ## 阶段 1：登录、评论、留言限流
 
@@ -310,6 +310,15 @@ AI 历史能完成“生成 -> 记录 -> 复看”闭环后停止。
 feat: add ai task history review
 ```
 
+### 验收记录
+
+- 新增 `GET /api/admin/ai/tasks`，复用 `ai_tasks` 返回最近 20 条 AI 任务。
+- 后台编辑器 AI 面板新增“任务”展开区，可查看工具类型、状态、模型、输出、说明和来源链接。
+- 使用后台 API 验证最近 3 条任务返回结果、模型和来源字段。
+- 使用浏览器验证编辑器任务列表可展开，点击历史任务可打开复看弹窗。
+- `node --check backend\src\server.js`：通过。
+- `npm.cmd run build`：通过。
+
 ## 阶段 8：精选文章排序配置
 
 ### 目标
@@ -338,6 +347,16 @@ feat: add ai task history review
 ```text
 feat: add featured post ordering
 ```
+
+### 验收记录
+
+- 新增 `posts.featured_order`，启动时自动补列并归一化历史精选文章顺序。
+- 后台文章列表的精选文章新增“上移精选 / 下移精选”操作。
+- 前台 `GET /api/public/posts?featured=true` 按 `featured_order` 返回。
+- 使用真实数据验证精选顺序 `49,37,38`，上移第二篇后为 `37,49,38`，再下移恢复为 `49,37,38`。
+- 浏览器验证后台文章列表出现“上移精选 / 下移精选”按钮。
+- `node --check backend\src\server.js`：通过。
+- `npm.cmd run build`：通过。
 
 ## 阶段 9：文章目录和代码高亮阅读体验
 
@@ -370,6 +389,15 @@ feat: add featured post ordering
 feat: improve article reading navigation
 ```
 
+### 验收记录
+
+- 文章页目录支持滚动自动高亮当前章节。
+- 移动端新增横向文章目录，不遮挡正文；桌面左侧目录保持 sticky。
+- 代码块增加语言归一化、复制反馈、行号和轻量 token 高亮。
+- 浏览器验证文章详情桌面目录高亮、代码块行号和高亮存在。
+- 375px 移动端验证 `.mobile-toc` 显示、桌面 `.toc` 隐藏，页面无横向滚动。
+- `npm.cmd run build`：通过。
+
 ## 阶段 10：文章搜索体验继续增强
 
 ### 目标
@@ -399,6 +427,16 @@ feat: improve article reading navigation
 feat: improve public article search
 ```
 
+### 验收记录
+
+- 后端文章搜索范围扩展到标题、摘要、简介、正文、分类名和标签名。
+- 搜索接口返回 `searchSnippet`，前端搜索结果显示匹配内容。
+- 搜索结果卡片对命中关键词做轻量高亮。
+- 使用 `q=Q/K/V` 验证正文关键词可命中文章 #49。
+- 浏览器验证搜索结果显示“匹配内容”、关键词高亮，页面无横向滚动。
+- `node --check backend\src\server.js`：通过。
+- `npm.cmd run build`：通过。
+
 ## 阶段 11：作者卡片和关注残留处理
 
 ### 目标
@@ -427,6 +465,14 @@ feat: improve public article search
 fix: close author card interaction gaps
 ```
 
+### 验收记录
+
+- 文章侧栏作者卡片不再硬编码姓名、等级和简介。
+- 作者头像、标题、徽章、副标题和介绍从关于页公开配置读取。
+- 仍保留“了解作者”真实入口，不再出现关注、粉丝、关注未接入等未闭环社交功能。
+- 浏览器验证文章侧栏作者卡片使用关于页照片，且无关注/粉丝残留。
+- `npm.cmd run build`：通过。
+
 ## 阶段 12：最终文档和本地验收
 
 ### 目标
@@ -447,6 +493,14 @@ fix: close author card interaction gaps
 ### 停止条件
 
 文档更新、最终验证通过、最后一次提交完成后停止。
+
+### 验收记录
+
+- `npm.cmd run build`：通过。
+- `node --check backend\src\server.js`：通过。
+- `Invoke-RestMethod http://127.0.0.1:8000/api/health`：返回 `ok: true`。
+- 阶段 1-11 均已按阶段单独提交。
+- 仍延期事项：AI 调用限流、服务器部署、生产级对象存储/CDN、云端自动备份不在本轮 goal 范围内。
 
 ### 提交信息
 
