@@ -86,11 +86,32 @@ This file is a handoff note for continuing the project in a new Codex thread or 
 - Several backend error `message` fields were changed to stable English strings.
 - `node --check backend\src\server.js` passed afterward.
 
+### Pagination And List Loading
+
+- Admin article lists now use backend pagination:
+  - Published article list
+  - Draft list
+  - Trash/archived list
+  - Default page size is 10.
+  - The footer shows current page and total article count.
+- Admin media library page size was changed to 10.
+- Admin comments and messages now support backend pagination, status filtering, and keyword search together.
+- Public article comments now load the first 10 comments and expose a `加载更多评论` button when more data exists.
+- Public message board now loads the first 10 root messages and exposes a `加载更多留言` button when more data exists.
+- Backend pagination parsing is centralized through `readPagination(...)` so invalid `page` or `pageSize` query values fall back to safe defaults instead of producing invalid SQL limits.
+- After restarting the backend, the admin article pagination endpoint was verified with:
+  - `items=10`
+  - `page=1`
+  - `pageSize=10`
+  - `total=11`
+  - `hasMore=True`
+
 ## Verification Already Done
 
 - `npm.cmd run build` passed.
 - `node --check backend\src\server.js` passed.
 - `GET http://127.0.0.1:8000/api/health` passed.
+- `GET /api/admin/posts?page=1&pageSize=10` returned 10 items and a total count of 11 after backend restart.
 - Browser verification confirmed article editor toolbar buttons:
   - `B`, `I`, `H`, `≡`, `</>`, `❞`, `🔗`, `▦`, `▧`, `库`
 - Table button insertion produced a `preview-table`.

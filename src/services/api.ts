@@ -1132,10 +1132,14 @@ export const api = {
     if (data.source === "mock" || !Array.isArray(data.items)) return { articles: [], source: "mock" as const };
     return { articles: data.items.map(mapBackendPost), source: "api" as const };
   },
-  getComments: async (postId: number) => {
-    const data = await requestJson<{ items?: BackendComment[]; source?: "mock" }>(`/public/posts/${postId}/comments`, { items: [], source: "mock" });
-    if (data.source === "mock" || !Array.isArray(data.items)) return { items: [], source: "mock" as const };
-    return { items: data.items.map(mapPublicComment), source: "api" as const };
+  getComments: async (postId: number, options: { page?: number; pageSize?: number } = {}) => {
+    const params = new URLSearchParams();
+    if (options.page) params.set("page", String(options.page));
+    if (options.pageSize) params.set("pageSize", String(options.pageSize));
+    const query = params.toString() ? `?${params.toString()}` : "";
+    const data = await requestJson<{ items?: BackendComment[]; page?: number | string; pageSize?: number | string; total?: number | string; hasMore?: boolean; source?: "mock" }>(`/public/posts/${postId}/comments${query}`, { items: [], source: "mock" });
+    if (data.source === "mock" || !Array.isArray(data.items)) return { items: [], page: options.page || 1, pageSize: options.pageSize || 10, total: 0, hasMore: false, source: "mock" as const };
+    return { items: data.items.map(mapPublicComment), page: toNumber(data.page) || options.page || 1, pageSize: toNumber(data.pageSize) || options.pageSize || data.items.length, total: toNumber(data.total), hasMore: Boolean(data.hasMore), source: "api" as const };
   },
   likePost: async (postId: number) => {
     const visitorId = getVisitorId();
@@ -1163,11 +1167,15 @@ export const api = {
       source: "api" as const,
     };
   },
-  getAdminPosts: async (status?: AdminPostListItem["status"]) => {
-    const query = status ? `?status=${encodeURIComponent(status)}` : "";
-    const data = await requestStrictJson<{ items?: Array<BackendPost & { status?: AdminPostListItem["status"] }> }>(`/admin/posts${query}`);
+  getAdminPosts: async (options: { status?: AdminPostListItem["status"]; page?: number; pageSize?: number } = {}) => {
+    const params = new URLSearchParams();
+    if (options.status) params.set("status", options.status);
+    if (options.page) params.set("page", String(options.page));
+    if (options.pageSize) params.set("pageSize", String(options.pageSize));
+    const query = params.toString() ? `?${params.toString()}` : "";
+    const data = await requestStrictJson<{ items?: Array<BackendPost & { status?: AdminPostListItem["status"] }>; page?: number | string; pageSize?: number | string; total?: number | string; hasMore?: boolean }>(`/admin/posts${query}`);
     if (!Array.isArray(data.items)) throw new ApiError("后端没有返回文章列表");
-    return { items: data.items.map(mapAdminPost), source: "api" as const };
+    return { items: data.items.map(mapAdminPost), page: toNumber(data.page) || options.page || 1, pageSize: toNumber(data.pageSize) || options.pageSize || data.items.length, total: toNumber(data.total), hasMore: Boolean(data.hasMore), source: "api" as const };
   },
   getEditorPost: async (id: number) => {
     const data = await requestStrictJson<BackendPost>(`/admin/posts/${id}`);
@@ -1275,21 +1283,37 @@ export const api = {
     const data = await requestStrictJson<{ ok?: boolean; id?: DbId; deleted?: boolean }>(`/admin/tags/${id}`, { method: "DELETE" });
     return { ok: data.ok ?? true, id: toNumberId(data.id ?? id), deleted: data.deleted ?? true, source: "api" as const };
   },
-  getAdminComments: async () => {
-    const data = await requestStrictJson<{ items?: BackendComment[] }>("/admin/comments");
+  getAdminComments: async (options: { page?: number; pageSize?: number; status?: "all" | "pending" | "approved" | "rejected"; keyword?: string } = {}) => {
+    const params = new URLSearchParams();
+    if (options.page) params.set("page", String(options.page));
+    if (options.pageSize) params.set("pageSize", String(options.pageSize));
+    if (options.status && options.status !== "all") params.set("status", options.status);
+    if (options.keyword?.trim()) params.set("q", options.keyword.trim());
+    const query = params.toString() ? `?${params.toString()}` : "";
+    const data = await requestStrictJson<{ items?: BackendComment[]; page?: number | string; pageSize?: number | string; total?: number | string; hasMore?: boolean }>(`/admin/comments${query}`);
     if (!Array.isArray(data.items)) throw new ApiError("后端没有返回评论列表");
-    return { items: data.items.map(mapBackendComment), source: "api" as const };
+    return { items: data.items.map(mapBackendComment), page: toNumber(data.page) || options.page || 1, pageSize: toNumber(data.pageSize) || options.pageSize || data.items.length, total: toNumber(data.total), hasMore: Boolean(data.hasMore), source: "api" as const };
   },
-  getAdminMessages: async () => {
-    const data = await requestStrictJson<{ items?: BackendMessage[] }>("/admin/messages");
+  getAdminMessages: async (options: { page?: number; pageSize?: number; status?: "all" | "pending" | "approved" | "rejected"; keyword?: string } = {}) => {
+    const params = new URLSearchParams();
+    if (options.page) params.set("page", String(options.page));
+    if (options.pageSize) params.set("pageSize", String(options.pageSize));
+    if (options.status && options.status !== "all") params.set("status", options.status);
+    if (options.keyword?.trim()) params.set("q", options.keyword.trim());
+    const query = params.toString() ? `?${params.toString()}` : "";
+    const data = await requestStrictJson<{ items?: BackendMessage[]; page?: number | string; pageSize?: number | string; total?: number | string; hasMore?: boolean }>(`/admin/messages${query}`);
     if (!Array.isArray(data.items)) throw new ApiError("后端没有返回留言列表");
-    return { items: data.items.map(mapBackendMessage), source: "api" as const };
+    return { items: data.items.map(mapBackendMessage), page: toNumber(data.page) || options.page || 1, pageSize: toNumber(data.pageSize) || options.pageSize || data.items.length, total: toNumber(data.total), hasMore: Boolean(data.hasMore), source: "api" as const };
   },
-  getMessages: async () => {
+  getMessages: async (options: { page?: number; pageSize?: number } = {}) => {
     const fallback = { messages, source: "mock" as const };
-    const data = await requestJson<{ items?: BackendMessage[]; source?: "mock" }>("/public/messages", { items: [], source: "mock" });
-    if (data.source === "mock" || !Array.isArray(data.items)) return wait(fallback);
-    return { messages: data.items.map(mapPublicMessage), source: "api" as const };
+    const params = new URLSearchParams();
+    if (options.page) params.set("page", String(options.page));
+    if (options.pageSize) params.set("pageSize", String(options.pageSize));
+    const query = params.toString() ? `?${params.toString()}` : "";
+    const data = await requestJson<{ items?: BackendMessage[]; page?: number | string; pageSize?: number | string; total?: number | string; hasMore?: boolean; source?: "mock" }>(`/public/messages${query}`, { items: [], source: "mock" });
+    if (data.source === "mock" || !Array.isArray(data.items)) return wait({ ...fallback, page: options.page || 1, pageSize: options.pageSize || fallback.messages.length, total: fallback.messages.length, hasMore: false });
+    return { messages: data.items.map(mapPublicMessage), page: toNumber(data.page) || options.page || 1, pageSize: toNumber(data.pageSize) || options.pageSize || data.items.length, total: toNumber(data.total), hasMore: Boolean(data.hasMore), source: "api" as const };
   },
   postMessage: async (payload: { author: string; email: string; site?: string; content: string; parentId?: number }) => {
     const createdMessage = await requestStrictJson<{ item?: BackendMessage }>("/public/messages", { method: "POST", body: JSON.stringify(payload) });

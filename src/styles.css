@@ -235,6 +235,9 @@ pre button { position: absolute; right: 12px; top: 10px; color: #fff; border: 1p
 .comment-row p { margin: 0 0 4px; }
 .comment-row small { color: #667386; font-size: 12px; }
 .comment-reply { margin-top: 10px; padding-left: 18px; display: grid; grid-template-columns: 24px 1fr; gap: 8px; border-left: 1px dashed #cbd8df; }
+.list-count { margin: 10px 0 0; color: var(--muted); font-size: 13px; text-align: center; }
+.load-more { min-height: 38px; margin: 12px auto 0; display: inline-flex; align-items: center; justify-content: center; padding: 0 16px; border: 1px solid var(--line); border-radius: 7px; color: var(--teal-dark); background: #fff; font-weight: 800; }
+.load-more:hover:not(:disabled) { border-color: rgba(7,155,149,.36); background: #e9fbf8; }
 .author { text-align: center; }
 .author-stats { display: grid; grid-template-columns: repeat(3, 1fr); border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); margin: 16px 0; padding: 12px 0; }
 .author-stats span { display: block; color: var(--muted); font-size: 12px; font-weight: 400; }

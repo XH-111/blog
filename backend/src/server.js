@@ -198,6 +198,15 @@ function corsHeaders(req) {
   };
 }
 
+function readPagination(url, { defaultPageSize = 10, maxPageSize = 100 } = {}) {
+  const rawPage = Number(url.searchParams.get("page"));
+  const rawPageSize = Number(url.searchParams.get("pageSize"));
+  const page = Number.isFinite(rawPage) && rawPage > 0 ? Math.floor(rawPage) : 1;
+  const requestedPageSize = Number.isFinite(rawPageSize) && rawPageSize > 0 ? Math.floor(rawPageSize) : defaultPageSize;
+  const pageSize = Math.min(Math.max(requestedPageSize, 1), maxPageSize);
+  return { page, pageSize, offset: (page - 1) * pageSize };
+}
+
 async function ensureRuntimeSchema() {
   await query(`
     CREATE TABLE IF NOT EXISTS site_daily_visitors (
@@ -1502,18 +1511,21 @@ async function refreshPostCommentCount(client, postId) {
   );
 }
 
-async function handlePublicComments(req, res, id) {
+async function handlePublicComments(req, res, id, url) {
   const post = await query("SELECT id FROM posts WHERE id = $1 AND status = 'published'", [id]);
   if (!post.rowCount) return sendJson(res, 404, { error: "post_not_found" }, corsHeaders(req));
+  const { page, pageSize, offset } = readPagination(url, { defaultPageSize: 10, maxPageSize: 50 });
   const result = await query(
-    `SELECT id, parent_id, author_name, author_site, content, likes_count, status, created_at
+    `SELECT count(*) OVER()::integer AS total_count,
+            id, parent_id, author_name, author_site, content, likes_count, status, created_at
      FROM comments
      WHERE post_id = $1 AND status = 'approved'
      ORDER BY created_at ASC
-     LIMIT 100`,
-    [id],
+     LIMIT $2 OFFSET $3`,
+    [id, pageSize, offset],
   );
-  sendJson(res, 200, { items: result.rows }, corsHeaders(req));
+  const total = Number(result.rows[0]?.total_count ?? 0);
+  sendJson(res, 200, { items: result.rows, page, pageSize, total, hasMore: page * pageSize < total }, corsHeaders(req));
 }
 
 async function handleCreateComment(req, res, id) {
@@ -1548,14 +1560,26 @@ async function handleCreateComment(req, res, id) {
   sendJson(res, 201, { item: result }, corsHeaders(req));
 }
 
-async function handlePublicMessages(req, res) {
-  const result = await query(`
-    SELECT id, parent_id, author_name, author_site, role, content, likes_count, status, created_at
-    FROM messages
-    WHERE status = 'approved'
-    ORDER BY created_at ASC
-    LIMIT 50
-  `);
+async function handlePublicMessages(req, res, url) {
+  const { page, pageSize, offset } = readPagination(url, { defaultPageSize: 10, maxPageSize: 50 });
+  const rootResult = await query(
+    `SELECT count(*) OVER()::integer AS total_count,
+            id, parent_id, author_name, author_site, role, content, likes_count, status, created_at
+     FROM messages
+     WHERE status = 'approved' AND parent_id IS NULL
+     ORDER BY created_at DESC
+     LIMIT $1 OFFSET $2`,
+    [pageSize, offset],
+  );
+  const rootIds = rootResult.rows.map((row) => row.id);
+  const replyResult = rootIds.length ? await query(
+    `SELECT id, parent_id, author_name, author_site, role, content, likes_count, status, created_at
+     FROM messages
+     WHERE status = 'approved' AND parent_id = ANY($1::bigint[])
+     ORDER BY created_at ASC`,
+    [rootIds],
+  ) : { rows: [] };
+  const result = { rows: [...rootResult.rows, ...replyResult.rows] };
   const byId = new Map();
   const roots = [];
   for (const row of result.rows) {
@@ -1570,7 +1594,8 @@ async function handlePublicMessages(req, res) {
     }
   }
   roots.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
-  sendJson(res, 200, { items: roots }, corsHeaders(req));
+  const total = Number(rootResult.rows[0]?.total_count ?? 0);
+  sendJson(res, 200, { items: roots, page, pageSize, total, hasMore: page * pageSize < total }, corsHeaders(req));
 }
 
 async function handleCreateMessage(req, res) {
@@ -1602,6 +1627,7 @@ async function handleCreateMessage(req, res) {
 async function handleAdminPosts(req, res, url) {
   await publishDueScheduledPosts();
   const status = url.searchParams.get("status");
+  const { page, pageSize, offset } = readPagination(url, { defaultPageSize: 10, maxPageSize: 100 });
   const params = [];
   const where = [];
   if (status) {
@@ -1610,9 +1636,11 @@ async function handleAdminPosts(req, res, url) {
   } else {
     where.push("p.status <> 'archived'");
   }
+  params.push(pageSize, offset);
   const result = await query(
     `
       SELECT
+        count(*) OVER()::integer AS total_count,
         p.id, p.title, p.slug, p.excerpt, p.summary, p.cover_url, p.status, p.visibility, p.password_hint,
         p.access_password_hash, p.is_featured, p.featured_order, p.allow_comment,
         p.reading_minutes, p.views_count, p.likes_count, p.comments_count, p.published_at,
@@ -1625,10 +1653,18 @@ async function handleAdminPosts(req, res, url) {
       ${where.length ? `WHERE ${where.join(" AND ")}` : ""}
       GROUP BY p.id, c.id
       ORDER BY p.is_featured DESC, p.featured_order ASC, p.updated_at DESC
+      LIMIT $${params.length - 1} OFFSET $${params.length}
     `,
     params,
   );
-  sendJson(res, 200, { items: result.rows.map((row) => ({ ...mapPost(row), status: row.status })) }, corsHeaders(req));
+  const total = Number(result.rows[0]?.total_count ?? 0);
+  sendJson(res, 200, {
+    items: result.rows.map((row) => ({ ...mapPost(row), status: row.status })),
+    page,
+    pageSize,
+    total,
+    hasMore: page * pageSize < total,
+  }, corsHeaders(req));
 }
 
 async function handleAdminPostDetail(req, res, id) {
@@ -1994,8 +2030,7 @@ async function handleAdminSearch(req, res, url) {
 }
 
 async function handleAdminMedia(req, res, url) {
-  const pageSize = Math.min(Math.max(Number(url.searchParams.get("pageSize") || 20), 1), 100);
-  const page = Math.max(Number(url.searchParams.get("page") || 1), 1);
+  const { page, pageSize, offset } = readPagination(url, { defaultPageSize: 20, maxPageSize: 100 });
   const type = String(url.searchParams.get("type") || "all");
   const keyword = String(url.searchParams.get("q") || "").trim().toLowerCase();
   const params = [];
@@ -2008,7 +2043,7 @@ async function handleAdminMedia(req, res, url) {
     params.push(`%${keyword}%`);
     where.push(`(lower(file_name) LIKE $${params.length} OR lower(original_name) LIKE $${params.length} OR lower(COALESCE(alt_text, '')) LIKE $${params.length} OR lower(mime_type) LIKE $${params.length})`);
   }
-  params.push(pageSize, (page - 1) * pageSize);
+  params.push(pageSize, offset);
   const existing = await query(
     `SELECT count(*) OVER()::integer AS total_count,
             id, file_name, original_name, mime_type, file_size, url, width, height, alt_text, created_at
@@ -2215,17 +2250,34 @@ async function handleAdminDeleteTag(req, res, id) {
   sendJson(res, 200, { id, ok: true, deleted: true }, corsHeaders(req));
 }
 
-async function handleAdminComments(req, res) {
-  const result = await query(`
-    SELECT
-      cm.id, cm.author_name, cm.author_email, cm.author_site, cm.content, cm.likes_count,
-      cm.status, cm.created_at, p.id AS post_id, p.title AS post_title
-    FROM comments cm
-    LEFT JOIN posts p ON p.id = cm.post_id
-    ORDER BY cm.created_at DESC
-    LIMIT 100
-  `);
-  sendJson(res, 200, { items: result.rows }, corsHeaders(req));
+async function handleAdminComments(req, res, url) {
+  const { page, pageSize, offset } = readPagination(url, { defaultPageSize: 10, maxPageSize: 100 });
+  const status = String(url.searchParams.get("status") || "all");
+  const keyword = String(url.searchParams.get("q") || "").trim().toLowerCase();
+  const params = [];
+  const where = [];
+  if (["pending", "approved", "rejected"].includes(status)) {
+    params.push(status);
+    where.push(`cm.status = $${params.length}`);
+  }
+  if (keyword) {
+    params.push(`%${keyword}%`);
+    where.push(`(lower(cm.author_name) LIKE $${params.length} OR lower(cm.content) LIKE $${params.length} OR lower(COALESCE(p.title, '')) LIKE $${params.length})`);
+  }
+  params.push(pageSize, offset);
+  const result = await query(
+    `SELECT count(*) OVER()::integer AS total_count,
+            cm.id, cm.author_name, cm.author_email, cm.author_site, cm.content, cm.likes_count,
+            cm.status, cm.created_at, p.id AS post_id, p.title AS post_title
+     FROM comments cm
+     LEFT JOIN posts p ON p.id = cm.post_id
+     ${where.length ? `WHERE ${where.join(" AND ")}` : ""}
+     ORDER BY cm.created_at DESC
+     LIMIT $${params.length - 1} OFFSET $${params.length}`,
+    params,
+  );
+  const total = Number(result.rows[0]?.total_count ?? 0);
+  sendJson(res, 200, { items: result.rows, page, pageSize, total, hasMore: page * pageSize < total }, corsHeaders(req));
 }
 
 async function handleAdminUpdateComment(req, res, id) {
@@ -2262,14 +2314,32 @@ async function handleAdminDeleteComment(req, res, id) {
   sendJson(res, 200, { id, ok: true, deleted: true }, corsHeaders(req));
 }
 
-async function handleAdminMessages(req, res) {
-  const result = await query(`
-    SELECT id, parent_id, author_name, author_email, author_site, role, content, likes_count, status, created_at
-    FROM messages
-    ORDER BY created_at DESC
-    LIMIT 100
-  `);
-  sendJson(res, 200, { items: result.rows }, corsHeaders(req));
+async function handleAdminMessages(req, res, url) {
+  const { page, pageSize, offset } = readPagination(url, { defaultPageSize: 10, maxPageSize: 100 });
+  const status = String(url.searchParams.get("status") || "all");
+  const keyword = String(url.searchParams.get("q") || "").trim().toLowerCase();
+  const params = [];
+  const where = [];
+  if (["pending", "approved", "rejected"].includes(status)) {
+    params.push(status);
+    where.push(`status = $${params.length}`);
+  }
+  if (keyword) {
+    params.push(`%${keyword}%`);
+    where.push(`(lower(author_name) LIKE $${params.length} OR lower(content) LIKE $${params.length} OR lower(role) LIKE $${params.length})`);
+  }
+  params.push(pageSize, offset);
+  const result = await query(
+    `SELECT count(*) OVER()::integer AS total_count,
+            id, parent_id, author_name, author_email, author_site, role, content, likes_count, status, created_at
+     FROM messages
+     ${where.length ? `WHERE ${where.join(" AND ")}` : ""}
+     ORDER BY created_at DESC
+     LIMIT $${params.length - 1} OFFSET $${params.length}`,
+    params,
+  );
+  const total = Number(result.rows[0]?.total_count ?? 0);
+  sendJson(res, 200, { items: result.rows, page, pageSize, total, hasMore: page * pageSize < total }, corsHeaders(req));
 }
 
 async function handleAdminUpdateMessage(req, res, id) {
@@ -2683,7 +2753,7 @@ async function handleRequest(req, res) {
     if (req.method === "GET" && url.pathname === "/api/public/home") return handlePublicHome(req, res);
     if (req.method === "GET" && url.pathname === "/api/public/about") return handlePublicAbout(req, res);
     if (req.method === "GET" && url.pathname === "/api/public/archive") return handleArchive(req, res);
-    if (req.method === "GET" && url.pathname === "/api/public/messages") return handlePublicMessages(req, res);
+    if (req.method === "GET" && url.pathname === "/api/public/messages") return handlePublicMessages(req, res, url);
     if (req.method === "POST" && url.pathname === "/api/public/messages") return handleCreateMessage(req, res);
     if (req.method === "POST" && url.pathname === "/api/public/subscriptions") return handleCreateSubscription(req, res);
 
@@ -2703,7 +2773,7 @@ async function handleRequest(req, res) {
     if (req.method === "POST" && likePost) return handleLikePost(req, res, Number(likePost[1]));
 
     const publicComments = url.pathname.match(/^\/api\/public\/posts\/(\d+)\/comments$/);
-    if (req.method === "GET" && publicComments) return handlePublicComments(req, res, Number(publicComments[1]));
+    if (req.method === "GET" && publicComments) return handlePublicComments(req, res, Number(publicComments[1]), url);
 
     const createComment = url.pathname.match(/^\/api\/public\/posts\/(\d+)\/comments$/);
     if (req.method === "POST" && createComment) return handleCreateComment(req, res, Number(createComment[1]));
@@ -2764,8 +2834,8 @@ async function handleRequest(req, res) {
     const adminTag = url.pathname.match(/^\/api\/admin\/tags\/(\d+)$/);
     if (req.method === "PUT" && adminTag) return handleAdminUpdateTag(req, res, Number(adminTag[1]));
     if (req.method === "DELETE" && adminTag) return handleAdminDeleteTag(req, res, Number(adminTag[1]));
-    if (req.method === "GET" && url.pathname === "/api/admin/comments") return handleAdminComments(req, res);
-    if (req.method === "GET" && url.pathname === "/api/admin/messages") return handleAdminMessages(req, res);
+    if (req.method === "GET" && url.pathname === "/api/admin/comments") return handleAdminComments(req, res, url);
+    if (req.method === "GET" && url.pathname === "/api/admin/messages") return handleAdminMessages(req, res, url);
     if (req.method === "GET" && url.pathname === "/api/admin/ai/status") return handleAdminAiStatus(req, res);
     if (req.method === "GET" && url.pathname === "/api/admin/ai/tasks") return handleAdminAiTasks(req, res, url);
     if (req.method === "POST" && url.pathname === "/api/admin/ai/run") return handleAdminAiRun(req, res);

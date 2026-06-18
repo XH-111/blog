@@ -51,6 +51,10 @@ const defaultSiteSettings: SiteSettings = {
 const COMMENT_CONTENT_MAX_LENGTH = 1000;
 const MESSAGE_CONTENT_MAX_LENGTH = 2000;
 const ARCHIVE_PAGE_SIZE = 10;
+const ADMIN_LIST_PAGE_SIZE = 10;
+const ADMIN_MEDIA_PAGE_SIZE = 10;
+const PUBLIC_COMMENT_PAGE_SIZE = 10;
+const PUBLIC_MESSAGE_PAGE_SIZE = 10;
 
 function useRoute() {
   const [path, setPath] = useState(location.hash.replace("#", "") || "/");
@@ -895,17 +899,22 @@ function CommentBox({ articleId, value, onChange, enabled, disabledReason }: { a
   const [comments, setComments] = useState<PublicCommentItem[]>([]);
   const [commenter, setCommenter] = useState({ authorName: "", authorEmail: "" });
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [message, setMessage] = useState("");
+  const [commentPage, setCommentPage] = useState(1);
+  const [commentPagination, setCommentPagination] = useState({ page: 1, pageSize: PUBLIC_COMMENT_PAGE_SIZE, total: 0, hasMore: false });
 
   useEffect(() => {
     let alive = true;
     function loadComments() {
       setLoading(true);
-      api.getComments(articleId)
+      setCommentPage(1);
+      api.getComments(articleId, { page: 1, pageSize: PUBLIC_COMMENT_PAGE_SIZE })
         .then((result) => {
           if (!alive) return;
           setComments(result.items);
+          setCommentPagination({ page: result.page, pageSize: result.pageSize, total: result.total, hasMore: result.hasMore });
           if (result.source === "mock") setMessage("评论服务暂不可用，当前未展示离线预览评论。");
         })
         .catch((error) => {
@@ -922,6 +931,22 @@ function CommentBox({ articleId, value, onChange, enabled, disabledReason }: { a
       window.removeEventListener("admin-data-changed", loadComments);
     };
   }, [articleId]);
+
+  async function loadMoreComments() {
+    if (loadingMore || !commentPagination.hasMore) return;
+    const nextPage = commentPage + 1;
+    setLoadingMore(true);
+    try {
+      const result = await api.getComments(articleId, { page: nextPage, pageSize: PUBLIC_COMMENT_PAGE_SIZE });
+      setComments((items) => [...items, ...result.items]);
+      setCommentPage(result.page);
+      setCommentPagination({ page: result.page, pageSize: result.pageSize, total: result.total, hasMore: result.hasMore });
+    } catch (error) {
+      setMessage(getApiErrorMessage(error));
+    } finally {
+      setLoadingMore(false);
+    }
+  }
 
   async function submitComment() {
     const content = value.trim();
@@ -989,6 +1014,8 @@ function CommentBox({ articleId, value, onChange, enabled, disabledReason }: { a
           </article>
         )) : <div className="friendly-empty"><b>暂无公开评论</b><span>成为第一个认真交流的人吧，审核通过后会显示在这里。</span></div>}
       </div>
+      {!loading && comments.length > 0 && <p className="list-count">已显示 {comments.length} / {commentPagination.total} 条评论</p>}
+      {!loading && commentPagination.hasMore && <button className="load-more" disabled={loadingMore} onClick={loadMoreComments}>{loadingMore ? "加载中..." : "加载更多评论"}</button>}
     </section>
   );
 }
@@ -1937,17 +1964,23 @@ function MessagesPage() {
   const [submitting, setSubmitting] = useState(false);
   const [messagesUsingMock, setMessagesUsingMock] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [messagePage, setMessagePage] = useState(1);
+  const [messagePagination, setMessagePagination] = useState({ page: 1, pageSize: PUBLIC_MESSAGE_PAGE_SIZE, total: 0, hasMore: false });
   const [ownerProfile, setOwnerProfile] = useState(defaultAboutSettings);
 
   useEffect(() => {
     let alive = true;
     function loadMessages() {
       setLoading(true);
-      api.getMessages()
-        .then(({ messages: nextMessages, source }) => {
+      setMessagePage(1);
+      api.getMessages({ page: 1, pageSize: PUBLIC_MESSAGE_PAGE_SIZE })
+        .then(({ messages: nextMessages, source, page: nextPage, pageSize, total, hasMore }) => {
           if (!alive) return;
           const usingMock = source === "mock";
           setList(nextMessages);
+          setMessagePage(nextPage);
+          setMessagePagination({ page: nextPage, pageSize, total, hasMore });
           setMessagesUsingMock(usingMock);
         })
         .catch((error) => {
@@ -1967,6 +2000,23 @@ function MessagesPage() {
       window.removeEventListener("admin-data-changed", loadMessages);
     };
   }, []);
+
+  async function loadMoreMessages() {
+    if (loadingMore || !messagePagination.hasMore) return;
+    const nextPage = messagePage + 1;
+    setLoadingMore(true);
+    try {
+      const result = await api.getMessages({ page: nextPage, pageSize: PUBLIC_MESSAGE_PAGE_SIZE });
+      setList((items) => [...items, ...result.messages]);
+      setMessagePage(result.page);
+      setMessagePagination({ page: result.page, pageSize: result.pageSize, total: result.total, hasMore: result.hasMore });
+      setMessagesUsingMock(result.source === "mock");
+    } catch (error) {
+      setSubmitNotice(getApiErrorMessage(error));
+    } finally {
+      setLoadingMore(false);
+    }
+  }
 
   useEffect(() => {
     let alive = true;
@@ -2050,6 +2100,8 @@ function MessagesPage() {
             <select value={sort} onChange={(event) => setSort(event.target.value)}><option value="latest">最新留言</option><option value="hot">点赞最多</option></select>
           </div>
           <div className="message-list">{loading ? <section className="empty card">正在读取留言...</section> : visibleMessages.length ? visibleMessages.map((item) => <MessageItem key={item.id} item={item} readonlyMock={messagesUsingMock} />) : <section className="friendly-empty card"><b>当前筛选下暂无留言</b><span>{tab === "all" ? "还没有公开留言，可以先写下第一个问题或想法。" : "换到全部留言，或者等待站长审核和回复。"}</span></section>}</div>
+          {!loading && list.length > 0 && <p className="list-count">已显示 {list.length} / {messagePagination.total} 条留言</p>}
+          {!loading && messagePagination.hasMore && <button className="load-more" disabled={loadingMore} onClick={loadMoreMessages}>{loadingMore ? "加载中..." : "加载更多留言"}</button>}
         </section>
         <aside className="side-stack"><section className="rule-card card"><h3>友好交流</h3><p>请尊重他人、文明发言</p><p>禁止发布广告、恶意链接</p><p>技术讨论请尽量具体清晰</p><p>站长会定期查看并回复</p></section><Card title="最新评论"><MiniComments /></Card><section className="author card"><AuthorAvatar url={ownerProfile.portraitUrl} /><h3>{ownerProfile.title || "关于我"} <Tag>{ownerProfile.badge || "站长"}</Tag></h3><p>{ownerProfile.subtitle || defaultAboutSettings.subtitle}</p><p>{ownerProfile.intro || defaultAboutSettings.intro}</p></section></aside>
       </main>
@@ -2450,14 +2502,29 @@ function AdminPlaceholder({ page }: { page: string }) {
   const [actionNotice, setActionNotice] = useState("");
   const [batchMode, setBatchMode] = useState(false);
   const [selectedKeys, setSelectedKeys] = useState<string[]>([]);
+  const [postPage, setPostPage] = useState(1);
+  const [postPagination, setPostPagination] = useState({ page: 1, pageSize: ADMIN_LIST_PAGE_SIZE, total: 0, hasMore: false });
   const [mediaTypeFilter, setMediaTypeFilter] = useState<"all" | "image" | "video">("all");
   const [mediaSearch, setMediaSearch] = useState("");
   const [mediaPage, setMediaPage] = useState(1);
-  const [mediaPagination, setMediaPagination] = useState({ page: 1, pageSize: 20, total: 0, hasMore: false });
+  const [mediaPagination, setMediaPagination] = useState({ page: 1, pageSize: ADMIN_MEDIA_PAGE_SIZE, total: 0, hasMore: false });
   const [moderationStatusFilter, setModerationStatusFilter] = useState<"all" | "pending" | "approved" | "rejected">("all");
   const [moderationSearch, setModerationSearch] = useState("");
+  const [moderationPage, setModerationPage] = useState(1);
+  const [moderationPagination, setModerationPagination] = useState({ page: 1, pageSize: ADMIN_LIST_PAGE_SIZE, total: 0, hasMore: false });
   const [mediaUploading, setMediaUploading] = useState(false);
   const mediaInputRef = useRef<HTMLInputElement | null>(null);
+
+  useEffect(() => {
+    setPostPage(1);
+    setModerationPage(1);
+    setSelectedKeys([]);
+  }, [page]);
+
+  useEffect(() => {
+    setModerationPage(1);
+    setSelectedKeys([]);
+  }, [moderationStatusFilter, moderationSearch]);
 
   useEffect(() => {
     setBatchMode(false);
@@ -2468,14 +2535,15 @@ function AdminPlaceholder({ page }: { page: string }) {
       setActionNotice("");
       try {
         if (page === "posts" || page === "drafts" || page === "trash") {
-          const result = await api.getAdminPosts(page === "drafts" ? "draft" : page === "trash" ? "archived" : undefined);
+          const result = await api.getAdminPosts({ status: page === "drafts" ? "draft" : page === "trash" ? "archived" : undefined, page: postPage, pageSize: ADMIN_LIST_PAGE_SIZE });
           if (alive) {
             setAdminPosts(result.items);
+            setPostPagination({ page: result.page, pageSize: result.pageSize, total: result.total, hasMore: result.hasMore });
             setSource(result.source);
             setLoading(false);
           }
         } else if (page === "media") {
-          const result = await api.getAdminMedia({ page: mediaPage, pageSize: 20, type: mediaTypeFilter, keyword: mediaSearch });
+          const result = await api.getAdminMedia({ page: mediaPage, pageSize: ADMIN_MEDIA_PAGE_SIZE, type: mediaTypeFilter, keyword: mediaSearch });
           if (alive) {
             setAdminMedia(result.items);
             setMediaPagination({ page: result.page, pageSize: result.pageSize, total: result.total, hasMore: result.hasMore });
@@ -2497,16 +2565,18 @@ function AdminPlaceholder({ page }: { page: string }) {
             setLoading(false);
           }
         } else if (page === "comments") {
-          const result = await api.getAdminComments();
+          const result = await api.getAdminComments({ page: moderationPage, pageSize: ADMIN_LIST_PAGE_SIZE, status: moderationStatusFilter, keyword: moderationSearch });
           if (alive) {
             setAdminComments(result.items);
+            setModerationPagination({ page: result.page, pageSize: result.pageSize, total: result.total, hasMore: result.hasMore });
             setSource(result.source);
             setLoading(false);
           }
         } else if (page === "messages") {
-          const result = await api.getAdminMessages();
+          const result = await api.getAdminMessages({ page: moderationPage, pageSize: ADMIN_LIST_PAGE_SIZE, status: moderationStatusFilter, keyword: moderationSearch });
           if (alive) {
             setAdminMessages(result.items);
+            setModerationPagination({ page: result.page, pageSize: result.pageSize, total: result.total, hasMore: result.hasMore });
             setSource(result.source);
             setLoading(false);
           }
@@ -2527,7 +2597,7 @@ function AdminPlaceholder({ page }: { page: string }) {
     return () => {
       alive = false;
     };
-  }, [page, mediaPage, mediaTypeFilter, mediaSearch]);
+  }, [page, postPage, mediaPage, mediaTypeFilter, mediaSearch, moderationPage, moderationStatusFilter, moderationSearch]);
 
   async function reviewRow(kind: "comment" | "message", id: number, status: "approved" | "rejected") {
     try {
@@ -2583,8 +2653,9 @@ function AdminPlaceholder({ page }: { page: string }) {
   async function movePostFeatured(id: number, direction: "up" | "down") {
     try {
       const result = await api.updatePostFeaturedOrder(id, direction);
-      const refreshed = await api.getAdminPosts(page === "drafts" ? "draft" : page === "trash" ? "archived" : undefined);
+      const refreshed = await api.getAdminPosts({ status: page === "drafts" ? "draft" : page === "trash" ? "archived" : undefined, page: postPage, pageSize: ADMIN_LIST_PAGE_SIZE });
       setAdminPosts(sortPostsForAdminList(refreshed.items));
+      setPostPagination({ page: refreshed.page, pageSize: refreshed.pageSize, total: refreshed.total, hasMore: refreshed.hasMore });
       setActionNotice(result.unchanged ? "这篇精选文章已经在当前方向的边界。" : "精选文章排序已更新，前台精选列表会按新顺序展示。");
       emitAdminDataChanged();
     } catch (error) {
@@ -3095,16 +3166,16 @@ function AdminPlaceholder({ page }: { page: string }) {
                 ["approved", "已通过"],
                 ["rejected", "已驳回"],
               ].map(([value, label]) => (
-                <button key={value} type="button" className={moderationStatusFilter === value ? "active" : ""} onClick={() => { setModerationStatusFilter(value as "all" | "pending" | "approved" | "rejected"); setSelectedKeys([]); }}>
+                <button key={value} type="button" className={moderationStatusFilter === value ? "active" : ""} onClick={() => { setModerationStatusFilter(value as "all" | "pending" | "approved" | "rejected"); setModerationPage(1); setSelectedKeys([]); }}>
                   {label}
                 </button>
               ))}
             </div>
             <label>
               <span className="visually-hidden">搜索审核内容</span>
-              <input value={moderationSearch} onChange={(event) => { setModerationSearch(event.target.value); setSelectedKeys([]); }} placeholder={page === "comments" ? "搜索评论作者、内容或文章标题" : "搜索留言作者、内容或角色"} />
+              <input value={moderationSearch} onChange={(event) => { setModerationSearch(event.target.value); setModerationPage(1); setSelectedKeys([]); }} placeholder={page === "comments" ? "搜索评论作者、内容或文章标题" : "搜索留言作者、内容或角色"} />
             </label>
-            {(moderationStatusFilter !== "all" || moderationSearch.trim()) && <button type="button" className="media-clear-filter" onClick={() => { setModerationStatusFilter("all"); setModerationSearch(""); setSelectedKeys([]); }}>清空</button>}
+            {(moderationStatusFilter !== "all" || moderationSearch.trim()) && <button type="button" className="media-clear-filter" onClick={() => { setModerationStatusFilter("all"); setModerationSearch(""); setModerationPage(1); setSelectedKeys([]); }}>清空</button>}
           </div>
         )}
         <section className="card admin-table">
@@ -3127,11 +3198,25 @@ function AdminPlaceholder({ page }: { page: string }) {
             </div>
           )}
           {loading ? <p className="soft-text">正在读取数据...</p> : rows.length ? rows.map((row) => <div className={`admin-row ${row.href ? "clickable" : ""} ${row.media ? "media-row" : ""} ${selectedKeys.includes(row.key) ? "selected" : ""}`} key={row.key} onClick={() => row.href && go(row.href)}>{batchMode && <label className="row-check" onClick={(event) => event.stopPropagation()}><input type="checkbox" checked={selectedKeys.includes(row.key)} onChange={(event) => setRowSelected(row.key, event.target.checked)} /><span className="visually-hidden">选择 {row.text}</span></label>}{row.media && <button className={`media-thumb ${isVideoMedia(row.media) ? "video-thumb" : ""}`} type="button" style={isVideoMedia(row.media) ? undefined : { backgroundImage: `url(${row.media.url})` }} onClick={(event) => { event.stopPropagation(); setPreviewMedia(row.media!); }} aria-label={`查看 ${row.text}`}>{isVideoMedia(row.media) && <><video src={row.media.url} muted preload="metadata" /><span>视频</span></>}</button>}{row.media ? <span className="media-text"><b>{row.text}</b><small>{mediaMetaText(row.media)}</small></span> : <span>{row.text}</span>}<div className="admin-row-actions"><small>{row.status}</small>{row.actions?.map((action) => <button key={action.label} title={action.title} onClick={(event) => { event.stopPropagation(); if (action.href) go(action.href); action.run?.(); }}>{action.label}</button>)}{row.review && row.review.status !== "approved" && <button onClick={(event) => { event.stopPropagation(); reviewRow(row.review!.kind, row.review!.id, "approved"); }}>通过</button>}{row.review && row.review.status !== "rejected" && <button onClick={(event) => { event.stopPropagation(); reviewRow(row.review!.kind, row.review!.id, "rejected"); }}>驳回</button>}</div></div>) : <p className="soft-text">{emptyText}</p>}
+          {(page === "posts" || page === "drafts" || page === "trash") && !loading && (
+            <div className="admin-pagination">
+              <button disabled={postPage <= 1} onClick={() => { setPostPage((value) => Math.max(1, value - 1)); setSelectedKeys([]); }}>上一页</button>
+              <span>第 {postPagination.page} 页 · 共 {postPagination.total} 篇文章</span>
+              <button disabled={!postPagination.hasMore} onClick={() => { setPostPage((value) => value + 1); setSelectedKeys([]); }}>下一页</button>
+            </div>
+          )}
           {page === "media" && !loading && (
             <div className="admin-pagination">
               <button disabled={mediaPage <= 1} onClick={() => { setMediaPage((value) => Math.max(1, value - 1)); setSelectedKeys([]); }}>上一页</button>
               <span>第 {mediaPagination.page} 页 · 共 {mediaPagination.total} 个媒体</span>
               <button disabled={!mediaPagination.hasMore} onClick={() => { setMediaPage((value) => value + 1); setSelectedKeys([]); }}>下一页</button>
+            </div>
+          )}
+          {(page === "comments" || page === "messages") && !loading && (
+            <div className="admin-pagination">
+              <button disabled={moderationPage <= 1} onClick={() => { setModerationPage((value) => Math.max(1, value - 1)); setSelectedKeys([]); }}>上一页</button>
+              <span>第 {moderationPagination.page} 页 · 共 {moderationPagination.total} 条{page === "comments" ? "评论" : "留言"}</span>
+              <button disabled={!moderationPagination.hasMore} onClick={() => { setModerationPage((value) => value + 1); setSelectedKeys([]); }}>下一页</button>
             </div>
           )}
         </section>
