@@ -109,6 +109,49 @@ const DEFAULT_SITE_SETTINGS = {
   footerText: "© 2026 全栈博客创作平台",
 };
 
+const rateLimitBuckets = new Map();
+
+function checkRateLimit(req, { scope, max, windowMs }) {
+  const now = Date.now();
+  const ip = getClientIp(req) || "unknown";
+  const key = `${scope}:${ip}`;
+  const existing = rateLimitBuckets.get(key);
+  const bucket = existing && existing.resetAt > now ? existing : { count: 0, resetAt: now + windowMs };
+  bucket.count += 1;
+  rateLimitBuckets.set(key, bucket);
+  if (bucket.count > max) {
+    return {
+      limited: true,
+      retryAfterSeconds: Math.max(1, Math.ceil((bucket.resetAt - now) / 1000)),
+    };
+  }
+  if (rateLimitBuckets.size > 1000) {
+    for (const [bucketKey, value] of rateLimitBuckets.entries()) {
+      if (value.resetAt <= now) rateLimitBuckets.delete(bucketKey);
+    }
+  }
+  return { limited: false, retryAfterSeconds: 0 };
+}
+
+function enforceRateLimit(req, res, options) {
+  const result = checkRateLimit(req, options);
+  if (!result.limited) return false;
+  sendJson(
+    res,
+    429,
+    {
+      error: "rate_limited",
+      message: "操作太频繁，请稍后再试",
+      retryAfterSeconds: result.retryAfterSeconds,
+    },
+    {
+      ...corsHeaders(req),
+      "retry-after": String(result.retryAfterSeconds),
+    },
+  );
+  return true;
+}
+
 const scrypt = crypto.scrypt;
 
 function scryptAsync(password, salt) {
@@ -794,6 +837,7 @@ async function serveUploadedFile(req, res, url) {
 }
 
 async function handleAdminLogin(req, res) {
+  if (enforceRateLimit(req, res, { scope: "admin-login", max: 5, windowMs: 15 * 60 * 1000 })) return;
   const body = await readBody(req);
   const account = String(body.account || body.username || body.email || "").trim();
   const password = String(body.password || "");
@@ -1404,6 +1448,7 @@ async function handlePublicComments(req, res, id) {
 }
 
 async function handleCreateComment(req, res, id) {
+  if (enforceRateLimit(req, res, { scope: "public-comment", max: 5, windowMs: 60 * 1000 })) return;
   const body = await readBody(req);
   const authorName = String(body.authorName || body.author || "").trim();
   const authorEmail = String(body.authorEmail || body.email || "").trim();
@@ -1460,6 +1505,7 @@ async function handlePublicMessages(req, res) {
 }
 
 async function handleCreateMessage(req, res) {
+  if (enforceRateLimit(req, res, { scope: "public-message", max: 3, windowMs: 60 * 1000 })) return;
   const body = await readBody(req);
   const authorName = String(body.authorName || body.author || "").trim();
   const authorEmail = String(body.authorEmail || body.email || "").trim();

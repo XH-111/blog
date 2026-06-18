@@ -106,6 +106,7 @@ const API_ERROR_MESSAGES: Record<string, string> = {
   ai_timeout: "AI 模型响应超时，请稍后重试",
   ai_empty_result: "AI 没有返回内容，请稍后重试",
   ai_web_search_disabled: "后端未启用 AI 联网核查，请检查 AI_WEB_SEARCH_ENABLED 配置",
+  rate_limited: "操作太频繁，请稍后再试",
 };
 
 function isAbortError(error: unknown) {
