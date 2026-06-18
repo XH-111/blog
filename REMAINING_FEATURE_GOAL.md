@@ -21,7 +21,7 @@
 | 3 | 数据库和上传目录备份闭环 | Done | this commit |
 | 4 | 移动端核心流程复验和修复 | Done | this commit |
 | 5 | 前台 mock 兜底和未接入提示收敛 | Done | this commit |
-| 6 | 媒体库视频基础信息增强 | Pending | - |
+| 6 | 媒体库视频基础信息增强 | Done | this commit |
 | 7 | AI 任务历史列表和结果复看 | Pending | - |
 | 8 | 精选文章排序配置 | Pending | - |
 | 9 | 文章目录和代码高亮阅读体验 | Pending | - |
@@ -261,6 +261,18 @@ fix: polish public fallback states
 ### 停止条件
 
 视频在媒体库中可识别、可筛选、可预览后停止。
+
+### 验收记录
+
+- 后端现有上传接口已支持 `video/*`，视频最大 50MB，非图片/视频会被拒绝。
+- 后端媒体列表已支持 `type=video` 筛选，并返回 `mime_type`、`file_size`、`url`、`created_at`。
+- 后台媒体库已有视频缩略预览和弹窗播放能力，本阶段补充上传日期展示。
+- 使用后台 API 验证 `GET /api/admin/media?type=video&pageSize=5` 返回 1 个 `video/mp4` 媒体。
+- 后台媒体库筛选“视频”后显示 1 行视频，列表元信息包含 `MP4 · 44.7 MB · 2026-06-18`。
+- 点击视频缩略图后打开预览弹窗，弹窗内存在 `.media-preview-video`。
+- `npm.cmd run build`：通过。
+- `node --check backend\src\server.js`：通过。
+- 验证过程中触发过登录限流，已重启后端清空内存限流桶；`GET /api/health` 返回 `ok: true`。
 
 ### 提交信息
 

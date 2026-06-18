@@ -2097,6 +2097,11 @@ function formatMediaFileSize(value?: number) {
   return `${value} B`;
 }
 
+function formatMediaCreatedAt(value?: string) {
+  if (!value) return "";
+  return value.slice(0, 10);
+}
+
 function mediaMetaText(item: AdminMediaItem) {
   const displayName = mediaDisplayName(item);
   const originalName = cleanMediaText(item.originalName);
@@ -2104,6 +2109,7 @@ function mediaMetaText(item: AdminMediaItem) {
     item.mimeType.replace(/^(image|video)\//, "").toUpperCase(),
     item.width && item.height ? `${item.width}x${item.height}` : "",
     formatMediaFileSize(item.fileSize),
+    formatMediaCreatedAt(item.createdAt),
     originalName && originalName !== displayName ? originalName : "",
   ].filter(Boolean).join(" · ");
 }
