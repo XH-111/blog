@@ -727,6 +727,7 @@ pre button { position: absolute; right: 12px; top: 10px; color: #fff; border: 1p
 .inline-picker { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; }
 .inline-picker button, .project-editor header button, .timeline-editor header button, .home-entry-editor header button, .entry-card-actions button, .project-media-column button, .project-remove { border: 1px solid var(--line); border-radius: 7px; padding: 0 12px; color: var(--teal-dark); background: #fff; font-weight: 700; }
 .inline-picker button:hover, .project-editor header button:hover, .timeline-editor header button:hover, .home-entry-editor header button:hover, .entry-card-actions button:hover:not(:disabled), .project-media-column button:hover { border-color: rgba(7, 155, 149, .35); background: #e9fbf8; }
+.entry-card-actions button:disabled { color: #a8b2bd; background: #f4f7f8; cursor: not-allowed; }
 .project-editor { display: grid; gap: 14px; }
 .project-editor header, .timeline-editor header { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; padding: 0 0 2px; border: 0; }
 .project-editor header button, .timeline-editor header button { min-height: 36px; white-space: nowrap; }

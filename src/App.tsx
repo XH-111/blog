@@ -1330,6 +1330,16 @@ function AboutSettingsPage() {
     setProjects((items) => items.filter((_, itemIndex) => itemIndex !== index));
   }
 
+  function moveProject(index: number, direction: -1 | 1) {
+    setProjects((items) => {
+      const nextIndex = index + direction;
+      if (nextIndex < 0 || nextIndex >= items.length) return items;
+      const next = [...items];
+      [next[index], next[nextIndex]] = [next[nextIndex], next[index]];
+      return next;
+    });
+  }
+
   function updateTimeline(index: number, patch: Partial<AboutPageSettings["timeline"][number]>) {
     setTimeline((items) => items.map((item, itemIndex) => itemIndex === index ? { ...item, ...patch } : item));
   }
@@ -1340,6 +1350,16 @@ function AboutSettingsPage() {
 
   function removeTimelineItem(index: number) {
     setTimeline((items) => items.filter((_, itemIndex) => itemIndex !== index));
+  }
+
+  function moveTimelineItem(index: number, direction: -1 | 1) {
+    setTimeline((items) => {
+      const nextIndex = index + direction;
+      if (nextIndex < 0 || nextIndex >= items.length) return items;
+      const next = [...items];
+      [next[index], next[nextIndex]] = [next[nextIndex], next[index]];
+      return next;
+    });
   }
 
   async function saveAboutSettings() {
@@ -1450,7 +1470,11 @@ function AboutSettingsPage() {
                 <article key={`${item.year}-${item.title}-${index}`}>
                   <div className="project-card-head">
                     <b>经历 {index + 1}</b>
-                    <button className="project-remove" type="button" onClick={() => removeTimelineItem(index)}>删除</button>
+                    <div className="entry-card-actions">
+                      <button type="button" disabled={index === 0} onClick={() => moveTimelineItem(index, -1)}>上移</button>
+                      <button type="button" disabled={index === timeline.length - 1} onClick={() => moveTimelineItem(index, 1)}>下移</button>
+                      <button className="project-remove" type="button" onClick={() => removeTimelineItem(index)}>删除</button>
+                    </div>
                   </div>
                   <label>时间 / 年份<input value={item.year} onChange={(event) => updateTimeline(index, { year: event.target.value })} placeholder="例如：2026.05 - 至今" /></label>
                   <label>标题<input value={item.title} onChange={(event) => updateTimeline(index, { title: event.target.value })} placeholder="例如：多 Agent 竞品分析系统个人实践" /></label>
@@ -1472,7 +1496,11 @@ function AboutSettingsPage() {
                   <div className="project-form-grid">
                     <div className="project-card-head">
                       <b>项目 {index + 1}</b>
-                      <button className="project-remove" type="button" onClick={() => removeProject(index)}>删除</button>
+                      <div className="entry-card-actions">
+                        <button type="button" disabled={index === 0} onClick={() => moveProject(index, -1)}>上移</button>
+                        <button type="button" disabled={index === projects.length - 1} onClick={() => moveProject(index, 1)}>下移</button>
+                        <button className="project-remove" type="button" onClick={() => removeProject(index)}>删除</button>
+                      </div>
                     </div>
                     <label>项目名称<input value={project.title} onChange={(event) => updateProject(index, { title: event.target.value })} /></label>
                     <label>项目徽标<input value={project.badge ?? ""} onChange={(event) => updateProject(index, { badge: event.target.value })} /></label>
