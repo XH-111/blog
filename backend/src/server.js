@@ -393,10 +393,10 @@ function validatePostSchedule(payload) {
   if (payload.status !== "scheduled") return null;
   const scheduledAt = parseScheduledAt(payload.scheduledAt);
   if (!scheduledAt) {
-    return { error: "invalid_scheduled_at", message: "瀹氭椂鍙戝竷蹇呴』濉啓鏈夋晥鍙戝竷鏃堕棿" };
+    return { error: "invalid_scheduled_at", message: "定时发布必须填写有效发布时间" };
   }
   if (scheduledAt.getTime() <= Date.now()) {
-    return { error: "scheduled_at_in_past", message: "瀹氭椂鍙戝竷鏃堕棿蹇呴』鏅氫簬褰撳墠鏃堕棿" };
+    return { error: "scheduled_at_in_past", message: "定时发布时间必须晚于当前时间" };
   }
   return null;
 }
@@ -405,8 +405,8 @@ function validatePublishablePost(payload) {
   if (!["published", "scheduled"].includes(payload.status)) return null;
   const title = String(payload.title || "").trim();
   const content = String(payload.contentMarkdown || payload.content || "").trim();
-  if (!title) return { error: "title_required", message: "鍙戝竷鏂囩珷蹇呴』濉啓鏍囬" };
-  if (!content) return { error: "content_required", message: "鍙戝竷鏂囩珷蹇呴』濉啓姝ｆ枃鍐呭" };
+  if (!title) return { error: "title_required", message: "发布文章必须填写标题" };
+  if (!content) return { error: "content_required", message: "发布文章必须填写正文内容" };
   return null;
 }
 
@@ -452,7 +452,7 @@ function parseSections(content) {
     }
   }
   if (current) sections.push(current);
-  return sections.length ? sections : [{ anchor: "content", title: "姝ｆ枃", level: 2, body: makeExcerpt(content) }];
+  return sections.length ? sections : [{ anchor: "content", title: "正文", level: 2, body: makeExcerpt(content) }];
 }
 
 async function ensureCategory(client, name = "技术笔记") {
@@ -958,7 +958,7 @@ async function requireAdmin(req, res) {
   const authorization = req.headers.authorization || "";
   const match = authorization.match(/^Bearer\s+(.+)$/i);
   if (!match) {
-    sendJson(res, 401, { error: "unauthorized", message: "璇峰厛鐧诲綍绠＄悊鍚庡彴" }, corsHeaders(req));
+    sendJson(res, 401, { error: "unauthorized", message: "请先登录管理后台" }, corsHeaders(req));
     return null;
   }
   const tokenHash = hashToken(match[1]);
@@ -1579,7 +1579,7 @@ async function handleCreateMessage(req, res) {
   const authorName = String(body.authorName || body.author || "").trim();
   const authorEmail = String(body.authorEmail || body.email || "").trim();
   const content = String(body.content || "").trim();
-  if (!authorName || !authorEmail || !content) return sendJson(res, 400, { error: "message_required_fields", message: "璇峰～鍐欐樀绉般€侀偖绠卞拰鐣欒█鍐呭" }, corsHeaders(req));
+  if (!authorName || !authorEmail || !content) return sendJson(res, 400, { error: "message_required_fields", message: "请填写昵称、邮箱和留言内容" }, corsHeaders(req));
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(authorEmail)) {
     return sendJson(res, 400, { error: "invalid_email", message: "Please enter a valid email" }, corsHeaders(req));
   }
@@ -1744,7 +1744,7 @@ async function handleAdminStatusPost(req, res, id) {
   const status = ["published", "scheduled", "draft", "archived"].includes(body.status) ? body.status : "";
   if (!status) return sendJson(res, 400, { error: "invalid_status" }, corsHeaders(req));
   if (status === "scheduled") {
-    return sendJson(res, 400, { error: "scheduled_requires_editor", message: "瀹氭椂鍙戝竷闇€瑕佸湪缂栬緫鍣ㄥ～鍐欏彂甯冩椂闂村悗淇濆瓨" }, corsHeaders(req));
+    return sendJson(res, 400, { error: "scheduled_requires_editor", message: "定时发布需要在编辑器填写发布时间后保存" }, corsHeaders(req));
   }
   const result = await transaction(async (client) => {
     if (status === "published") {
@@ -2208,7 +2208,7 @@ async function handleAdminUpdateTag(req, res, id) {
 async function handleAdminDeleteTag(req, res, id) {
   const used = await query("SELECT count(*)::integer AS count FROM post_tags WHERE tag_id = $1", [id]);
   if ((used.rows[0]?.count ?? 0) > 0) {
-    return sendJson(res, 409, { error: "tag_in_use", message: "璇ユ爣绛句粛琚枃绔犱娇鐢紝涓嶈兘鍒犻櫎" }, corsHeaders(req));
+    return sendJson(res, 409, { error: "tag_in_use", message: "该标签仍被文章使用，不能删除" }, corsHeaders(req));
   }
   const result = await query("DELETE FROM tags WHERE id = $1 RETURNING id", [id]);
   if (!result.rowCount) return sendJson(res, 404, { error: "tag_not_found", message: "Tag not found" }, corsHeaders(req));
@@ -2309,7 +2309,7 @@ async function handleAdminReplyMessage(req, res, id) {
     `INSERT INTO messages(parent_id, author_name, author_email, role, content, status, ip_address, user_agent)
      VALUES ($1,$2,$3,'owner',$4,'approved',$5,$6)
      RETURNING id, parent_id, author_name, role, content, likes_count, status, created_at`,
-    [id, req.adminUser?.username || "绔欓暱", req.adminUser?.email || null, content, req.socket.remoteAddress, req.headers["user-agent"] ?? ""],
+    [id, req.adminUser?.username || "站长", req.adminUser?.email || null, content, req.socket.remoteAddress, req.headers["user-agent"] ?? ""],
   );
   sendJson(res, 201, { item: result.rows[0], ok: true }, corsHeaders(req));
 }
@@ -2788,7 +2788,7 @@ async function handleRequest(req, res) {
       return sendJson(res, 409, { error: "duplicate_key", message: "Name or slug already exists" }, headers);
     }
     if (error?.code === "23503") {
-      return sendJson(res, 409, { error: "record_in_use", message: "璇ヨ褰曚粛琚叾浠栨暟鎹紩鐢紝涓嶈兘鍒犻櫎" }, headers);
+      return sendJson(res, 409, { error: "record_in_use", message: "该记录仍被其他数据引用，不能删除" }, headers);
     }
     sendJson(res, 500, { error: "internal_error", message: error.message }, headers);
   }

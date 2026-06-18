@@ -490,13 +490,62 @@ function PublicDataNotice({ show, surface }: { show: boolean; surface: string })
   return show ? <div className="note">当前{surface}暂未连接后端，正在显示离线预览数据。</div> : null;
 }
 
+async function copyText(text: string) {
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(text);
+    return true;
+  }
+  const textarea = document.createElement("textarea");
+  textarea.value = text;
+  textarea.setAttribute("readonly", "true");
+  textarea.style.position = "fixed";
+  textarea.style.left = "-9999px";
+  document.body.appendChild(textarea);
+  textarea.select();
+  const ok = document.execCommand("copy");
+  textarea.remove();
+  return ok;
+}
+
+function useSafeImageUrl(url?: string, fallback = "/assets/about-portrait.png") {
+  const normalized = url?.trim() || fallback;
+  const [safeUrl, setSafeUrl] = useState(normalized);
+  useEffect(() => {
+    setSafeUrl(normalized);
+  }, [normalized]);
+  return {
+    url: safeUrl,
+    onError: () => {
+      if (safeUrl !== fallback) setSafeUrl(fallback);
+    },
+  };
+}
+
+function AuthorAvatar({ url, label = "站长头像" }: { url?: string; label?: string }) {
+  const image = useSafeImageUrl(url, defaultAboutSettings.portraitUrl);
+  return (
+    <div className="avatar lg author-photo">
+      <img src={image.url} onError={image.onError} alt={label} />
+    </div>
+  );
+}
+
+function ProjectCover({ url, badge, title }: { url?: string; badge?: string; title: string }) {
+  const image = useSafeImageUrl(url, "/assets/about-project-blogcore.png");
+  return (
+    <div className="project-cover art wide">
+      <img src={image.url} onError={image.onError} alt={title} />
+      {badge && <span>{badge}</span>}
+    </div>
+  );
+}
+
 function CodeBlock({ code, language }: { code: string; language?: string }) {
   const [copied, setCopied] = useState(false);
   const displayLanguage = normalizeCodeLanguage(language);
   async function copyCode() {
     try {
-      await navigator.clipboard?.writeText(code);
-      setCopied(true);
+      setCopied(await copyText(code));
       window.setTimeout(() => setCopied(false), 1600);
     } catch {
       setCopied(false);
@@ -693,8 +742,8 @@ function ArticlePage({ articleId }: { articleId: number }) {
 
   async function copyArticleLink() {
     try {
-      await navigator.clipboard?.writeText(location.href);
-      setLikeNotice("文章链接已复制到剪贴板。");
+      const ok = await copyText(location.href);
+      setLikeNotice(ok ? "文章链接已复制到剪贴板。" : "当前浏览器不支持自动复制，请手动复制地址栏链接。");
     } catch {
       setLikeNotice("当前浏览器不支持自动复制，请手动复制地址栏链接。");
     }
@@ -970,7 +1019,7 @@ function AuthorCard() {
 
   return (
     <section className="author card">
-      <div className="avatar lg author-photo" style={{ backgroundImage: `url(${author.portraitUrl || defaultAboutSettings.portraitUrl})` }}>站</div>
+      <AuthorAvatar url={author.portraitUrl} />
       <h3>{author.title || defaultAboutSettings.title} <Tag>{author.badge || "站长"}</Tag></h3>
       <p>{author.subtitle || defaultAboutSettings.subtitle}</p>
       <p>{author.intro || defaultAboutSettings.intro}</p>
@@ -1195,6 +1244,7 @@ function AboutPage() {
     else window.open(url, "_blank", "noreferrer");
   };
   const aboutSkills = aboutConfig.skills.filter((item) => item.trim() && item.trim() !== "…");
+  const portrait = useSafeImageUrl(aboutConfig.portraitUrl, defaultAboutSettings.portraitUrl);
 
   return (
     <>
@@ -1202,13 +1252,13 @@ function AboutPage() {
       <main className="page about-layout">
         <section className="about-main card">
           <div className="profile">
-            <div className="portrait" style={{ backgroundImage: `url(${aboutConfig.portraitUrl || "/assets/about-portrait.png"})` }} />
+            <img className="portrait" src={portrait.url} onError={portrait.onError} alt={aboutConfig.title || "关于我头像"} />
             <div className="profile-text"><h1>{aboutConfig.title} <Tag>{aboutConfig.badge}</Tag></h1><p>{aboutConfig.subtitle}</p><h3>{aboutConfig.introTitle}</h3><p>{aboutConfig.intro}</p><div className="contact"><span>⌖ {aboutConfig.location}</span><span>✉ {aboutConfig.email}</span><span>☎ {aboutConfig.phone}</span></div></div>
           </div>
           <hr />
           <h3>技术栈</h3><div className="skill-row">{aboutSkills.map((x) => <span className="skill-chip" key={x}><b>{x.slice(0, 2).toUpperCase()}</b>{x}</span>)}</div>
           <h3>项目作品集</h3>
-          <div className="project-grid">{aboutConfig.projects.map((project, i) => <article className={project.projectUrl || project.demoUrl ? "clickable" : ""} key={`${project.title}-${i}`} onClick={() => navigateConfiguredUrl(project.projectUrl || project.demoUrl)}><div className="project-cover art wide" style={{ backgroundImage: project.imageUrl ? `url(${project.imageUrl})` : undefined }}>{project.badge && <span>{project.badge}</span>}</div><h4>{project.title}</h4><p>{project.description}</p><div>{project.tags.map((tag) => <Tag key={tag} tone="gray">{tag}</Tag>)}</div></article>)}</div>
+          <div className="project-grid">{aboutConfig.projects.map((project, i) => <article className={project.projectUrl || project.demoUrl ? "clickable" : ""} key={`${project.title}-${i}`} onClick={() => navigateConfiguredUrl(project.projectUrl || project.demoUrl)}><ProjectCover url={project.imageUrl} badge={project.badge} title={project.title} /><h4>{project.title}</h4><p>{project.description}</p><div>{project.tags.map((tag) => <Tag key={tag} tone="gray">{tag}</Tag>)}</div></article>)}</div>
           <div className="cooperate"><span>💬✈</span><div><h3>{aboutConfig.cooperateTitle}</h3><p>{aboutConfig.cooperateText}</p></div><button onClick={() => navigateConfiguredUrl(aboutConfig.cooperateUrl || "/messages")}>{aboutConfig.cooperateButtonText} →</button></div>
         </section>
         <aside className="side-stack"><PublicDataNotice show={aboutUsingMock} surface="关于页公开数据" /><Card title="关注我"><div className="socials about-socials"><button type="button" onClick={() => navigateConfiguredUrl(aboutConfig.githubUrl)}><span className="social-icon github-icon" aria-hidden="true">GH</span><b>GitHub</b></button><button type="button" onClick={() => setWechatQrOpen(true)}><span className="social-icon wechat-icon" aria-hidden="true">微</span><b>微信</b></button></div></Card><Card title="自我介绍时间线"><div className="intro-line">{aboutConfig.timeline.map((x) => <p key={`${x.year}-${x.title}`}><b>{x.year}</b><span>{x.title}</span><small>{x.description}</small></p>)}</div></Card></aside>
@@ -1887,7 +1937,7 @@ function MessagesPage() {
   const [submitting, setSubmitting] = useState(false);
   const [messagesUsingMock, setMessagesUsingMock] = useState(false);
   const [loading, setLoading] = useState(true);
-  const [ownerPortraitUrl, setOwnerPortraitUrl] = useState(defaultAboutSettings.portraitUrl);
+  const [ownerProfile, setOwnerProfile] = useState(defaultAboutSettings);
 
   useEffect(() => {
     let alive = true;
@@ -1923,10 +1973,10 @@ function MessagesPage() {
     function loadOwnerProfile() {
       api.getPublicAbout()
         .then((result) => {
-          if (alive) setOwnerPortraitUrl(result.item.portraitUrl || defaultAboutSettings.portraitUrl);
+          if (alive) setOwnerProfile(result.item);
         })
         .catch(() => {
-          if (alive) setOwnerPortraitUrl(defaultAboutSettings.portraitUrl);
+          if (alive) setOwnerProfile(defaultAboutSettings);
         });
     }
     loadOwnerProfile();
@@ -2001,7 +2051,7 @@ function MessagesPage() {
           </div>
           <div className="message-list">{loading ? <section className="empty card">正在读取留言...</section> : visibleMessages.length ? visibleMessages.map((item) => <MessageItem key={item.id} item={item} readonlyMock={messagesUsingMock} />) : <section className="friendly-empty card"><b>当前筛选下暂无留言</b><span>{tab === "all" ? "还没有公开留言，可以先写下第一个问题或想法。" : "换到全部留言，或者等待站长审核和回复。"}</span></section>}</div>
         </section>
-        <aside className="side-stack"><section className="rule-card card"><h3>友好交流</h3><p>请尊重他人、文明发言</p><p>禁止发布广告、恶意链接</p><p>技术讨论请尽量具体清晰</p><p>站长会定期查看并回复</p></section><Card title="最新评论"><MiniComments /></Card><section className="author card"><div className="avatar lg author-photo" style={{ backgroundImage: `url(${ownerPortraitUrl || defaultAboutSettings.portraitUrl})` }}>站</div><h3>站长 <Tag>站长</Tag></h3><p>全栈开发 & 技术分享</p><p>热爱技术，热爱分享。在这里记录学习与实践的点滴。</p></section></aside>
+        <aside className="side-stack"><section className="rule-card card"><h3>友好交流</h3><p>请尊重他人、文明发言</p><p>禁止发布广告、恶意链接</p><p>技术讨论请尽量具体清晰</p><p>站长会定期查看并回复</p></section><Card title="最新评论"><MiniComments /></Card><section className="author card"><AuthorAvatar url={ownerProfile.portraitUrl} /><h3>{ownerProfile.title || "关于我"} <Tag>{ownerProfile.badge || "站长"}</Tag></h3><p>{ownerProfile.subtitle || defaultAboutSettings.subtitle}</p><p>{ownerProfile.intro || defaultAboutSettings.intro}</p></section></aside>
       </main>
       <PublicFooter />
     </>
@@ -2112,6 +2162,11 @@ const adminRoutes: Record<string, { label: string; path: string }> = {
   about: { label: "关于页配置", path: "/admin/about-config" },
   home: { label: "首页配置", path: "/admin/home-config" },
   settings: { label: "站点设置", path: "/admin/settings" },
+};
+
+const adminRouteAliases: Record<string, string> = {
+  "/admin/about": "about",
+  "/admin/home": "home",
 };
 
 type AdminRow = {
@@ -4254,7 +4309,7 @@ export default function App() {
     if (routePath === "/admin/editor") return <AdminShell editor />;
     if (routePath === "/admin") return <AdminShell />;
     if (routePath.startsWith("/admin/")) {
-      const adminPage = Object.entries(adminRoutes).find(([, item]) => item.path === routePath)?.[0] ?? "dashboard";
+      const adminPage = adminRouteAliases[routePath] ?? Object.entries(adminRoutes).find(([, item]) => item.path === routePath)?.[0] ?? "dashboard";
       return <AdminShell page={adminPage} />;
     }
     if (routePath.startsWith("/article")) return <ArticlePage articleId={Number(routePath.split("/")[2]) || 0} />;

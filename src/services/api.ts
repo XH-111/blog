@@ -81,6 +81,9 @@ const API_ERROR_MESSAGES: Record<string, string> = {
   post_password_required: "密码文章必须填写访问密码",
   invalid_post_password: "访问密码不正确",
   post_password_unavailable: "这篇文章还没有配置访问密码",
+  title_required: "发布文章必须填写标题",
+  invalid_scheduled_at: "定时发布必须填写有效发布时间",
+  scheduled_at_in_past: "定时发布时间必须晚于当前时间",
   scheduled_requires_editor: "定时发布需要在编辑器填写发布时间后保存",
   media_not_found: "媒体文件不存在",
   category_not_found: "分类不存在",
@@ -619,6 +622,19 @@ function formatCount(value = 0) {
   return value >= 1000 ? `${(value / 1000).toFixed(1).replace(".0", "")}k` : String(value);
 }
 
+function plainTextExcerpt(value = "", maxLength = 150) {
+  return value
+    .replace(/```[\s\S]*?```/g, " ")
+    .replace(/`([^`]+)`/g, "$1")
+    .replace(/!\[([^\]]*)\]\([^)]+\)/g, "$1")
+    .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")
+    .replace(/[#>*_~|\-[\](){}]+/g, " ")
+    .replace(/https?:\/\/\S+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, maxLength);
+}
+
 function inferImage(post: BackendPost): Article["image"] {
   const text = `${post.title} ${post.tags?.map((tag) => tag.name).join(" ") ?? ""}`.toLowerCase();
   if (text.includes("docker")) return "docker";
@@ -629,12 +645,17 @@ function inferImage(post: BackendPost): Article["image"] {
 }
 
 function mapBackendPost(post: BackendPost): Article {
+  const rawExcerpt = post.excerpt || post.summary || "";
+  const rawSummary = post.summary || post.excerpt || "";
+  const excerpt = plainTextExcerpt(rawExcerpt) || plainTextExcerpt(rawSummary);
+  const summary = plainTextExcerpt(rawSummary, 220) || excerpt;
+  const searchSnippet = plainTextExcerpt(post.searchSnippet ?? rawSummary, 220);
   return {
     id: toNumberId(post.id),
     title: post.title,
-    excerpt: post.excerpt ?? "",
-    summary: post.summary ?? post.excerpt ?? "",
-    searchSnippet: post.searchSnippet ?? "",
+    excerpt,
+    summary,
+    searchSnippet,
     date: post.publishedAt?.slice(0, 10) ?? "",
     category: post.category?.name ?? "未分类",
     tags: post.tags?.map((tag) => tag.name) ?? [],
