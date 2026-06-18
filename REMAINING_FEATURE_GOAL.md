@@ -19,7 +19,7 @@
 | 1 | 登录、评论、留言限流 | Done | this commit |
 | 2 | 生产配置和启动安全检查 | Done | this commit |
 | 3 | 数据库和上传目录备份闭环 | Done | this commit |
-| 4 | 移动端核心流程复验和修复 | Pending | - |
+| 4 | 移动端核心流程复验和修复 | Done | this commit |
 | 5 | 前台 mock 兜底和未接入提示收敛 | Pending | - |
 | 6 | 媒体库视频基础信息增强 | Pending | - |
 | 7 | AI 任务历史列表和结果复看 | Pending | - |
@@ -177,6 +177,19 @@ docs: add local backup workflow
 ### 停止条件
 
 前台核心路径在窄屏可用，没有明显遮挡和横向滚动后停止。
+
+### 验收记录
+
+- Browser 插件访问 `127.0.0.1:5173` 被运行时网络策略拦截，错误为 `ERR_NETWORK_IO_SUSPENDED`；本阶段记录该 blocker，并使用系统 Chrome + Playwright fallback 验证。
+- 375x812 视口复验：首页、文章页、文章详情、留言板、关于页均非空渲染。
+- 修复关于页移动端 `.profile` 仍保留双列 `grid-template-areas` 导致整页横向滚动的问题；复验后关于页 `scrollWidth=375`。
+- 文章详情代码块内部仍允许横向滚动，页面级 `scrollWidth=375`，不造成整页横向滚动。
+- 修复评论和留言提交成功提示被数据刷新立即清空的问题。
+- 移动端首页“开始阅读”按钮可跳转到 `/#/posts`。
+- 移动端文章页搜索 `Transformer` 后进入 `/#/posts?q=Transformer`，显示 1 条搜索结果，且无横向滚动。
+- 移动端留言和评论表单均可提交并显示成功提示；测试数据已通过后台 API 删除，数据库无 `mobile qa` 残留。
+- `npm.cmd run build`：通过。
+- 关于页仍有一条本地数据导致的 404 图片请求：`/uploads/1781419563675-c005ef93ddcb.png`，原因是数据库引用了未提交的上传文件；这是本地数据缺失，不是本阶段布局代码问题。
 
 ### 提交信息
 

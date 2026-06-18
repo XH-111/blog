@@ -772,7 +772,6 @@ function CommentBox({ articleId, value, onChange, enabled, disabledReason }: { a
     let alive = true;
     function loadComments() {
       setLoading(true);
-      setMessage("");
       api.getComments(articleId)
         .then((result) => {
           if (!alive) return;
@@ -1801,7 +1800,6 @@ function MessagesPage() {
           const usingMock = source === "mock";
           setList(nextMessages);
           setMessagesUsingMock(usingMock);
-          setSubmitNotice("");
         })
         .catch((error) => {
           if (alive) {
