@@ -476,6 +476,13 @@ export type AdminAiRunResult = {
   taskId?: number;
 };
 
+export type AdminSearchItem = {
+  kind: "post" | "category" | "tag" | "media";
+  title: string;
+  subtitle: string;
+  href: string;
+};
+
 type BackendMedia = {
   id: DbId;
   file_name?: string;
@@ -1334,6 +1341,11 @@ export const api = {
   getDashboard: async () => {
     const data = await requestStrictJson<BackendDashboard>("/admin/dashboard");
     return mapDashboard(data);
+  },
+  searchAdmin: async (keyword: string) => {
+    const query = keyword.trim() ? `?q=${encodeURIComponent(keyword.trim())}` : "";
+    const data = await requestStrictJson<{ items?: AdminSearchItem[] }>(`/admin/search${query}`);
+    return { items: Array.isArray(data.items) ? data.items : [], source: "api" as const };
   },
   getAiStatus: async (): Promise<AdminAiStatus> => {
     const data = await requestStrictJson<AdminAiStatus>("/admin/ai/status");

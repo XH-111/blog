@@ -39,6 +39,12 @@ input:focus, textarea:focus, select:focus { border-color: var(--teal); box-shado
 .header-tools { display: flex; justify-content: flex-end; align-items: center; gap: 14px; }
 .search-mini { width: 220px; height: 38px; display: flex; align-items: center; padding: 0 12px; border: 1px solid var(--line); border-radius: 8px; background: #fff; }
 .search-mini input { flex: 1; min-width: 0; border: 0; box-shadow: none; }
+.admin-search { position: relative; width: min(360px, 42vw); }
+.admin-search-panel { position: absolute; left: 0; right: 0; top: calc(100% + 8px); z-index: 40; display: grid; gap: 4px; max-height: 360px; overflow: auto; padding: 8px; border: 1px solid var(--line); border-radius: 8px; background: #fff; box-shadow: var(--shadow); }
+.admin-search-panel button { display: grid; gap: 4px; padding: 10px 12px; border-radius: 7px; text-align: left; }
+.admin-search-panel button:hover { background: #eefaf8; }
+.admin-search-panel b { color: #172033; font-size: 14px; }
+.admin-search-panel small, .admin-search-panel p { margin: 0; color: var(--muted); font-size: 12px; }
 .round, .avatar { display: grid; place-items: center; border: 1px solid var(--line); border-radius: 50%; background: #fff; }
 .round, .avatar.sm { width: 42px; height: 42px; }
 .avatar { position: relative; color: #fff; background: radial-gradient(circle at 50% 34%, #f2c5a6 0 18%, transparent 19%), radial-gradient(circle at 50% 78%, #f4f7fb 0 30%, transparent 31%), linear-gradient(135deg, #1d4f7a, #9fd4e5); font-weight: 700; flex: 0 0 auto; aspect-ratio: 1 / 1; overflow: hidden; }

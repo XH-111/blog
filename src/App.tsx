@@ -1,7 +1,7 @@
 ﻿import { ChangeEvent, FormEvent, ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { api, getApiErrorMessage } from "./services/api";
 import type { ClipboardEvent, PointerEvent, WheelEvent } from "react";
-import type { AboutPageSettings, AdminAiReviewFocus, AdminAiStatus, AdminAiTool, AdminCategoryItem, AdminCommentItem, AdminDashboardData, AdminMediaItem, AdminMessageItem, AdminPostListItem, AdminTagItem, HomeEntryCardSetting, HomePageSettings, PublicCommentItem, PublicSiteStats, SiteSettings } from "./services/api";
+import type { AboutPageSettings, AdminAiReviewFocus, AdminAiStatus, AdminAiTool, AdminCategoryItem, AdminCommentItem, AdminDashboardData, AdminMediaItem, AdminMessageItem, AdminPostListItem, AdminSearchItem, AdminTagItem, HomeEntryCardSetting, HomePageSettings, PublicCommentItem, PublicSiteStats, SiteSettings } from "./services/api";
 import type { Article, Message } from "./types";
 
 const nav = [
@@ -2192,6 +2192,10 @@ function AdminSidebar({ active }: { active: string }) {
 
 function AdminTop({ editor = false, editorTitle = "新建文章" }: { editor?: boolean; editorTitle?: string }) {
   const [pendingCount, setPendingCount] = useState(0);
+  const [adminSearch, setAdminSearch] = useState("");
+  const [adminSearchResults, setAdminSearchResults] = useState<AdminSearchItem[]>([]);
+  const [adminSearchOpen, setAdminSearchOpen] = useState(false);
+  const [adminSearchLoading, setAdminSearchLoading] = useState(false);
   useEffect(() => {
     let alive = true;
     function loadPendingCount() {
@@ -2210,7 +2214,42 @@ function AdminTop({ editor = false, editorTitle = "新建文章" }: { editor?: b
       window.removeEventListener("admin-data-changed", loadPendingCount);
     };
   }, []);
-  return <header className="admin-top"><div>{editor ? `‹ 文章管理 / ${editorTitle}` : "欢迎回来，站长 👋"}</div><label className="search-mini"><input placeholder="搜索文章、分类、标签..." /><span>⌕</span></label><button className="bell">♧{pendingCount > 0 && <b>{formatCompactNumber(pendingCount)}</b>}</button><span className="avatar sm">站</span></header>;
+  useEffect(() => {
+    const keyword = adminSearch.trim();
+    if (!keyword) {
+      setAdminSearchResults([]);
+      setAdminSearchLoading(false);
+      return;
+    }
+    let alive = true;
+    setAdminSearchLoading(true);
+    const timer = window.setTimeout(() => {
+      api.searchAdmin(keyword)
+        .then((result) => {
+          if (alive) setAdminSearchResults(result.items);
+        })
+        .catch(() => {
+          if (alive) setAdminSearchResults([]);
+        })
+        .finally(() => {
+          if (alive) setAdminSearchLoading(false);
+        });
+    }, 220);
+    return () => {
+      alive = false;
+      window.clearTimeout(timer);
+    };
+  }, [adminSearch]);
+  function submitAdminSearch(event: FormEvent) {
+    event.preventDefault();
+    setAdminSearchOpen(true);
+  }
+  function openAdminSearchItem(item: AdminSearchItem) {
+    setAdminSearchOpen(false);
+    setAdminSearch("");
+    go(item.href);
+  }
+  return <header className="admin-top"><div>{editor ? `‹ 文章管理 / ${editorTitle}` : "欢迎回来，站长 👋"}</div><form className="search-mini admin-search" onSubmit={submitAdminSearch}><input value={adminSearch} onFocus={() => setAdminSearchOpen(true)} onChange={(event) => { setAdminSearch(event.target.value); setAdminSearchOpen(true); }} placeholder="搜索文章、分类、标签、媒体..." /><button aria-label="后台搜索">⌕</button>{adminSearchOpen && adminSearch.trim() && <div className="admin-search-panel">{adminSearchLoading ? <p>正在搜索...</p> : adminSearchResults.length ? adminSearchResults.map((item) => <button type="button" key={`${item.kind}-${item.href}-${item.title}`} onMouseDown={(event) => event.preventDefault()} onClick={() => openAdminSearchItem(item)}><b>{item.title}</b><small>{item.subtitle}</small></button>) : <p>没有找到相关结果</p>}</div>}</form><button className="bell">♧{pendingCount > 0 && <b>{formatCompactNumber(pendingCount)}</b>}</button><span className="avatar sm">站</span></header>;
 }
 
 function AdminPlaceholder({ page }: { page: string }) {

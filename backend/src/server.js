@@ -1704,6 +1704,53 @@ async function handleAdminDashboard(req, res) {
   }, corsHeaders(req));
 }
 
+async function handleAdminSearch(req, res, url) {
+  const keyword = String(url.searchParams.get("q") || "").trim().toLowerCase();
+  if (!keyword) return sendJson(res, 200, { items: [] }, corsHeaders(req));
+  const pattern = `%${keyword}%`;
+  const [posts, categoriesResult, tagsResult, mediaResult] = await Promise.all([
+    query(
+      `SELECT id, title, status, updated_at
+       FROM posts
+       WHERE lower(title) LIKE $1 OR lower(COALESCE(excerpt, '')) LIKE $1 OR lower(COALESCE(summary, '')) LIKE $1
+       ORDER BY updated_at DESC
+       LIMIT 6`,
+      [pattern],
+    ),
+    query(
+      `SELECT id, name, posts_count
+       FROM categories
+       WHERE lower(name) LIKE $1 OR lower(COALESCE(description, '')) LIKE $1
+       ORDER BY posts_count DESC, name ASC
+       LIMIT 4`,
+      [pattern],
+    ),
+    query(
+      `SELECT id, name, posts_count
+       FROM tags
+       WHERE lower(name) LIKE $1
+       ORDER BY posts_count DESC, name ASC
+       LIMIT 4`,
+      [pattern],
+    ),
+    query(
+      `SELECT id, original_name, file_name, mime_type, created_at
+       FROM media_assets
+       WHERE lower(original_name) LIKE $1 OR lower(file_name) LIKE $1 OR lower(COALESCE(alt_text, '')) LIKE $1 OR lower(mime_type) LIKE $1
+       ORDER BY created_at DESC
+       LIMIT 6`,
+      [pattern],
+    ),
+  ]);
+  const items = [
+    ...posts.rows.map((item) => ({ kind: "post", title: item.title, subtitle: `文章 · ${item.status} · ${String(item.updated_at || "").slice(0, 10)}`, href: `/admin/editor?id=${item.id}` })),
+    ...categoriesResult.rows.map((item) => ({ kind: "category", title: item.name, subtitle: `分类 · ${item.posts_count ?? 0} 篇文章`, href: "/admin/categories" })),
+    ...tagsResult.rows.map((item) => ({ kind: "tag", title: item.name, subtitle: `标签 · ${item.posts_count ?? 0} 篇文章`, href: "/admin/tags" })),
+    ...mediaResult.rows.map((item) => ({ kind: "media", title: item.original_name || item.file_name, subtitle: `媒体 · ${item.mime_type}`, href: "/admin/media" })),
+  ];
+  sendJson(res, 200, { items }, corsHeaders(req));
+}
+
 async function handleAdminMedia(req, res, url) {
   const pageSize = Math.min(Math.max(Number(url.searchParams.get("pageSize") || 20), 1), 100);
   const page = Math.max(Number(url.searchParams.get("page") || 1), 1);
@@ -2386,6 +2433,7 @@ async function handleRequest(req, res) {
     if (req.method === "PUT" && adminFeatured) return handleAdminFeaturedPost(req, res, Number(adminFeatured[1]));
 
     if (req.method === "GET" && url.pathname === "/api/admin/dashboard") return handleAdminDashboard(req, res);
+    if (req.method === "GET" && url.pathname === "/api/admin/search") return handleAdminSearch(req, res, url);
     if (req.method === "GET" && url.pathname === "/api/admin/site-settings") return handleAdminSiteSettings(req, res);
     if (req.method === "PUT" && url.pathname === "/api/admin/site-settings") return handleAdminUpdateSiteSettings(req, res);
     if (req.method === "GET" && url.pathname === "/api/admin/home-settings") return handleAdminHomeSettings(req, res);
