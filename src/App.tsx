@@ -170,6 +170,11 @@ function useSiteSettings(applyDocumentMeta = false) {
   return siteSettings;
 }
 
+function setMetaDescription(content: string) {
+  const description = document.querySelector<HTMLMetaElement>('meta[name="description"]');
+  if (description) description.content = content;
+}
+
 function Logo({ admin = false, settings = defaultSiteSettings }: { admin?: boolean; settings?: SiteSettings }) {
   const title = admin ? settings.siteName.replace(/创作平台$/, "").trim() || settings.siteName : settings.siteName;
   const subtitle = admin ? "创作平台" : settings.siteSubtitle;
@@ -186,8 +191,19 @@ function Logo({ admin = false, settings = defaultSiteSettings }: { admin?: boole
 
 function PublicHeader({ active }: { active: string }) {
   const [headerSearch, setHeaderSearch] = useState("");
-  const siteSettings = useSiteSettings(true);
+  const siteSettings = useSiteSettings(false);
   const headerNav = nav;
+  useEffect(() => {
+    const pageTitle = active === "/"
+      ? siteSettings.defaultSeoTitle || siteSettings.siteName
+      : active === "/posts" ? `文章 - ${siteSettings.siteName}`
+        : active === "/about" ? `关于 - ${siteSettings.siteName}`
+          : active === "/messages" ? `留言板 - ${siteSettings.siteName}`
+            : active.startsWith("/article") ? `文章详情 - ${siteSettings.siteName}`
+              : siteSettings.defaultSeoTitle || siteSettings.siteName;
+    document.title = pageTitle;
+    setMetaDescription(siteSettings.defaultSeoDescription);
+  }, [active, siteSettings]);
   function openPublicNav(href: string) {
     go(href);
   }
@@ -483,6 +499,7 @@ function StatsCard() {
 }
 
 function ArticlePage({ articleId }: { articleId: number }) {
+  const siteSettings = useSiteSettings(false);
   const [liked, setLiked] = useState(false);
   const [likeCount, setLikeCount] = useState(0);
   const [likeNotice, setLikeNotice] = useState("");
@@ -565,6 +582,10 @@ function ArticlePage({ articleId }: { articleId: number }) {
 
   useEffect(() => {
     if (!article) return;
+    if (!article.locked) {
+      document.title = `${article.title} - ${siteSettings.siteName}`;
+      setMetaDescription(article.summary || article.excerpt || siteSettings.defaultSeoDescription);
+    }
     setLiked(false);
     setLikeCount(article.likes);
     setLikeNotice("");
@@ -583,7 +604,7 @@ function ArticlePage({ articleId }: { articleId: number }) {
     return () => {
       alive = false;
     };
-  }, [article]);
+  }, [article, siteSettings]);
 
   function jumpToSection(id: string) {
     setActiveSection(id);
