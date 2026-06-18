@@ -1067,6 +1067,11 @@ export const api = {
     });
     return { article: mapBackendPost(data), source: "api" as const };
   },
+  getRelatedPosts: async (id: number) => {
+    const data = await requestJson<{ items?: BackendPost[]; source?: "mock" }>(`/public/posts/${id}/related`, { items: [], source: "mock" });
+    if (data.source === "mock" || !Array.isArray(data.items)) return { articles: [], source: "mock" as const };
+    return { articles: data.items.map(mapBackendPost), source: "api" as const };
+  },
   getComments: async (postId: number) => {
     const data = await requestJson<{ items?: BackendComment[]; source?: "mock" }>(`/public/posts/${postId}/comments`, { items: [], source: "mock" });
     if (data.source === "mock" || !Array.isArray(data.items)) return { items: [], source: "mock" as const };

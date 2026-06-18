@@ -209,6 +209,12 @@ pre { position: relative; margin: 14px 0; padding: 18px; border-radius: 7px; col
 pre button { position: absolute; right: 12px; top: 10px; color: #fff; border: 1px solid #526071; border-radius: 6px; padding: 5px 10px; }
 .pager { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin: 20px 0; }
 .pager button { padding: 14px; border: 1px solid var(--line); border-radius: 7px; text-align: left; background: #fff; }
+.article-related-bottom { display: grid; gap: 14px; margin: 30px 0; padding: 22px; border: 1px solid var(--line); border-radius: 8px; background: #fbfdfe; }
+.article-related-bottom h3 { margin: 0; }
+.article-related-bottom > div { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.article-related-bottom button { display: grid; gap: 6px; padding: 14px; border: 1px solid #e4edf1; border-radius: 7px; text-align: left; background: #fff; }
+.article-related-bottom button:hover { border-color: rgba(7,155,149,.35); background: #f0fbf9; }
+.article-related-bottom small { color: var(--muted); }
 .comment-input { display: grid; grid-template-columns: 44px 1fr 110px; gap: 10px; align-items: start; }
 .comment-compose { border: 1px solid var(--line); border-radius: 7px; background: #fff; overflow: hidden; }
 .comment-meta { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); border-bottom: 1px solid var(--line); }

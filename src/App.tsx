@@ -572,11 +572,11 @@ function ArticlePage({ articleId }: { articleId: number }) {
     setActiveSection(article.sections[0]?.id ?? "");
     let alive = true;
     Promise.all([
-      api.getPublicPosts({ category: article.category, pageSize: 4 }),
+      api.getRelatedPosts(article.id),
       api.getPublicPosts({ pageSize: 5 }),
     ]).then(([relatedResult, latestResult]) => {
       if (!alive) return;
-      setRelatedArticles(relatedResult.articles.filter((item) => item.id !== article.id).slice(0, 3));
+      setRelatedArticles(relatedResult.articles.filter((item) => item.id !== article.id).slice(0, 4));
       setLatestArticles(latestResult.articles.filter((item) => item.id !== article.id).slice(0, 5));
       setArticleSideUsingMock(relatedResult.source === "mock" || latestResult.source === "mock");
     });
@@ -707,6 +707,10 @@ function ArticlePage({ articleId }: { articleId: number }) {
             {article.codeSample && <><h3>示例代码</h3><CodeBlock code={article.codeSample} language="typescript" /></>}
             <Pager article={article} />
             <CommentBox articleId={article.id} value={comment} onChange={setComment} enabled={articleSource === "api" && article.allowComment !== false} disabledReason={articleSource !== "api" ? "当前为 mock 文章，评论不会写入数据库。" : undefined} />
+            <section className="article-related-bottom">
+              <h3>推荐阅读</h3>
+              {relatedArticles.length ? <div>{relatedArticles.map((item) => <button key={item.id} onClick={() => go(`/article/${item.id}`)}><b>{item.title}</b><small>{item.category} · 阅读 {item.readingMinutes} 分钟</small></button>)}</div> : <p className="soft-text">暂无同分类或同标签文章。</p>}
+            </section>
           </div>
         </article>
         <aside className="side-stack article-side">

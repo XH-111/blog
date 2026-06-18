@@ -901,6 +901,43 @@ async function handlePublicPostDetail(req, res, id) {
   return sendPublicPostContent(req, res, row, id);
 }
 
+async function handlePublicRelatedPosts(req, res, id) {
+  await publishDueScheduledPosts();
+  const result = await query(
+    `
+      WITH current_post AS (
+        SELECT category_id FROM posts WHERE id = $1
+      ),
+      current_tags AS (
+        SELECT tag_id FROM post_tags WHERE post_id = $1
+      )
+      SELECT
+        p.id, p.title, p.slug, p.excerpt, p.summary, p.cover_url, p.status, p.visibility, p.password_hint,
+        p.is_featured, p.allow_comment,
+        p.reading_minutes, p.views_count, p.likes_count, p.comments_count, p.published_at,
+        c.id AS category_id, c.name AS category_name, c.slug AS category_slug,
+        COALESCE(json_agg(DISTINCT jsonb_build_object('id', t.id, 'name', t.name, 'slug', t.slug)) FILTER (WHERE t.id IS NOT NULL), '[]') AS tags,
+        CASE WHEN p.category_id = (SELECT category_id FROM current_post) THEN 1 ELSE 0 END AS category_score,
+        count(DISTINCT ct.tag_id)::integer AS tag_score
+      FROM posts p
+      LEFT JOIN categories c ON c.id = p.category_id
+      LEFT JOIN post_tags pt ON pt.post_id = p.id
+      LEFT JOIN tags t ON t.id = pt.tag_id
+      LEFT JOIN current_tags ct ON ct.tag_id = pt.tag_id
+      WHERE p.id <> $1
+        AND p.status = 'published'
+        AND p.visibility IN ('public', 'password')
+      GROUP BY p.id, c.id
+      HAVING CASE WHEN p.category_id = (SELECT category_id FROM current_post) THEN 1 ELSE 0 END > 0
+        OR count(DISTINCT ct.tag_id) > 0
+      ORDER BY tag_score DESC, category_score DESC, p.published_at DESC NULLS LAST
+      LIMIT 4
+    `,
+    [id],
+  );
+  sendJson(res, 200, { items: result.rows.map(mapPost) }, corsHeaders(req));
+}
+
 async function sendPublicPostContent(req, res, row, id) {
   const sections = await query(
     `SELECT anchor AS id, title, level, body FROM post_sections WHERE post_id = $1 ORDER BY sort_order ASC`,
@@ -2392,6 +2429,9 @@ async function handleRequest(req, res) {
 
     const postDetail = url.pathname.match(/^\/api\/public\/posts\/(\d+)$/);
     if (req.method === "GET" && postDetail) return handlePublicPostDetail(req, res, Number(postDetail[1]));
+
+    const relatedPosts = url.pathname.match(/^\/api\/public\/posts\/(\d+)\/related$/);
+    if (req.method === "GET" && relatedPosts) return handlePublicRelatedPosts(req, res, Number(relatedPosts[1]));
 
     const unlockPost = url.pathname.match(/^\/api\/public\/posts\/(\d+)\/unlock$/);
     if (req.method === "POST" && unlockPost) return handleUnlockPublicPost(req, res, Number(unlockPost[1]));
