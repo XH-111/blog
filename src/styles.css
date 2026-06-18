@@ -449,11 +449,11 @@ pre button { position: absolute; right: 12px; top: 10px; color: #fff; border: 1p
 .media-upload-strip button { border: 0; border-radius: 7px; background: var(--teal); color: #fff; padding: 9px 14px; font-weight: 700; cursor: pointer; }
 .media-upload-strip button:disabled { opacity: .62; cursor: not-allowed; }
 .media-upload-strip span { color: #55706f; }
-.media-filter-bar { display: grid; grid-template-columns: auto minmax(220px, 1fr) auto; gap: 10px; align-items: center; padding: 12px; border: 1px solid var(--line); border-radius: 8px; background: #fff; }
+.media-filter-bar, .moderation-filter-bar { display: grid; grid-template-columns: auto minmax(220px, 1fr) auto; gap: 10px; align-items: center; padding: 12px; border: 1px solid var(--line); border-radius: 8px; background: #fff; }
 .media-type-tabs { display: inline-flex; gap: 6px; padding: 4px; border-radius: 8px; background: #f2f6f7; }
 .media-type-tabs button, .media-clear-filter { min-height: 34px; padding: 0 12px; border-radius: 7px; color: #536273; font-weight: 800; }
 .media-type-tabs button.active { color: #fff; background: var(--teal); }
-.media-filter-bar input { width: 100%; height: 38px; padding: 0 12px; border-radius: 7px; }
+.media-filter-bar input, .moderation-filter-bar input { width: 100%; height: 38px; padding: 0 12px; border-radius: 7px; }
 .media-clear-filter { border: 1px solid var(--line); color: var(--teal-dark); background: #fff; }
 .admin-stats { grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 15px; }
 .admin-stat { min-height: 128px; display: grid; grid-template-rows: 54px 20px 36px 22px; place-items: center; align-content: center; gap: 3px; padding: 16px 18px 18px; text-align: center; border: 1px solid #e5edf1; border-radius: 10px; background: #fff; box-shadow: 0 10px 26px rgba(38, 63, 83, .05); }
@@ -891,7 +891,7 @@ pre button { position: absolute; right: 12px; top: 10px; color: #fff; border: 1p
   .editor-split { grid-template-columns: 1fr; }
   .editor-actions { position: static; margin: 12px 0; }
   .about-config, .home-config, .settings-grid, .project-editor article, .timeline-editor article, .home-entry-editor article, .project-form-grid { grid-template-columns: 1fr; }
-  .media-filter-bar { grid-template-columns: 1fr; }
+  .media-filter-bar, .moderation-filter-bar { grid-template-columns: 1fr; }
   .media-type-tabs { width: 100%; }
   .media-type-tabs button { flex: 1; }
   .settings-panel.wide, .settings-grid .wide, .timeline-editor .wide, .home-entry-editor .wide, .project-form-grid .wide, .project-card-head { grid-column: auto; }

@@ -2275,6 +2275,8 @@ function AdminPlaceholder({ page }: { page: string }) {
   const [mediaSearch, setMediaSearch] = useState("");
   const [mediaPage, setMediaPage] = useState(1);
   const [mediaPagination, setMediaPagination] = useState({ page: 1, pageSize: 20, total: 0, hasMore: false });
+  const [moderationStatusFilter, setModerationStatusFilter] = useState<"all" | "pending" | "approved" | "rejected">("all");
+  const [moderationSearch, setModerationSearch] = useState("");
   const [mediaUploading, setMediaUploading] = useState(false);
   const mediaInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -2621,6 +2623,17 @@ function AdminPlaceholder({ page }: { page: string }) {
     const matchSearch = !keyword || [mediaDisplayName(item), item.originalName, item.fileName, item.altText ?? "", item.mimeType].join(" ").toLowerCase().includes(keyword);
     return matchType && matchSearch;
   });
+  const moderationKeyword = moderationSearch.trim().toLowerCase();
+  const filteredAdminComments = adminComments.filter((item) => {
+    const matchStatus = moderationStatusFilter === "all" || item.status === moderationStatusFilter;
+    const matchSearch = !moderationKeyword || [item.authorName, item.content, item.postTitle ?? ""].join(" ").toLowerCase().includes(moderationKeyword);
+    return matchStatus && matchSearch;
+  });
+  const filteredAdminMessages = adminMessages.filter((item) => {
+    const matchStatus = moderationStatusFilter === "all" || item.status === moderationStatusFilter;
+    const matchSearch = !moderationKeyword || [item.authorName, item.content, item.role].join(" ").toLowerCase().includes(moderationKeyword);
+    return matchStatus && matchSearch;
+  });
 
   const rows: AdminRow[] = page === "posts" || page === "drafts" || page === "trash"
     ? adminPosts.map((item) => ({
@@ -2682,7 +2695,7 @@ function AdminPlaceholder({ page }: { page: string }) {
               ],
             }))
           : page === "comments"
-            ? adminComments.map((item) => ({
+            ? filteredAdminComments.map((item) => ({
                 key: `comment-${item.id}`,
                 id: item.id,
                 text: `${item.authorName} · ${item.content}${item.postTitle ? ` · ${item.postTitle}` : ""}`,
@@ -2692,7 +2705,7 @@ function AdminPlaceholder({ page }: { page: string }) {
                 review: { kind: "comment" as const, id: item.id, status: item.status },
               }))
             : page === "messages"
-              ? adminMessages.map((item) => ({
+              ? filteredAdminMessages.map((item) => ({
                   key: `message-${item.id}`,
                   id: item.id,
                   text: `${item.parentId ? "回复" : "留言"} · ${item.authorName} · ${item.content}`,
@@ -2871,6 +2884,27 @@ function AdminPlaceholder({ page }: { page: string }) {
               <input value={mediaSearch} onChange={(event) => { setMediaSearch(event.target.value); setMediaPage(1); setSelectedKeys([]); }} placeholder="搜索文件名、说明或类型" />
             </label>
             {mediaHasActiveFilter && <button type="button" className="media-clear-filter" onClick={() => { setMediaTypeFilter("all"); setMediaSearch(""); setMediaPage(1); setSelectedKeys([]); }}>清空</button>}
+          </div>
+        )}
+        {(page === "comments" || page === "messages") && (
+          <div className="moderation-filter-bar">
+            <div className="media-type-tabs" aria-label="审核状态筛选">
+              {[
+                ["all", "全部"],
+                ["pending", "待审核"],
+                ["approved", "已通过"],
+                ["rejected", "已驳回"],
+              ].map(([value, label]) => (
+                <button key={value} type="button" className={moderationStatusFilter === value ? "active" : ""} onClick={() => { setModerationStatusFilter(value as "all" | "pending" | "approved" | "rejected"); setSelectedKeys([]); }}>
+                  {label}
+                </button>
+              ))}
+            </div>
+            <label>
+              <span className="visually-hidden">搜索审核内容</span>
+              <input value={moderationSearch} onChange={(event) => { setModerationSearch(event.target.value); setSelectedKeys([]); }} placeholder={page === "comments" ? "搜索评论作者、内容或文章标题" : "搜索留言作者、内容或角色"} />
+            </label>
+            {(moderationStatusFilter !== "all" || moderationSearch.trim()) && <button type="button" className="media-clear-filter" onClick={() => { setModerationStatusFilter("all"); setModerationSearch(""); setSelectedKeys([]); }}>清空</button>}
           </div>
         )}
         <section className="card admin-table">
