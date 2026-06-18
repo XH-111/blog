@@ -202,6 +202,9 @@ pre button { position: absolute; right: 12px; top: 10px; color: #fff; border: 1p
 .comment-input button { background: var(--teal); color: #fff; border-radius: 7px; height: 40px; }
 .comment-closed { margin: 10px 0; padding: 14px 16px; border: 1px solid #dbe7ea; border-radius: 7px; color: #536273; background: #f6faf9; }
 .comment-thread { margin-top: 12px; display: flex; flex-direction: column; gap: 10px; }
+.friendly-empty { display: grid; justify-items: center; gap: 6px; padding: 22px 16px; border: 1px dashed #d5e5e6; border-radius: 8px; color: var(--muted); text-align: center; background: #fbfefe; }
+.friendly-empty b { color: #172033; }
+.friendly-empty span { max-width: 420px; line-height: 1.7; }
 .comment-row { display: grid; grid-template-columns: 28px 1fr; gap: 10px; color: #27384d; }
 .comment-row p { margin: 0 0 4px; }
 .comment-row small { color: #667386; font-size: 12px; }
@@ -332,6 +335,7 @@ pre button { position: absolute; right: 12px; top: 10px; color: #fff; border: 1p
 .message-form textarea { min-height: 120px; padding: 14px; resize: vertical; }
 .message-form footer { display: flex; align-items: center; gap: 16px; }
 .message-form footer small { margin-left: auto; color: var(--muted); }
+.message-form button:disabled { opacity: .58; cursor: not-allowed; }
 .form-notice { margin: 10px 0 0; padding: 10px 12px; border: 1px solid #f4c7c3; border-radius: 7px; color: #9f2f24; background: #fff7f6; font-size: 13px; }
 .message-tabs { display: flex; align-items: center; gap: 28px; border-bottom: 1px solid var(--line); }
 .message-tabs button { padding: 14px 0; color: #536273; }

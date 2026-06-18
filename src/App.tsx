@@ -734,7 +734,7 @@ function CommentBox({ articleId, value, onChange, enabled, disabledReason }: { a
               <small>{item.createdAt?.slice(0, 16).replace("T", " ") ?? "刚刚"} · 点赞 {item.likesCount}{(item.localPending || item.status === "pending") ? " · 待审核" : ""}</small>
             </div>
           </article>
-        )) : <p className="soft-text">暂无公开评论</p>}
+        )) : <div className="friendly-empty"><b>暂无公开评论</b><span>成为第一个认真交流的人吧，审核通过后会显示在这里。</span></div>}
       </div>
     </section>
   );
@@ -1550,6 +1550,7 @@ function MessagesPage() {
   const [form, setForm] = useState({ author: "", email: "", site: "", content: "" });
   const [list, setList] = useState<Message[]>([]);
   const [submitNotice, setSubmitNotice] = useState("");
+  const [submitting, setSubmitting] = useState(false);
   const [messagesUsingMock, setMessagesUsingMock] = useState(false);
   const [loading, setLoading] = useState(true);
   const [ownerPortraitUrl, setOwnerPortraitUrl] = useState(defaultAboutSettings.portraitUrl);
@@ -1611,7 +1612,11 @@ function MessagesPage() {
 
   async function submit(event: FormEvent) {
     event.preventDefault();
-    if (!form.author.trim() || !form.email.trim() || !form.content.trim()) return;
+    if (submitting) return;
+    if (!form.author.trim() || !form.email.trim() || !form.content.trim()) {
+      setSubmitNotice("请填写昵称、邮箱和留言内容。");
+      return;
+    }
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email.trim())) {
       setSubmitNotice("请输入有效邮箱，邮箱不会公开。");
       return;
@@ -1620,6 +1625,8 @@ function MessagesPage() {
       setSubmitNotice(`留言内容不能超过 ${MESSAGE_CONTENT_MAX_LENGTH} 字。`);
       return;
     }
+    setSubmitting(true);
+    setSubmitNotice("正在提交留言...");
     try {
       const next = await api.postMessage(form);
       setList((items) => [{ ...next, approved: false, replies: [] }, ...items]);
@@ -1628,6 +1635,8 @@ function MessagesPage() {
       emitAdminDataChanged();
     } catch (error) {
       setSubmitNotice(getApiErrorMessage(error));
+    } finally {
+      setSubmitting(false);
     }
   }
 
@@ -1648,7 +1657,7 @@ function MessagesPage() {
               <label>网站（可选）<input value={form.site} onChange={(event) => setForm({ ...form, site: event.target.value })} placeholder="https://your-site.com" /></label>
             </div>
             <label>写下你的留言 *<textarea value={form.content} onChange={(event) => setForm({ ...form, content: event.target.value })} maxLength={MESSAGE_CONTENT_MAX_LENGTH} placeholder="欢迎留言交流，分享你的想法或问题..." /></label>
-            <footer><span>☺　▧　&lt;/&gt;</span><small>{form.content.length} / {MESSAGE_CONTENT_MAX_LENGTH}</small><button disabled={!form.author.trim() || !form.email.trim() || !form.content.trim()}>发布留言</button></footer>
+            <footer><span>☺　▧　&lt;/&gt;</span><small>{form.content.length} / {MESSAGE_CONTENT_MAX_LENGTH}</small><button disabled={submitting || !form.author.trim() || !form.email.trim() || !form.content.trim()}>{submitting ? "提交中..." : "发布留言"}</button></footer>
             {submitNotice && <p className="form-notice">{submitNotice}</p>}
           </form>
           <div className="message-tabs">
@@ -1657,7 +1666,7 @@ function MessagesPage() {
             <button onClick={() => setTab("pending")} className={tab === "pending" ? "active" : ""}>待审核 <b>{pendingCount}</b></button>
             <select value={sort} onChange={(event) => setSort(event.target.value)}><option value="latest">最新留言</option><option value="hot">点赞最多</option></select>
           </div>
-          <div className="message-list">{loading ? <section className="empty card">正在读取留言...</section> : visibleMessages.length ? visibleMessages.map((item) => <MessageItem key={item.id} item={item} readonlyMock={messagesUsingMock} />) : <section className="empty card">当前筛选下暂无留言</section>}</div>
+          <div className="message-list">{loading ? <section className="empty card">正在读取留言...</section> : visibleMessages.length ? visibleMessages.map((item) => <MessageItem key={item.id} item={item} readonlyMock={messagesUsingMock} />) : <section className="friendly-empty card"><b>当前筛选下暂无留言</b><span>{tab === "all" ? "还没有公开留言，可以先写下第一个问题或想法。" : "换到全部留言，或者等待站长审核和回复。"}</span></section>}</div>
         </section>
         <aside className="side-stack"><section className="rule-card card"><h3>友好交流</h3><p>请尊重他人、文明发言</p><p>禁止发布广告、恶意链接</p><p>技术讨论请尽量具体清晰</p><p>站长会定期查看并回复</p></section><Card title="最新评论"><MiniComments /></Card><section className="author card"><div className="avatar lg author-photo" style={{ backgroundImage: `url(${ownerPortraitUrl || defaultAboutSettings.portraitUrl})` }}>站</div><h3>站长 <Tag>站长</Tag></h3><p>全栈开发 & 技术分享</p><p>热爱技术，热爱分享。在这里记录学习与实践的点滴。</p></section></aside>
       </main>
