@@ -2460,6 +2460,64 @@ async function handleAdminAiStatus(req, res) {
   }, corsHeaders(req));
 }
 
+function normalizeJsonValue(value) {
+  if (!value) return {};
+  if (typeof value === "object") return value;
+  if (typeof value !== "string") return {};
+  try {
+    return JSON.parse(value);
+  } catch {
+    return {};
+  }
+}
+
+function mapAiTaskRow(row) {
+  const result = normalizeJsonValue(row.result_json);
+  const sources = Array.isArray(result.sources)
+    ? result.sources
+      .map((source) => ({
+        title: String(source?.title || source?.url || "参考来源"),
+        url: String(source?.url || ""),
+      }))
+      .filter((source) => source.url)
+    : [];
+  return {
+    id: Number(row.id),
+    taskType: row.task_type,
+    sourceType: row.source_type,
+    sourceId: row.source_id ? Number(row.source_id) : null,
+    inputPreview: trimAiInput(row.input_text || "").slice(0, 120),
+    status: row.status,
+    title: result.title || "",
+    summary: result.summary || "",
+    userInstruction: result.userInstruction || "",
+    reviewFocus: result.reviewFocus || null,
+    result: result.result || "",
+    notes: result.notes || "",
+    error: result.error || "",
+    message: result.message || "",
+    sources,
+    provider: result.provider || null,
+    model: result.model || null,
+    enableWebSearch: Boolean(result.enableWebSearch),
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+async function handleAdminAiTasks(req, res, url) {
+  const requestedLimit = Number(url.searchParams.get("limit") || 20);
+  const limit = Math.min(50, Math.max(1, Number.isFinite(requestedLimit) ? Math.trunc(requestedLimit) : 20));
+  const result = await query(
+    `SELECT id, task_type, source_type, source_id, input_text, result_json, status, created_at, updated_at
+     FROM ai_tasks
+     ORDER BY created_at DESC
+     LIMIT $1`,
+    [limit],
+  );
+  sendJson(res, 200, { items: result.rows.map(mapAiTaskRow) }, corsHeaders(req));
+}
+
 async function handleAdminAiRun(req, res) {
   const body = await readBody(req);
   const tool = String(body.tool || "").trim();
@@ -2618,6 +2676,7 @@ async function handleRequest(req, res) {
     if (req.method === "GET" && url.pathname === "/api/admin/comments") return handleAdminComments(req, res);
     if (req.method === "GET" && url.pathname === "/api/admin/messages") return handleAdminMessages(req, res);
     if (req.method === "GET" && url.pathname === "/api/admin/ai/status") return handleAdminAiStatus(req, res);
+    if (req.method === "GET" && url.pathname === "/api/admin/ai/tasks") return handleAdminAiTasks(req, res, url);
     if (req.method === "POST" && url.pathname === "/api/admin/ai/run") return handleAdminAiRun(req, res);
 
     const adminComment = url.pathname.match(/^\/api\/admin\/comments\/(\d+)$/);

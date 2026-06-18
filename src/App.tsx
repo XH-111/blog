@@ -1,7 +1,7 @@
 ﻿import { ChangeEvent, FormEvent, ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { api, getApiErrorMessage } from "./services/api";
 import type { ClipboardEvent, PointerEvent, WheelEvent } from "react";
-import type { AboutPageSettings, AdminAiReviewFocus, AdminAiStatus, AdminAiTool, AdminCategoryItem, AdminCommentItem, AdminDashboardData, AdminMediaItem, AdminMessageItem, AdminPostListItem, AdminPostVersionItem, AdminSearchItem, AdminTagItem, HomeEntryCardSetting, HomePageSettings, PublicCommentItem, PublicSiteStats, SiteSettings } from "./services/api";
+import type { AboutPageSettings, AdminAiReviewFocus, AdminAiStatus, AdminAiTaskItem, AdminAiTool, AdminCategoryItem, AdminCommentItem, AdminDashboardData, AdminMediaItem, AdminMessageItem, AdminPostListItem, AdminPostVersionItem, AdminSearchItem, AdminTagItem, HomeEntryCardSetting, HomePageSettings, PublicCommentItem, PublicSiteStats, SiteSettings } from "./services/api";
 import type { Article, Message } from "./types";
 
 const nav = [
@@ -3352,6 +3352,9 @@ function EditorPage() {
     tasksCount: 0,
     message: "正在读取 AI 功能状态...",
   });
+  const [aiTasks, setAiTasks] = useState<AdminAiTaskItem[]>([]);
+  const [aiTasksOpen, setAiTasksOpen] = useState(false);
+  const [aiTasksLoading, setAiTasksLoading] = useState(false);
   const [aiBusyTool, setAiBusyTool] = useState<AdminAiTool | "">("");
   const [aiMode, setAiMode] = useState<AdminAiTool>("polish");
   const [aiComment, setAiComment] = useState("");
@@ -3689,12 +3692,51 @@ function EditorPage() {
       markdownInputRef.current?.setSelectionRange(lastPolishSnapshot.selectionStart, lastPolishSnapshot.selectionEnd);
     }, 0);
   }
+  const aiToolNames: Record<AdminAiTool, string> = {
+    summary: "AI 摘要",
+    polish: "AI 润色",
+    comment: "AI 评论",
+  };
+  const aiStatusNames: Record<string, string> = {
+    running: "处理中",
+    succeeded: "已完成",
+    failed: "失败",
+  };
+  async function loadAiTasks(showNotice = false) {
+    setAiTasksLoading(true);
+    try {
+      const result = await api.getAiTasks(20);
+      setAiTasks(result.items);
+      setAiStatus((current) => ({ ...current, tasksCount: Math.max(current.tasksCount, result.items.length) }));
+      if (showNotice) setNotice(result.items.length ? `已读取最近 ${result.items.length} 条 AI 任务。` : "暂无 AI 任务记录。");
+    } catch (error) {
+      setNotice(getApiErrorMessage(error));
+    } finally {
+      setAiTasksLoading(false);
+    }
+  }
+  function toggleAiTasks() {
+    setAiTasksOpen((open) => {
+      const nextOpen = !open;
+      if (nextOpen) void loadAiTasks(true);
+      return nextOpen;
+    });
+  }
+  function openAiTaskResult(task: AdminAiTaskItem) {
+    const name = aiToolNames[task.taskType as AdminAiTool] ?? "AI 任务";
+    const sections = [
+      `状态：${aiStatusNames[task.status] ?? task.status}`,
+      task.model ? `模型：${task.model}${task.enableWebSearch ? "（联网核查）" : ""}` : "",
+      task.userInstruction ? `本次要求：${task.userInstruction}` : "",
+      task.notes ? `处理说明：\n${task.notes}` : "",
+      task.result ? `输出结果：\n${task.result}` : "",
+      task.message ? `错误信息：${task.message}` : "",
+      !task.result && !task.notes && !task.message && task.inputPreview ? `输入摘要：${task.inputPreview}` : "",
+    ].filter(Boolean).join("\n\n");
+    setAiResultModal({ title: `${name} #${task.id}`, content: sections || "这条任务暂时没有可复看的输出。", sources: task.sources });
+  }
   async function runAiTool(tool: AdminAiTool) {
-    const labels: Record<AdminAiTool, string> = {
-      summary: "AI 摘要",
-      polish: "AI 润色",
-      comment: "AI 评论",
-    };
+    const labels = aiToolNames;
     if (aiBusyTool) return;
     const textarea = markdownInputRef.current;
     const selectionStart = textarea?.selectionStart ?? markdown.length;
@@ -3771,6 +3813,7 @@ function EditorPage() {
       }
       if (result.taskId) {
         setAiStatus((current) => ({ ...current, enabled: true, mode: "api", provider: result.provider, model: result.model, tasksCount: current.tasksCount + 1, message: `千问已接入，当前模型：${result.model}` }));
+        if (aiTasksOpen) void loadAiTasks();
       }
     } catch (error) {
       const message = getApiErrorMessage(error);
@@ -3941,8 +3984,33 @@ function EditorPage() {
           <header><h3>✦ AI 助手</h3><button onClick={() => setNotice("AI 助手面板已保持打开")}>×</button></header>
           <div className="ai-status-row">
             <span className={aiStatus.enabled ? "ready" : "warn"}>{aiStatus.enabled ? "千问已接入" : "未配置 Key"}</span>
-            <button type="button" onClick={() => setNotice(`AI 任务表已启用，当前已有 ${aiStatus.tasksCount} 条任务记录。`)}>任务</button>
+            <button type="button" onClick={toggleAiTasks}>{aiTasksOpen ? "收起" : `任务 ${aiStatus.tasksCount}`}</button>
           </div>
+          {aiTasksOpen && (
+            <section className="ai-history" aria-label="AI 任务历史">
+              <div className="ai-history-head">
+                <b>最近任务</b>
+                <button type="button" disabled={aiTasksLoading} onClick={() => loadAiTasks(true)}>{aiTasksLoading ? "读取中" : "刷新"}</button>
+              </div>
+              {aiTasksLoading && !aiTasks.length ? <p className="ai-history-empty">正在读取 AI 任务...</p> : aiTasks.length ? (
+                <div className="ai-history-list">
+                  {aiTasks.map((task) => {
+                    const toolName = aiToolNames[task.taskType as AdminAiTool] ?? "AI 任务";
+                    const timeText = task.createdAt?.slice(0, 16).replace("T", " ") ?? "刚刚";
+                    return (
+                      <button type="button" key={task.id} onClick={() => openAiTaskResult(task)}>
+                        <span>
+                          <b>{toolName}</b>
+                          <small>{aiStatusNames[task.status] ?? task.status} · {timeText}</small>
+                        </span>
+                        <i>{task.result || task.notes || task.message || task.inputPreview || "查看结果"}</i>
+                      </button>
+                    );
+                  })}
+                </div>
+              ) : <p className="ai-history-empty">暂无任务记录，生成摘要、评论或润色后会出现在这里。</p>}
+            </section>
+          )}
           <div className="ai-mode-tabs">
             {aiModeOptions.map((item) => (
               <button key={item.tool} className={aiMode === item.tool ? "active" : ""} onClick={() => setAiMode(item.tool)}>

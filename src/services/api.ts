@@ -488,6 +488,29 @@ export type AdminAiRunResult = {
   taskId?: number;
 };
 
+export type AdminAiTaskItem = {
+  id: number;
+  taskType: AdminAiTool | string;
+  sourceType?: string | null;
+  sourceId?: number | null;
+  inputPreview?: string;
+  status: "running" | "succeeded" | "failed" | string;
+  title?: string;
+  summary?: string;
+  userInstruction?: string;
+  reviewFocus?: AdminAiReviewFocus | string | null;
+  result?: string;
+  notes?: string;
+  error?: string;
+  message?: string;
+  sources?: Array<{ title: string; url: string }>;
+  provider?: string | null;
+  model?: string | null;
+  enableWebSearch?: boolean;
+  createdAt?: string;
+  updatedAt?: string;
+};
+
 export type AdminSearchItem = {
   kind: "post" | "category" | "tag" | "media";
   title: string;
@@ -1381,6 +1404,10 @@ export const api = {
       tasksCount: Number(data.tasksCount ?? 0),
       message: data.message ?? "AI 模型服务尚未接入；当前仅支持前端模拟预览。",
     };
+  },
+  getAiTasks: async (limit = 20): Promise<{ items: AdminAiTaskItem[] }> => {
+    const data = await requestStrictJson<{ items?: AdminAiTaskItem[] }>(`/admin/ai/tasks?limit=${encodeURIComponent(String(limit))}`);
+    return { items: Array.isArray(data.items) ? data.items : [] };
   },
   runAiTool: async (payload: { tool: AdminAiTool; title?: string; summary?: string; content?: string; postId?: number; scope?: "document" | "selection"; userInstruction?: string; reviewFocus?: AdminAiReviewFocus; enableWebSearch?: boolean }): Promise<AdminAiRunResult> => {
     const data = await requestStrictJson<AdminAiRunResult>("/admin/ai/run", {
