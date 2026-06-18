@@ -1344,6 +1344,28 @@ async function handleAdminUpdatePost(req, res, id) {
   sendJson(res, 200, { id: postId, ok: true, item }, corsHeaders(req));
 }
 
+async function handleAdminDuplicatePost(req, res, id) {
+  const source = await getPostDetail(id);
+  if (!source) return sendJson(res, 404, { error: "post_not_found" }, corsHeaders(req));
+  const newId = await transaction((client) => writePost(client, {
+    title: `${source.title} 副本`,
+    contentMarkdown: source.contentMarkdown,
+    summary: source.summary,
+    coverUrl: source.coverUrl,
+    categoryName: source.category?.name,
+    tags: source.tags?.map((tag) => tag.name) ?? [],
+    status: "draft",
+    visibility: source.visibility,
+    isFeatured: false,
+    allowComment: source.allowComment,
+    requireCommentReview: source.requireCommentReview,
+    readingMinutes: source.readingMinutes,
+  }));
+  const item = newId ? await getPostDetail(newId) : null;
+  if (!item) return sendJson(res, 500, { error: "post_duplicate_failed", message: "Post duplicate failed" }, corsHeaders(req));
+  sendJson(res, 201, { id: newId, ok: true, item }, corsHeaders(req));
+}
+
 async function handleAdminPublishPost(req, res, id) {
   const result = await transaction(async (client) => {
     const current = await client.query("SELECT id, title, content_markdown FROM posts WHERE id = $1", [id]);
@@ -2177,6 +2199,9 @@ async function handleRequest(req, res) {
 
     const adminPublish = url.pathname.match(/^\/api\/admin\/posts\/(\d+)\/publish$/);
     if (req.method === "POST" && adminPublish) return handleAdminPublishPost(req, res, Number(adminPublish[1]));
+
+    const adminDuplicate = url.pathname.match(/^\/api\/admin\/posts\/(\d+)\/duplicate$/);
+    if (req.method === "POST" && adminDuplicate) return handleAdminDuplicatePost(req, res, Number(adminDuplicate[1]));
 
     const adminStatus = url.pathname.match(/^\/api\/admin\/posts\/(\d+)\/status$/);
     if (req.method === "PUT" && adminStatus) return handleAdminStatusPost(req, res, Number(adminStatus[1]));

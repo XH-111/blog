@@ -2087,6 +2087,18 @@ function AdminPlaceholder({ page }: { page: string }) {
     }
   }
 
+  async function duplicatePost(id: number) {
+    try {
+      const result = await api.duplicatePost(id);
+      setAdminPosts((items) => sortPostsForAdminList([result.item, ...items]));
+      setActionNotice("文章已复制为新草稿。");
+      emitAdminDataChanged();
+      go(`/admin/editor?id=${result.item.id}`);
+    } catch (error) {
+      setActionNotice(getApiErrorMessage(error));
+    }
+  }
+
   async function deletePost(id: number) {
     try {
       await api.deletePost(id);
@@ -2311,6 +2323,7 @@ function AdminPlaceholder({ page }: { page: string }) {
               { label: "编辑", title: "打开编辑器修改这篇文章", href: `/admin/editor?id=${item.id}` },
               ...(item.status === "published" ? [{ label: "查看", title: "打开前台文章详情页", href: `/article/${item.id}` }] : []),
               ...(item.status === "published" ? [{ label: "下架为草稿", title: "前台不再展示，文章保留在草稿箱继续编辑", run: () => changePostStatus(item.id, "draft") }] : [{ label: "发布", title: "将草稿发布到前台公开显示", run: () => changePostStatus(item.id, "published") }]),
+              { label: "复制", title: "复制文章内容、摘要、封面、分类和标签为一篇新草稿", run: () => duplicatePost(item.id) },
               { label: item.featured ? "取消精选" : "设为精选", title: item.featured ? "从前台精选文章列表移除" : "加入前台精选文章列表", run: () => togglePostFeatured(item.id, !item.featured) },
               { label: "删除", title: "先移入回收站，之后可恢复或永久删除", run: () => deletePost(item.id) },
             ],

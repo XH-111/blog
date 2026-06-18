@@ -1037,6 +1037,12 @@ export const api = {
     const item = data.item ? mapAdminPost(data.item) : undefined;
     return { ok: data.ok ?? true, id: toNumberId(data.item?.id ?? data.id ?? id), isFeatured: item?.featured ?? data.isFeatured ?? isFeatured, item, source: "api" as const };
   },
+  duplicatePost: async (id: number) => {
+    const data = await requestStrictJson<{ ok?: boolean; id?: DbId; item?: BackendPost }>(`/admin/posts/${id}/duplicate`, { method: "POST" });
+    if (!data.item) throw new ApiError("后端没有返回复制后的草稿");
+    const item = mapAdminPost(data.item);
+    return { ok: data.ok ?? true, id: toNumberId(data.id ?? item.id), item, source: "api" as const };
+  },
   deletePost: async (id: number) => {
     const data = await requestStrictJson<{ ok?: boolean; id?: DbId; deleted?: boolean; status?: "archived" }>(`/admin/posts/${id}`, { method: "DELETE" });
     return { ok: data.ok ?? true, id: toNumberId(data.id ?? id), deleted: data.deleted ?? false, status: data.status ?? "archived", source: "api" as const };
