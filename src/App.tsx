@@ -1962,6 +1962,8 @@ function AdminPlaceholder({ page }: { page: string }) {
   const [actionNotice, setActionNotice] = useState("");
   const [batchMode, setBatchMode] = useState(false);
   const [selectedKeys, setSelectedKeys] = useState<string[]>([]);
+  const [mediaTypeFilter, setMediaTypeFilter] = useState<"all" | "image" | "video">("all");
+  const [mediaSearch, setMediaSearch] = useState("");
   const mediaInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
@@ -2280,6 +2282,13 @@ function AdminPlaceholder({ page }: { page: string }) {
     return "待审核";
   }
 
+  const filteredAdminMedia = adminMedia.filter((item) => {
+    const matchType = mediaTypeFilter === "all" || (mediaTypeFilter === "image" ? item.mimeType.startsWith("image/") : item.mimeType.startsWith("video/"));
+    const keyword = mediaSearch.trim().toLowerCase();
+    const matchSearch = !keyword || [mediaDisplayName(item), item.originalName, item.fileName, item.altText ?? "", item.mimeType].join(" ").toLowerCase().includes(keyword);
+    return matchType && matchSearch;
+  });
+
   const rows: AdminRow[] = page === "posts" || page === "drafts" || page === "trash"
     ? adminPosts.map((item) => ({
         key: `post-${item.id}`,
@@ -2301,7 +2310,7 @@ function AdminPlaceholder({ page }: { page: string }) {
             ],
       }))
     : page === "media"
-      ? adminMedia.map((item) => ({
+      ? filteredAdminMedia.map((item) => ({
           key: `media-${item.id}`,
           id: item.id,
           text: mediaDisplayName(item),
@@ -2364,6 +2373,8 @@ function AdminPlaceholder({ page }: { page: string }) {
               : [];
   const selectedRows = rows.filter((row) => selectedKeys.includes(row.key));
   const allRowsSelected = rows.length > 0 && selectedRows.length === rows.length;
+  const mediaHasActiveFilter = page === "media" && (mediaTypeFilter !== "all" || Boolean(mediaSearch.trim()));
+  const emptyText = page === "media" && mediaHasActiveFilter ? "当前筛选下暂无媒体，试试清空搜索或切换类型。" : `暂无${info.label}数据。`;
   const batchActions = page === "posts"
     ? [{ label: "批量设精选", danger: false, run: () => batchChangePostFeatured(true) }, { label: "批量取消精选", danger: false, run: () => batchChangePostFeatured(false) }, { label: "批量下架", danger: false, run: () => batchChangePostStatus("draft") }, { label: "批量移入回收站", danger: true, run: () => batchDeletePosts() }]
     : page === "drafts"
@@ -2502,6 +2513,31 @@ function AdminPlaceholder({ page }: { page: string }) {
             <input ref={mediaInputRef} className="visually-hidden" type="file" accept="image/*,video/*" multiple onChange={uploadMediaFile} />
           </div>
         )}
+        {page === "media" && (
+          <div className="media-filter-bar">
+            <div className="media-type-tabs" aria-label="媒体类型筛选">
+              {[
+                ["all", "全部"],
+                ["image", "图片"],
+                ["video", "视频"],
+              ].map(([value, label]) => (
+                <button
+                  key={value}
+                  type="button"
+                  className={mediaTypeFilter === value ? "active" : ""}
+                  onClick={() => { setMediaTypeFilter(value as "all" | "image" | "video"); setSelectedKeys([]); }}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+            <label>
+              <span className="visually-hidden">搜索媒体</span>
+              <input value={mediaSearch} onChange={(event) => { setMediaSearch(event.target.value); setSelectedKeys([]); }} placeholder="搜索文件名、说明或类型" />
+            </label>
+            {mediaHasActiveFilter && <button type="button" className="media-clear-filter" onClick={() => { setMediaTypeFilter("all"); setMediaSearch(""); setSelectedKeys([]); }}>清空</button>}
+          </div>
+        )}
         <section className="card admin-table">
           <header>
             <div>
@@ -2521,7 +2557,7 @@ function AdminPlaceholder({ page }: { page: string }) {
               </div>
             </div>
           )}
-          {loading ? <p className="soft-text">正在读取数据...</p> : rows.length ? rows.map((row) => <div className={`admin-row ${row.href ? "clickable" : ""} ${row.media ? "media-row" : ""} ${selectedKeys.includes(row.key) ? "selected" : ""}`} key={row.key} onClick={() => row.href && go(row.href)}>{batchMode && <label className="row-check" onClick={(event) => event.stopPropagation()}><input type="checkbox" checked={selectedKeys.includes(row.key)} onChange={(event) => setRowSelected(row.key, event.target.checked)} /><span className="visually-hidden">选择 {row.text}</span></label>}{row.media && <button className={`media-thumb ${isVideoMedia(row.media) ? "video-thumb" : ""}`} type="button" style={isVideoMedia(row.media) ? undefined : { backgroundImage: `url(${row.media.url})` }} onClick={(event) => { event.stopPropagation(); setPreviewMedia(row.media!); }} aria-label={`查看 ${row.text}`}>{isVideoMedia(row.media) && <><video src={row.media.url} muted preload="metadata" /><span>视频</span></>}</button>}{row.media ? <span className="media-text"><b>{row.text}</b><small>{mediaMetaText(row.media)}</small></span> : <span>{row.text}</span>}<div className="admin-row-actions"><small>{row.status}</small>{row.actions?.map((action) => <button key={action.label} title={action.title} onClick={(event) => { event.stopPropagation(); if (action.href) go(action.href); action.run?.(); }}>{action.label}</button>)}{row.review && row.review.status !== "approved" && <button onClick={(event) => { event.stopPropagation(); reviewRow(row.review!.kind, row.review!.id, "approved"); }}>通过</button>}{row.review && row.review.status !== "rejected" && <button onClick={(event) => { event.stopPropagation(); reviewRow(row.review!.kind, row.review!.id, "rejected"); }}>驳回</button>}</div></div>) : <p className="soft-text">暂无{info.label}数据。</p>}
+          {loading ? <p className="soft-text">正在读取数据...</p> : rows.length ? rows.map((row) => <div className={`admin-row ${row.href ? "clickable" : ""} ${row.media ? "media-row" : ""} ${selectedKeys.includes(row.key) ? "selected" : ""}`} key={row.key} onClick={() => row.href && go(row.href)}>{batchMode && <label className="row-check" onClick={(event) => event.stopPropagation()}><input type="checkbox" checked={selectedKeys.includes(row.key)} onChange={(event) => setRowSelected(row.key, event.target.checked)} /><span className="visually-hidden">选择 {row.text}</span></label>}{row.media && <button className={`media-thumb ${isVideoMedia(row.media) ? "video-thumb" : ""}`} type="button" style={isVideoMedia(row.media) ? undefined : { backgroundImage: `url(${row.media.url})` }} onClick={(event) => { event.stopPropagation(); setPreviewMedia(row.media!); }} aria-label={`查看 ${row.text}`}>{isVideoMedia(row.media) && <><video src={row.media.url} muted preload="metadata" /><span>视频</span></>}</button>}{row.media ? <span className="media-text"><b>{row.text}</b><small>{mediaMetaText(row.media)}</small></span> : <span>{row.text}</span>}<div className="admin-row-actions"><small>{row.status}</small>{row.actions?.map((action) => <button key={action.label} title={action.title} onClick={(event) => { event.stopPropagation(); if (action.href) go(action.href); action.run?.(); }}>{action.label}</button>)}{row.review && row.review.status !== "approved" && <button onClick={(event) => { event.stopPropagation(); reviewRow(row.review!.kind, row.review!.id, "approved"); }}>通过</button>}{row.review && row.review.status !== "rejected" && <button onClick={(event) => { event.stopPropagation(); reviewRow(row.review!.kind, row.review!.id, "rejected"); }}>驳回</button>}</div></div>) : <p className="soft-text">{emptyText}</p>}
         </section>
         {previewMedia && (
           <div className="media-modal" role="dialog" aria-modal="true" aria-label={isVideoMedia(previewMedia) ? "视频预览" : "图片预览"} onClick={() => setPreviewMedia(null)}>
