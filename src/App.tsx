@@ -947,20 +947,38 @@ function CommentBox({ articleId, value, onChange, enabled, disabledReason }: { a
 function AuthorCard() {
   const [stats, setStats] = useState<PublicSiteStats>();
   const [usingMock, setUsingMock] = useState(false);
+  const [author, setAuthor] = useState<AboutPageSettings>(defaultAboutSettings);
+  const [aboutUsingMock, setAboutUsingMock] = useState(false);
 
   useEffect(() => {
     let alive = true;
-    api.getPublicStats().then((result) => {
+    Promise.all([api.getPublicStats(), api.getPublicAbout()]).then(([statsResult, aboutResult]) => {
       if (!alive) return;
-      setStats(result);
-      setUsingMock(result.source === "mock");
+      setStats(statsResult);
+      setUsingMock(statsResult.source === "mock");
+      setAuthor(aboutResult.item);
+      setAboutUsingMock(aboutResult.source === "mock");
+    }).catch(() => {
+      if (!alive) return;
+      setAuthor(defaultAboutSettings);
+      setAboutUsingMock(true);
     });
     return () => {
       alive = false;
     };
   }, []);
 
-  return <section className="author card"><div className="avatar lg">山</div><h3>一行代码 <Tag>LV6</Tag></h3><p>全栈开发者 · 技术博主</p>{usingMock && <p className="soft-text">作者统计暂未连接后端，正在显示离线预览数据。</p>}<div className="author-stats"><b>{stats ? stats.posts : "--"}<span>文章</span></b><b>{stats ? api.formatCount(stats.views) : "--"}<span>访问</span></b></div><button onClick={() => go("/about")}>了解作者</button></section>;
+  return (
+    <section className="author card">
+      <div className="avatar lg author-photo" style={{ backgroundImage: `url(${author.portraitUrl || defaultAboutSettings.portraitUrl})` }}>站</div>
+      <h3>{author.title || defaultAboutSettings.title} <Tag>{author.badge || "站长"}</Tag></h3>
+      <p>{author.subtitle || defaultAboutSettings.subtitle}</p>
+      <p>{author.intro || defaultAboutSettings.intro}</p>
+      {(usingMock || aboutUsingMock) && <p className="soft-text">作者信息暂未连接后端，正在显示离线预览数据。</p>}
+      <div className="author-stats"><b>{stats ? stats.posts : "--"}<span>文章</span></b><b>{stats ? api.formatCount(stats.views) : "--"}<span>访问</span></b></div>
+      <button onClick={() => go("/about")}>了解作者</button>
+    </section>
+  );
 }
 
 function PostsPage() {
