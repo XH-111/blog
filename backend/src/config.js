@@ -25,6 +25,8 @@ function numberFromEnv(value, fallback) {
 
 export const config = {
   port: Number(process.env.PORT ?? 8000),
+  host: process.env.HOST || "127.0.0.1",
+  nodeEnv: process.env.NODE_ENV || "development",
   databaseUrl: process.env.DATABASE_URL ?? "postgres://blog:blog123456@127.0.0.1:5432/blog_dev",
   adminDefaultPassword: process.env.ADMIN_DEFAULT_PASSWORD ?? "password",
   adminSessionDays: Number(process.env.ADMIN_SESSION_DAYS ?? 7),

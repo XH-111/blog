@@ -17,7 +17,7 @@
 | 阶段 | 名称 | 状态 | Commit |
 | --- | --- | --- | --- |
 | 1 | 登录、评论、留言限流 | Done | this commit |
-| 2 | 生产配置和启动安全检查 | Pending | - |
+| 2 | 生产配置和启动安全检查 | Done | this commit |
 | 3 | 数据库和上传目录备份闭环 | Pending | - |
 | 4 | 移动端核心流程复验和修复 | Pending | - |
 | 5 | 前台 mock 兜底和未接入提示收敛 | Pending | - |
@@ -97,6 +97,15 @@ feat: add basic public and admin rate limits
 ### 停止条件
 
 配置读取、默认值、启动日志都清晰可理解后停止。
+
+### 验收记录
+
+- `backend/src/config.js` 已支持 `HOST` 和 `NODE_ENV`。
+- 后端监听地址从硬编码 `127.0.0.1` 改为 `config.host`。
+- `backend/.env.example` 已补充 `NODE_ENV`、`HOST`、`ADMIN_DEFAULT_PASSWORD`、`ADMIN_SESSION_DAYS`。
+- 生产环境启动时会对 localhost 绑定、默认后台密码、开发数据库密码、联网搜索缺 Key 给出配置警告。
+- `node --check backend\src\server.js`：通过。
+- 使用 `HOST=127.0.0.1 PORT=18080` 启动临时后端，`GET /api/health` 返回 `ok: true`。
 
 ### 提交信息
 

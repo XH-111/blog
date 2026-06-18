@@ -619,6 +619,24 @@ async function runScheduledPostPublisher() {
   }
 }
 
+function warnRuntimeConfig() {
+  if (config.nodeEnv !== "production") return;
+  const warnings = [];
+  if (config.host === "127.0.0.1" || config.host === "localhost") {
+    warnings.push("HOST is bound to localhost. Set HOST=0.0.0.0 when the server must accept external traffic.");
+  }
+  if (config.adminDefaultPassword === "password") {
+    warnings.push("ADMIN_DEFAULT_PASSWORD is still the development default. Change it before production use.");
+  }
+  if (config.databaseUrl.includes("blog123456")) {
+    warnings.push("DATABASE_URL appears to contain the development database password. Use a stronger production password.");
+  }
+  if (config.aiWebSearchEnabled && !config.qwenApiKey) {
+    warnings.push("AI_WEB_SEARCH_ENABLED is true but DASHSCOPE_API_KEY/QWEN_API_KEY is missing.");
+  }
+  for (const warning of warnings) console.warn(`[config warning] ${warning}`);
+}
+
 async function refreshPublishedTaxonomyCounts() {
   await transaction(async (client) => {
     await refreshTaxonomyCounts(client);
@@ -2628,12 +2646,13 @@ async function handleRequest(req, res) {
 
 await ensureRuntimeSchema();
 await runScheduledPostPublisher();
+warnRuntimeConfig();
 
 const server = http.createServer(handleRequest);
 const scheduledPublisherTimer = setInterval(runScheduledPostPublisher, 60 * 1000);
 
-server.listen(config.port, "127.0.0.1", () => {
-  console.log(`blog backend listening on http://127.0.0.1:${config.port}`);
+server.listen(config.port, config.host, () => {
+  console.log(`blog backend listening on http://${config.host}:${config.port}`);
 });
 
 process.on("SIGINT", async () => {
