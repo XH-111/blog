@@ -171,6 +171,21 @@ async function ensureRuntimeSchema() {
       ADD COLUMN IF NOT EXISTS access_password_hash text,
       ADD COLUMN IF NOT EXISTS password_hint text
   `);
+  await query(`
+    CREATE TABLE IF NOT EXISTS post_versions (
+      id bigserial PRIMARY KEY,
+      post_id bigint NOT NULL REFERENCES posts(id) ON DELETE CASCADE,
+      title varchar(220) NOT NULL,
+      summary text,
+      content_markdown text NOT NULL,
+      cover_url text,
+      category_name varchar(120),
+      tags_json jsonb NOT NULL DEFAULT '[]'::jsonb,
+      created_by bigint REFERENCES admin_users(id) ON DELETE SET NULL,
+      created_at timestamptz NOT NULL DEFAULT now()
+    )
+  `);
+  await query("CREATE INDEX IF NOT EXISTS idx_post_versions_post_id_created_at ON post_versions(post_id, created_at DESC)");
 }
 
 function getClientIp(req) {
@@ -478,6 +493,21 @@ async function writePost(client, payload, id = null) {
       [postId, section.anchor, section.title, section.level, section.body, index + 1],
     );
   }
+
+  await client.query(
+    `INSERT INTO post_versions(post_id, title, summary, content_markdown, cover_url, category_name, tags_json, created_by)
+     VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,$8)`,
+    [
+      postId,
+      title,
+      summary,
+      contentMarkdown,
+      payload.coverUrl || "/assets/article-cover.png",
+      payload.categoryName || payload.category || "技术笔记",
+      JSON.stringify(Array.isArray(payload.tags) ? payload.tags : []),
+      payload.adminUserId ?? null,
+    ],
+  );
 
   await refreshTaxonomyCounts(client);
 
@@ -1493,6 +1523,29 @@ async function handleAdminPostDetail(req, res, id) {
   sendJson(res, 200, post, corsHeaders(req));
 }
 
+async function handleAdminPostVersions(req, res, id) {
+  const post = await query("SELECT id FROM posts WHERE id = $1", [id]);
+  if (!post.rowCount) return sendJson(res, 404, { error: "post_not_found" }, corsHeaders(req));
+  const versions = await query(
+    `SELECT id, title, summary, content_markdown, cover_url, category_name, tags_json, created_at
+     FROM post_versions
+     WHERE post_id = $1
+     ORDER BY created_at DESC
+     LIMIT 20`,
+    [id],
+  );
+  sendJson(res, 200, { items: versions.rows.map((item) => ({
+    id: Number(item.id),
+    title: item.title,
+    summary: item.summary || "",
+    contentMarkdown: item.content_markdown || "",
+    coverUrl: item.cover_url || "",
+    categoryName: item.category_name || "",
+    tags: Array.isArray(item.tags_json) ? item.tags_json : [],
+    createdAt: item.created_at,
+  })) }, corsHeaders(req));
+}
+
 async function handleAdminCreatePost(req, res) {
   const body = await readBody(req);
   const publishError = validatePublishablePost(body);
@@ -1501,7 +1554,7 @@ async function handleAdminCreatePost(req, res) {
   if (passwordError) return sendJson(res, 400, passwordError, corsHeaders(req));
   const scheduleError = validatePostSchedule(body);
   if (scheduleError) return sendJson(res, 400, scheduleError, corsHeaders(req));
-  const id = await transaction((client) => writePost(client, body));
+  const id = await transaction((client) => writePost(client, { ...body, adminUserId: req.adminUser?.id ?? null }));
   const item = id ? await getPostDetail(id) : null;
   if (!item) return sendJson(res, 500, { error: "post_create_failed" }, corsHeaders(req));
   sendJson(res, 201, { id, ok: true, item }, corsHeaders(req));
@@ -1515,7 +1568,7 @@ async function handleAdminUpdatePost(req, res, id) {
   if (passwordError) return sendJson(res, 400, passwordError, corsHeaders(req));
   const scheduleError = validatePostSchedule(body);
   if (scheduleError) return sendJson(res, 400, scheduleError, corsHeaders(req));
-  const postId = await transaction((client) => writePost(client, body, id));
+  const postId = await transaction((client) => writePost(client, { ...body, adminUserId: req.adminUser?.id ?? null }, id));
   if (!postId) return sendJson(res, 404, { error: "post_not_found" }, corsHeaders(req));
   const item = await getPostDetail(postId);
   sendJson(res, 200, { id: postId, ok: true, item }, corsHeaders(req));
@@ -2459,6 +2512,9 @@ async function handleRequest(req, res) {
     if (req.method === "GET" && adminPost) return handleAdminPostDetail(req, res, Number(adminPost[1]));
     if (req.method === "PUT" && adminPost) return handleAdminUpdatePost(req, res, Number(adminPost[1]));
     if (req.method === "DELETE" && adminPost) return handleAdminDeletePost(req, res, Number(adminPost[1]));
+
+    const adminPostVersions = url.pathname.match(/^\/api\/admin\/posts\/(\d+)\/versions$/);
+    if (req.method === "GET" && adminPostVersions) return handleAdminPostVersions(req, res, Number(adminPostVersions[1]));
 
     const adminPublish = url.pathname.match(/^\/api\/admin\/posts\/(\d+)\/publish$/);
     if (req.method === "POST" && adminPublish) return handleAdminPublishPost(req, res, Number(adminPublish[1]));

@@ -1,7 +1,7 @@
 ﻿import { ChangeEvent, FormEvent, ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { api, getApiErrorMessage } from "./services/api";
 import type { ClipboardEvent, PointerEvent, WheelEvent } from "react";
-import type { AboutPageSettings, AdminAiReviewFocus, AdminAiStatus, AdminAiTool, AdminCategoryItem, AdminCommentItem, AdminDashboardData, AdminMediaItem, AdminMessageItem, AdminPostListItem, AdminSearchItem, AdminTagItem, HomeEntryCardSetting, HomePageSettings, PublicCommentItem, PublicSiteStats, SiteSettings } from "./services/api";
+import type { AboutPageSettings, AdminAiReviewFocus, AdminAiStatus, AdminAiTool, AdminCategoryItem, AdminCommentItem, AdminDashboardData, AdminMediaItem, AdminMessageItem, AdminPostListItem, AdminPostVersionItem, AdminSearchItem, AdminTagItem, HomeEntryCardSetting, HomePageSettings, PublicCommentItem, PublicSiteStats, SiteSettings } from "./services/api";
 import type { Article, Message } from "./types";
 
 const nav = [
@@ -3280,6 +3280,8 @@ function EditorPage() {
   const [editorMediaItems, setEditorMediaItems] = useState<AdminMediaItem[]>([]);
   const [mediaPickerLoading, setMediaPickerLoading] = useState(false);
   const [loadedEditId, setLoadedEditId] = useState<number | undefined>();
+  const [postVersions, setPostVersions] = useState<AdminPostVersionItem[]>([]);
+  const [versionsLoading, setVersionsLoading] = useState(false);
   const [aiStatus, setAiStatus] = useState<AdminAiStatus>({
     enabled: false,
     mode: "mock",
@@ -3357,6 +3359,8 @@ function EditorPage() {
       setSeoTitle(DEFAULT_EDITOR_TITLE.slice(0, 60));
       setCoverUrl(DEFAULT_EDITOR_COVER);
       setCoverName("editor-cover.png");
+      setPostVersions([]);
+      setVersionsLoading(false);
       setPublished(false);
       setAiComment("");
       setAiPolishNotes("");
@@ -3372,6 +3376,17 @@ function EditorPage() {
       };
     }
     setLoadedEditId(editPostId);
+    setVersionsLoading(true);
+    api.getPostVersions(editPostId)
+      .then((versionResult) => {
+        if (alive) setPostVersions(versionResult.items);
+      })
+      .catch(() => {
+        if (alive) setPostVersions([]);
+      })
+      .finally(() => {
+        if (alive) setVersionsLoading(false);
+      });
     setNotice(`正在读取文章 #${editPostId}`);
     api.getEditorPost(editPostId)
       .then(({ item, source }) => {
@@ -3471,6 +3486,7 @@ function EditorPage() {
       setPublished(savedDraft.status === "published");
       const successText = isEditingExistingPost ? `文章 #${savedDraft.id} 已更新为草稿` : `草稿已保存到数据库 #${savedDraft.id}`;
       setNotice(successText);
+      api.getPostVersions(savedDraft.id).then((result) => setPostVersions(result.items)).catch(() => undefined);
       emitAdminDataChanged();
       return savedDraft;
     } catch (error) {
@@ -3478,6 +3494,20 @@ function EditorPage() {
       return undefined;
     }
   }
+
+  function restoreVersion(version: AdminPostVersionItem) {
+    setTitle(version.title);
+    setMarkdown(version.contentMarkdown);
+    setAiSummary(version.summary);
+    if (version.categoryName) setCategoryName(version.categoryName);
+    if (version.tags.length) setSelectedTags(version.tags);
+    if (version.coverUrl) {
+      setCoverUrl(version.coverUrl);
+      setCoverName(version.coverUrl.split("/").pop() || "cover");
+    }
+    setNotice(`已恢复版本 #${version.id} 到编辑器，确认无误后请手动保存。`);
+  }
+
   async function handleCoverUpload(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
     event.target.value = "";
@@ -3829,6 +3859,18 @@ function EditorPage() {
               <label>密码提示<input value={passwordHint} maxLength={80} onChange={(event) => setPasswordHint(event.target.value)} placeholder="例如：我的英文名、项目代号等" /></label>
               <small className="field-help">{hasAccessPassword ? "当前文章已设置访问密码；填写新密码会覆盖旧密码。" : "发布密码文章前必须设置访问密码，密码只会以哈希形式保存。"}</small>
             </>
+          )}
+          {isEditingExistingPost && (
+            <Card title="版本历史">
+              <div className="version-list">
+                {versionsLoading ? <p className="soft-text">正在读取版本...</p> : postVersions.length ? postVersions.map((version) => (
+                  <button type="button" key={version.id} onClick={() => restoreVersion(version)}>
+                    <b>{version.title}</b>
+                    <small>{version.createdAt?.slice(0, 16).replace("T", " ") ?? "刚刚"} · 恢复到编辑器</small>
+                  </button>
+                )) : <p className="soft-text">暂无历史版本，保存后会自动生成快照。</p>}
+              </div>
+            </Card>
           )}
           <h3>SEO 设置</h3>
           <label>SEO 标题<input value={seoTitle} maxLength={80} onChange={(event) => setSeoTitle(event.target.value)} placeholder="输入搜索结果标题" /></label>

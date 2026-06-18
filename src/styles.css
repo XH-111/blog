@@ -590,6 +590,10 @@ pre button { position: absolute; right: 12px; top: 10px; color: #fff; border: 1p
 .cover-thumb { height: 94px; border-radius: 7px; margin-bottom: 0; background-position: center; background-size: cover; background-repeat: no-repeat; }
 .cover-actions { display: grid; gap: 8px; align-content: center; }
 .cover-actions small { color: var(--muted); word-break: break-all; }
+.version-list { display: grid; gap: 8px; }
+.version-list button { display: grid; gap: 5px; padding: 10px; border: 1px solid var(--line); border-radius: 7px; text-align: left; background: #fff; }
+.version-list button:hover { border-color: rgba(7,155,149,.35); background: #f0fbf9; }
+.version-list small { color: var(--muted); line-height: 1.5; }
 .publish-panel h3, .ai-panel h3 { margin: 14px 0 8px; }
 .publish-panel label { display: grid; gap: 8px; margin: 14px 0; color: #39495a; }
 .publish-panel input, .publish-panel textarea, .publish-panel select { min-height: 40px; padding: 10px; }

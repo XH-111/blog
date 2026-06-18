@@ -248,6 +248,17 @@ export type EditorPostDetail = {
   requireCommentReview?: boolean;
 };
 
+export type AdminPostVersionItem = {
+  id: number;
+  title: string;
+  summary: string;
+  contentMarkdown: string;
+  coverUrl: string;
+  categoryName: string;
+  tags: string[];
+  createdAt?: string;
+};
+
 export type AdminMediaItem = {
   id: number;
   fileName: string;
@@ -1113,6 +1124,10 @@ export const api = {
     const data = await requestStrictJson<BackendPost>(`/admin/posts/${id}`);
     currentDraftId = toNumberId(data.id);
     return { item: mapEditorPost(data), source: "api" as const };
+  },
+  getPostVersions: async (id: number) => {
+    const data = await requestStrictJson<{ items?: AdminPostVersionItem[] }>(`/admin/posts/${id}/versions`);
+    return { items: Array.isArray(data.items) ? data.items : [], source: "api" as const };
   },
   startNewPost: () => {
     currentDraftId = undefined;
