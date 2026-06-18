@@ -962,19 +962,33 @@ function normalizeAboutPageSettings(input?: Partial<AboutPageSettings>): AboutPa
 }
 
 export const api = {
-  getPublicPosts: async (options: { pageSize?: number; sort?: "latest" | "hot"; category?: string; tag?: string; keyword?: string; year?: string } = {}) => {
+  getPublicPosts: async (options: { page?: number; pageSize?: number; sort?: "latest" | "hot"; category?: string; tag?: string; keyword?: string; year?: string; featured?: boolean } = {}) => {
     const fallback = { articles };
     const params = new URLSearchParams();
+    if (options.page) params.set("page", String(options.page));
     if (options.pageSize) params.set("pageSize", String(options.pageSize));
     if (options.sort) params.set("sort", options.sort);
     if (options.category) params.set("category", options.category);
     if (options.tag) params.set("tag", options.tag);
     if (options.keyword) params.set("q", options.keyword);
     if (options.year) params.set("year", options.year);
+    if (options.featured) params.set("featured", "true");
     const query = params.toString() ? `?${params.toString()}` : "";
-    const data = await requestJson<{ items?: BackendPost[]; source?: "mock" }>(`/public/posts${query}`, { items: [], source: "mock" });
-    if (data.source === "mock" || !Array.isArray(data.items)) return wait({ ...fallback, source: "mock" as const });
-    return { articles: data.items.map(mapBackendPost), source: "api" as const };
+    const data = await requestJson<{ items?: BackendPost[]; page?: number | string; pageSize?: number | string; total?: number | string; hasMore?: boolean; source?: "mock" }>(`/public/posts${query}`, { items: [], source: "mock" });
+    if (data.source === "mock" || !Array.isArray(data.items)) {
+      const filtered = articles
+        .filter((item) => !options.featured || item.featured)
+        .filter((item) => !options.category || item.category === options.category)
+        .filter((item) => !options.keyword || [item.title, item.excerpt, item.category, ...item.tags].join(" ").toLowerCase().includes(options.keyword.toLowerCase()));
+      const pageSize = options.pageSize ?? filtered.length;
+      const page = options.page ?? 1;
+      const start = (page - 1) * pageSize;
+      return wait({ articles: filtered.slice(start, start + pageSize), page, pageSize, total: filtered.length, hasMore: start + pageSize < filtered.length, source: "mock" as const });
+    }
+    const page = toNumber(data.page) || options.page || 1;
+    const pageSize = toNumber(data.pageSize) || options.pageSize || data.items.length;
+    const total = toNumber(data.total) || data.items.length;
+    return { articles: data.items.map(mapBackendPost), page, pageSize, total, hasMore: Boolean(data.hasMore), source: "api" as const };
   },
   getPublicCategories: async () => {
     const fallback = { items: categories.map(([name, count], index) => ({ id: index + 1, name, slug: String(name), postsCount: count })), source: "mock" as const };

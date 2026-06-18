@@ -865,16 +865,19 @@ function PostsPage() {
   const initialSearch = initialParams.get("q") ?? "";
   const initialView = initialParams.get("view");
   const initialSort = initialParams.get("sort") === "hot" ? "hot" : "latest";
+  const initialPage = Math.max(1, Number(initialParams.get("page") ?? 1) || 1);
   const [search, setSearch] = useState(initialSearch);
   const [searchDraft, setSearchDraft] = useState(initialSearch);
   const [category, setCategory] = useState(initialCategory);
   const [sortMode, setSortMode] = useState<"latest" | "hot">(initialSort);
+  const [page, setPage] = useState(initialPage);
   const [listMode, setListMode] = useState<"featured" | "all" | "category" | "search">(
     initialSearch ? "search" : initialCategory !== "全部分类" ? "category" : initialView === "all" ? "all" : "featured"
   );
   const [archiveArticles, setArchiveArticles] = useState<Article[]>([]);
   const [archiveCategories, setArchiveCategories] = useState<AdminCategoryItem[]>([]);
   const [archiveStats, setArchiveStats] = useState<PublicSiteStats>();
+  const [archivePagination, setArchivePagination] = useState({ page: initialPage, pageSize: ARCHIVE_PAGE_SIZE, total: 0, hasMore: false });
   const [archiveUsingMock, setArchiveUsingMock] = useState(false);
   useEffect(() => {
     const nextParams = routeQuery();
@@ -882,59 +885,68 @@ function PostsPage() {
     const nextCategory = nextParams.get("category") ?? "全部分类";
     const nextView = nextParams.get("view");
     const nextSort = nextParams.get("sort") === "hot" ? "hot" : "latest";
+    const nextPage = Math.max(1, Number(nextParams.get("page") ?? 1) || 1);
     setSearch(nextSearch);
     setSearchDraft(nextSearch);
     setCategory(nextCategory);
     setSortMode(nextSort);
+    setPage(nextPage);
     setListMode(nextSearch ? "search" : nextCategory !== "全部分类" ? "category" : nextView === "all" ? "all" : "featured");
   }, [archiveRoute]);
   useEffect(() => {
     let alive = true;
-    Promise.all([api.getPublicPosts(), api.getPublicCategories(), api.getPublicStats()]).then(([postResult, categoryResult, statsResult]) => {
+    Promise.all([api.getPublicCategories(), api.getPublicStats()]).then(([categoryResult, statsResult]) => {
       if (!alive) return;
-      setArchiveArticles(postResult.articles);
       setArchiveCategories(categoryResult.items);
       setArchiveStats(statsResult);
-      setArchiveUsingMock(postResult.source === "mock" || categoryResult.source === "mock" || statsResult.source === "mock");
+      setArchiveUsingMock(categoryResult.source === "mock" || statsResult.source === "mock");
     });
     return () => {
       alive = false;
     };
   }, []);
-  const categoryOptions = ["全部分类", ...Array.from(new Set(archiveArticles.map((item) => item.category)))];
-  const databaseCategoryOptions = archiveCategories.length ? archiveCategories.map((item) => item.name) : categoryOptions.filter((item) => item !== "全部分类");
+  useEffect(() => {
+    let alive = true;
+    api.getPublicPosts({
+      page,
+      pageSize: ARCHIVE_PAGE_SIZE,
+      sort: sortMode,
+      featured: listMode === "featured",
+      category: listMode === "category" ? category : undefined,
+      keyword: listMode === "search" ? search : undefined,
+    }).then((postResult) => {
+      if (!alive) return;
+      setArchiveArticles(postResult.articles);
+      setArchivePagination({ page: postResult.page ?? page, pageSize: postResult.pageSize ?? ARCHIVE_PAGE_SIZE, total: postResult.total ?? postResult.articles.length, hasMore: Boolean(postResult.hasMore) });
+      setArchiveUsingMock((current) => current || postResult.source === "mock");
+    });
+    return () => {
+      alive = false;
+    };
+  }, [listMode, category, search, sortMode, page]);
+  const databaseCategoryOptions = archiveCategories.map((item) => item.name);
   const categoryCountMap = new Map(archiveCategories.map((item) => [item.name, item.postsCount]));
-  const featuredArticles = archiveArticles.filter((item) => item.featured);
-  const filteredArticles = archiveArticles.filter((item) => {
-    const keyword = search.trim().toLowerCase();
-    const matchSearch = !keyword || [item.title, item.excerpt, item.category, ...item.tags].join(" ").toLowerCase().includes(keyword);
-    const matchCategory = category === "全部分类" || item.category === category;
-    return matchSearch && matchCategory;
-  });
-  const sortArticles = (items: Article[]) => [...items].sort((a, b) => {
-    if (sortMode === "hot") {
-      return (b.viewsCount ?? 0) - (a.viewsCount ?? 0) || b.likes - a.likes || b.comments - a.comments || b.id - a.id;
-    }
-    return new Date(b.date || 0).getTime() - new Date(a.date || 0).getTime() || b.id - a.id;
-  });
-  const currentArticles = sortArticles(listMode === "featured" ? featuredArticles : filteredArticles);
-  const visibleArticles = currentArticles.slice(0, ARCHIVE_PAGE_SIZE);
+  const visibleArticles = archiveArticles;
+  const totalArticles = archivePagination.total;
+  const totalPages = Math.max(1, Math.ceil(totalArticles / ARCHIVE_PAGE_SIZE));
   const currentTitle = listMode === "featured" ? "精选文章" : listMode === "all" ? "全部文章" : listMode === "search" ? "搜索结果" : `${category} 分类文章`;
   const currentDescription = listMode === "featured"
     ? `默认展示最多 ${ARCHIVE_PAGE_SIZE} 篇精选文章，点击全部或分类后只看对应文章。`
     : listMode === "all"
-      ? `当前共 ${currentArticles.length} 篇已发布文章，本页最多显示 ${ARCHIVE_PAGE_SIZE} 篇。`
+      ? `当前共 ${totalArticles} 篇已发布文章，本页最多显示 ${ARCHIVE_PAGE_SIZE} 篇。`
       : listMode === "search"
-        ? `包含关键词“${search}”的文章共 ${currentArticles.length} 篇，本页最多显示 ${ARCHIVE_PAGE_SIZE} 篇。`
-        : `该分类下共有 ${currentArticles.length} 篇文章，本页最多显示 ${ARCHIVE_PAGE_SIZE} 篇。`;
+        ? `包含关键词“${search}”的文章共 ${totalArticles} 篇，本页最多显示 ${ARCHIVE_PAGE_SIZE} 篇。`
+        : `该分类下共有 ${totalArticles} 篇文章，本页最多显示 ${ARCHIVE_PAGE_SIZE} 篇。`;
   const currentSortLabel = sortMode === "hot" ? "热门优先" : "最新优先";
-  function buildPostsPath(nextMode: typeof listMode, options: { nextSearch?: string; nextCategory?: string; nextSort?: "latest" | "hot" } = {}) {
+  function buildPostsPath(nextMode: typeof listMode, options: { nextSearch?: string; nextCategory?: string; nextSort?: "latest" | "hot"; nextPage?: number } = {}) {
     const params = new URLSearchParams();
     const targetSort = options.nextSort ?? sortMode;
+    const targetPage = Math.max(1, options.nextPage ?? 1);
     if (nextMode === "search" && options.nextSearch?.trim()) params.set("q", options.nextSearch.trim());
     if (nextMode === "category" && options.nextCategory) params.set("category", options.nextCategory);
     if (nextMode === "all") params.set("view", "all");
     if (targetSort === "hot") params.set("sort", "hot");
+    if (targetPage > 1) params.set("page", String(targetPage));
     const query = params.toString();
     return query ? `/posts?${query}` : "/posts";
   }
@@ -961,6 +973,12 @@ function PostsPage() {
     else if (listMode === "category") go(buildPostsPath("category", { nextCategory: category, nextSort }));
     else go(buildPostsPath(listMode, { nextSort }));
   }
+  function changePage(nextPage: number) {
+    if (nextPage < 1 || nextPage > totalPages) return;
+    if (listMode === "search") go(buildPostsPath("search", { nextSearch: search, nextPage }));
+    else if (listMode === "category") go(buildPostsPath("category", { nextCategory: category, nextPage }));
+    else go(buildPostsPath(listMode, { nextPage }));
+  }
   return (
     <>
       <PublicHeader active="/posts" />
@@ -968,7 +986,7 @@ function PostsPage() {
         <aside className="filter card archive-category-panel">
           <h3>文章分类</h3>
           <p>默认先看精选，切换全部或分类后只显示对应文章。</p>
-          <button className={listMode === "featured" ? "active" : ""} onClick={openFeaturedArticles}>精选文章 <small>{featuredArticles.length}</small></button>
+          <button className={listMode === "featured" ? "active" : ""} onClick={openFeaturedArticles}>精选文章 <small>{listMode === "featured" ? totalArticles : ""}</small></button>
           <button className={listMode === "all" ? "active" : ""} onClick={openAllArticles}>全部文章 <small>{archiveStats?.posts ?? archiveArticles.length}</small></button>
           <h4>按分类浏览</h4>
           {databaseCategoryOptions.map((x) => <button className={listMode === "category" && category === x ? "active" : ""} key={x} onClick={() => openCategory(x)}>{x} <small>{categoryCountMap.get(x) ?? archiveArticles.filter((item) => item.category === x).length}</small></button>)}
@@ -992,7 +1010,7 @@ function PostsPage() {
             {listMode === "search" && (
               <p className="archive-active-filter">
                 正在搜索 <b>{search}</b>
-                <span>{currentArticles.length ? `找到 ${currentArticles.length} 篇文章` : "暂时没有匹配文章"}</span>
+                <span>{totalArticles ? `找到 ${totalArticles} 篇文章` : "暂时没有匹配文章"}</span>
               </p>
             )}
           </section>
@@ -1019,6 +1037,11 @@ function PostsPage() {
               {listMode === "search" ? <button onClick={clearArchiveSearch}>清空搜索</button> : <button onClick={openAllArticles}>查看全部文章</button>}
             </section>
           )}
+          <div className="archive-pagination">
+            <button disabled={page <= 1} onClick={() => changePage(page - 1)}>上一页</button>
+            <span>第 {page} / {totalPages} 页 · 共 {totalArticles} 篇</span>
+            <button disabled={!archivePagination.hasMore} onClick={() => changePage(page + 1)}>下一页</button>
+          </div>
         </section>
       </main>
       <PublicFooter />

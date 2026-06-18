@@ -193,7 +193,7 @@ async function removeUploadedFile(storagePath) {
   }
 }
 
-function postListSql({ keyword, category, tag, year, sort, limit, offset }) {
+function postListSql({ keyword, category, tag, year, sort, limit, offset, featured }) {
   const params = [];
   const where = ["p.status = 'published'", "p.visibility IN ('public', 'password')"];
 
@@ -217,6 +217,9 @@ function postListSql({ keyword, category, tag, year, sort, limit, offset }) {
     params.push(`${year}%`);
     where.push(`to_char(p.published_at, 'YYYY') LIKE $${params.length}`);
   }
+  if (featured) {
+    where.push("p.is_featured = true");
+  }
 
   const orderBy = sort === "hot" ? "p.views_count DESC, p.published_at DESC" : "p.published_at DESC";
   params.push(limit, offset);
@@ -224,6 +227,7 @@ function postListSql({ keyword, category, tag, year, sort, limit, offset }) {
   return {
     text: `
       SELECT
+        count(*) OVER()::integer AS total_count,
         p.id, p.title, p.slug, p.excerpt, p.summary, p.cover_url, p.status, p.visibility, p.password_hint,
         p.is_featured, p.allow_comment,
         p.reading_minutes, p.views_count, p.likes_count, p.comments_count, p.published_at,
@@ -850,16 +854,20 @@ async function handlePublicPosts(req, res, url) {
     tag: url.searchParams.get("tag") || "",
     year: url.searchParams.get("year") || "",
     sort: url.searchParams.get("sort") || "latest",
+    featured: ["1", "true", "yes"].includes(String(url.searchParams.get("featured") || "").toLowerCase()),
     limit,
     offset: (page - 1) * limit,
   };
 
   const sql = postListSql(options);
   const result = await query(sql.text, sql.params);
+  const total = Number(result.rows[0]?.total_count ?? 0);
   sendJson(res, 200, {
     items: result.rows.map(mapPost),
     page,
     pageSize: limit,
+    total,
+    hasMore: page * limit < total,
   }, corsHeaders(req));
 }
 
