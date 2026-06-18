@@ -10,6 +10,7 @@ const COMMENT_CONTENT_MAX_LENGTH = 1000;
 const MESSAGE_CONTENT_MAX_LENGTH = 2000;
 const ABOUT_SETTING_KEY = "about_page";
 const HOME_SETTING_KEY = "home_page";
+const SITE_SETTING_KEY = "site_basic";
 const AI_INPUT_MAX_CHARS = 12000;
 const AI_INSTRUCTION_MAX_CHARS = 800;
 const AI_COMMENT_FOCUS_LABELS = {
@@ -96,6 +97,16 @@ const DEFAULT_HOME_PAGE = {
     { title: "项目作品", description: "沉淀全栈项目实践、开发复盘和可复用经验。", actionText: "查看项目", icon: "cube", href: "/about", visible: true },
     { title: "关于我", description: "了解我的技术栈与经历，也欢迎交流与合作。", actionText: "了解更多", icon: "user", href: "/about", visible: true },
   ],
+};
+
+const DEFAULT_SITE_SETTINGS = {
+  siteName: "全栈博客创作平台",
+  siteSubtitle: "记录 · 分享 · 成长",
+  logoUrl: "",
+  defaultSeoTitle: "全栈博客创作平台",
+  defaultSeoDescription: "记录技术探索与项目经验，分享思考与实践。",
+  icpText: "",
+  footerText: "© 2026 全栈博客创作平台",
 };
 
 const scrypt = crypto.scrypt;
@@ -1044,6 +1055,49 @@ async function handleAdminUpdateHomeSettings(req, res) {
     [HOME_SETTING_KEY, JSON.stringify(item)],
   );
   sendJson(res, 200, { item: normalizeHomePage(result.rows[0]?.value_json), ok: true, source: "api" }, corsHeaders(req));
+}
+
+function normalizeSiteSettings(value = {}) {
+  const next = { ...DEFAULT_SITE_SETTINGS, ...(value && typeof value === "object" ? value : {}) };
+  const text = (input, fallback = "") => input === undefined || input === null ? fallback : String(input).trim();
+  return {
+    siteName: text(next.siteName, DEFAULT_SITE_SETTINGS.siteName) || DEFAULT_SITE_SETTINGS.siteName,
+    siteSubtitle: text(next.siteSubtitle, DEFAULT_SITE_SETTINGS.siteSubtitle),
+    logoUrl: text(next.logoUrl, DEFAULT_SITE_SETTINGS.logoUrl),
+    defaultSeoTitle: text(next.defaultSeoTitle, DEFAULT_SITE_SETTINGS.defaultSeoTitle) || text(next.siteName, DEFAULT_SITE_SETTINGS.siteName),
+    defaultSeoDescription: text(next.defaultSeoDescription, DEFAULT_SITE_SETTINGS.defaultSeoDescription),
+    icpText: text(next.icpText, DEFAULT_SITE_SETTINGS.icpText),
+    footerText: text(next.footerText, DEFAULT_SITE_SETTINGS.footerText),
+  };
+}
+
+async function getSiteSettings() {
+  const result = await query("SELECT value_json FROM site_settings WHERE key = $1", [SITE_SETTING_KEY]);
+  return normalizeSiteSettings(result.rows[0]?.value_json);
+}
+
+async function handlePublicSiteSettings(req, res) {
+  const item = await getSiteSettings();
+  sendJson(res, 200, { item, source: "api" }, corsHeaders(req));
+}
+
+async function handleAdminSiteSettings(req, res) {
+  const item = await getSiteSettings();
+  sendJson(res, 200, { item, source: "api" }, corsHeaders(req));
+}
+
+async function handleAdminUpdateSiteSettings(req, res) {
+  const body = await readBody(req);
+  const item = normalizeSiteSettings(body.item ?? body);
+  const result = await query(
+    `INSERT INTO site_settings(key, value_json, updated_at)
+     VALUES ($1, $2::jsonb, now())
+     ON CONFLICT (key)
+     DO UPDATE SET value_json = EXCLUDED.value_json, updated_at = now()
+     RETURNING value_json`,
+    [SITE_SETTING_KEY, JSON.stringify(item)],
+  );
+  sendJson(res, 200, { item: normalizeSiteSettings(result.rows[0]?.value_json), ok: true, source: "api" }, corsHeaders(req));
 }
 
 function normalizeAboutPage(value = {}) {
@@ -2160,6 +2214,7 @@ async function handleRequest(req, res) {
     }
     if (req.method === "GET" && url.pathname === "/api/public/posts") return handlePublicPosts(req, res, url);
     if (req.method === "GET" && url.pathname === "/api/public/stats") return handlePublicStats(req, res);
+    if (req.method === "GET" && url.pathname === "/api/public/site-settings") return handlePublicSiteSettings(req, res);
     if (req.method === "GET" && url.pathname === "/api/public/home") return handlePublicHome(req, res);
     if (req.method === "GET" && url.pathname === "/api/public/about") return handlePublicAbout(req, res);
     if (req.method === "GET" && url.pathname === "/api/public/archive") return handleArchive(req, res);
@@ -2210,6 +2265,8 @@ async function handleRequest(req, res) {
     if (req.method === "PUT" && adminFeatured) return handleAdminFeaturedPost(req, res, Number(adminFeatured[1]));
 
     if (req.method === "GET" && url.pathname === "/api/admin/dashboard") return handleAdminDashboard(req, res);
+    if (req.method === "GET" && url.pathname === "/api/admin/site-settings") return handleAdminSiteSettings(req, res);
+    if (req.method === "PUT" && url.pathname === "/api/admin/site-settings") return handleAdminUpdateSiteSettings(req, res);
     if (req.method === "GET" && url.pathname === "/api/admin/home-settings") return handleAdminHomeSettings(req, res);
     if (req.method === "PUT" && url.pathname === "/api/admin/home-settings") return handleAdminUpdateHomeSettings(req, res);
     if (req.method === "GET" && url.pathname === "/api/admin/about-settings") return handleAdminAboutSettings(req, res);

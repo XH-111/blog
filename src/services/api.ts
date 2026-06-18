@@ -420,6 +420,16 @@ export type HomeEntryCardSetting = {
   visible: boolean;
 };
 
+export type SiteSettings = {
+  siteName: string;
+  siteSubtitle: string;
+  logoUrl: string;
+  defaultSeoTitle: string;
+  defaultSeoDescription: string;
+  icpText: string;
+  footerText: string;
+};
+
 export type PublicSubscriptionItem = {
   id: number;
   email: string;
@@ -839,6 +849,31 @@ const defaultHomePageSettings: HomePageSettings = {
   ],
 };
 
+const defaultSiteSettings: SiteSettings = {
+  siteName: "全栈博客创作平台",
+  siteSubtitle: "记录 · 分享 · 成长",
+  logoUrl: "",
+  defaultSeoTitle: "全栈博客创作平台",
+  defaultSeoDescription: "记录技术探索与项目经验，分享思考与实践。",
+  icpText: "",
+  footerText: "© 2026 全栈博客创作平台",
+};
+
+function normalizeSiteSettings(input?: Partial<SiteSettings>): SiteSettings {
+  const source = input ?? {};
+  const text = (value: unknown, fallback = "") => value === undefined || value === null ? fallback : String(value).trim();
+  const siteName = text(source.siteName, defaultSiteSettings.siteName) || defaultSiteSettings.siteName;
+  return {
+    siteName,
+    siteSubtitle: text(source.siteSubtitle, defaultSiteSettings.siteSubtitle),
+    logoUrl: text(source.logoUrl, defaultSiteSettings.logoUrl),
+    defaultSeoTitle: text(source.defaultSeoTitle, defaultSiteSettings.defaultSeoTitle) || siteName,
+    defaultSeoDescription: text(source.defaultSeoDescription, defaultSiteSettings.defaultSeoDescription),
+    icpText: text(source.icpText, defaultSiteSettings.icpText),
+    footerText: text(source.footerText, defaultSiteSettings.footerText),
+  };
+}
+
 function normalizeHomePageSettings(input?: Partial<HomePageSettings>): HomePageSettings {
   const source = input ?? {};
   const color = (value: unknown, fallback: string) => /^#[0-9a-f]{6}$/i.test(String(value ?? "")) ? String(value) : fallback;
@@ -959,6 +994,10 @@ export const api = {
       comments: toNumber(data.commentsCount ?? data.comments_count),
       source: "api",
     };
+  },
+  getPublicSiteSettings: async () => {
+    const data = await requestJson<{ item?: Partial<SiteSettings>; source?: "mock" }>("/public/site-settings", { item: defaultSiteSettings, source: "mock" });
+    return { item: normalizeSiteSettings(data.item), source: data.source === "mock" ? "mock" as const : "api" as const };
   },
   getPublicHome: async () => {
     const data = await requestJson<{ item?: Partial<HomePageSettings>; source?: "mock" }>("/public/home", { item: defaultHomePageSettings, source: "mock" });
@@ -1214,6 +1253,17 @@ export const api = {
     return true;
   },
   authChangedEvent: ADMIN_AUTH_CHANGED_EVENT,
+  getAdminSiteSettings: async () => {
+    const data = await requestStrictJson<{ item?: Partial<SiteSettings> }>("/admin/site-settings");
+    return { item: normalizeSiteSettings(data.item), source: "api" as const };
+  },
+  updateAdminSiteSettings: async (item: SiteSettings) => {
+    const data = await requestStrictJson<{ ok?: boolean; item?: Partial<SiteSettings> }>("/admin/site-settings", {
+      method: "PUT",
+      body: JSON.stringify({ item }),
+    });
+    return { ok: data.ok ?? true, item: normalizeSiteSettings(data.item), source: "api" as const };
+  },
   getAdminAboutSettings: async () => {
     const data = await requestStrictJson<{ item?: Partial<AboutPageSettings> }>("/admin/about-settings");
     return { item: normalizeAboutPageSettings(data.item), source: "api" as const };

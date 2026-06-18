@@ -1,7 +1,7 @@
 ﻿import { ChangeEvent, FormEvent, ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { api, getApiErrorMessage } from "./services/api";
 import type { ClipboardEvent, PointerEvent, WheelEvent } from "react";
-import type { AboutPageSettings, AdminAiReviewFocus, AdminAiStatus, AdminAiTool, AdminCategoryItem, AdminCommentItem, AdminDashboardData, AdminMediaItem, AdminMessageItem, AdminPostListItem, AdminTagItem, HomeEntryCardSetting, HomePageSettings, PublicCommentItem, PublicSiteStats } from "./services/api";
+import type { AboutPageSettings, AdminAiReviewFocus, AdminAiStatus, AdminAiTool, AdminCategoryItem, AdminCommentItem, AdminDashboardData, AdminMediaItem, AdminMessageItem, AdminPostListItem, AdminTagItem, HomeEntryCardSetting, HomePageSettings, PublicCommentItem, PublicSiteStats, SiteSettings } from "./services/api";
 import type { Article, Message } from "./types";
 
 const nav = [
@@ -36,6 +36,16 @@ const defaultHomeSettings: HomePageSettings = {
     { title: "项目作品", description: "沉淀全栈项目实践、开发复盘和可复用经验。", actionText: "查看项目", icon: "cube", href: "/about", visible: true },
     { title: "关于我", description: "了解我的技术栈与经历，也欢迎交流与合作。", actionText: "了解更多", icon: "user", href: "/about", visible: true },
   ],
+};
+
+const defaultSiteSettings: SiteSettings = {
+  siteName: "全栈博客创作平台",
+  siteSubtitle: "记录 · 分享 · 成长",
+  logoUrl: "",
+  defaultSeoTitle: "全栈博客创作平台",
+  defaultSeoDescription: "记录技术探索与项目经验，分享思考与实践。",
+  icpText: "",
+  footerText: "© 2026 全栈博客创作平台",
 };
 
 const COMMENT_CONTENT_MAX_LENGTH = 1000;
@@ -131,13 +141,44 @@ function Icon({ name }: { name: string }) {
   return <span className={`icon icon-${name}`} aria-hidden="true" />;
 }
 
-function Logo({ admin = false }: { admin?: boolean }) {
+function useSiteSettings(applyDocumentMeta = false) {
+  const [siteSettings, setSiteSettings] = useState<SiteSettings>(defaultSiteSettings);
+  useEffect(() => {
+    let alive = true;
+    function loadSiteSettings() {
+      api.getPublicSiteSettings()
+        .then((result) => {
+          if (!alive) return;
+          setSiteSettings(result.item);
+          if (applyDocumentMeta) {
+            document.title = result.item.defaultSeoTitle || result.item.siteName;
+            const description = document.querySelector<HTMLMetaElement>('meta[name="description"]');
+            if (description) description.content = result.item.defaultSeoDescription;
+          }
+        })
+        .catch(() => {
+          if (applyDocumentMeta) document.title = defaultSiteSettings.defaultSeoTitle;
+        });
+    }
+    loadSiteSettings();
+    window.addEventListener("admin-data-changed", loadSiteSettings);
+    return () => {
+      alive = false;
+      window.removeEventListener("admin-data-changed", loadSiteSettings);
+    };
+  }, [applyDocumentMeta]);
+  return siteSettings;
+}
+
+function Logo({ admin = false, settings = defaultSiteSettings }: { admin?: boolean; settings?: SiteSettings }) {
+  const title = admin ? settings.siteName.replace(/创作平台$/, "").trim() || settings.siteName : settings.siteName;
+  const subtitle = admin ? "创作平台" : settings.siteSubtitle;
   return (
     <button className="brand" onClick={() => go(admin ? "/admin" : "/")}>
-      <span className="brand-mark">{admin ? "✒" : "</>"}</span>
+      <span className={`brand-mark ${settings.logoUrl ? "has-logo" : ""}`} style={settings.logoUrl ? { backgroundImage: `url(${settings.logoUrl})` } : undefined}>{settings.logoUrl ? "" : admin ? "✒" : "</>"}</span>
       <span>
-        <strong>全栈博客{admin ? "" : "创作平台"}</strong>
-        <small>{admin ? "创作平台" : "记录 · 分享 · 成长"}</small>
+        <strong>{title}</strong>
+        <small>{subtitle}</small>
       </span>
     </button>
   );
@@ -145,6 +186,7 @@ function Logo({ admin = false }: { admin?: boolean }) {
 
 function PublicHeader({ active }: { active: string }) {
   const [headerSearch, setHeaderSearch] = useState("");
+  const siteSettings = useSiteSettings(true);
   const headerNav = nav;
   function openPublicNav(href: string) {
     go(href);
@@ -161,7 +203,7 @@ function PublicHeader({ active }: { active: string }) {
   }
   return (
     <header className={`public-header ${active.startsWith("/article") ? "article-header" : ""} ${active === "/posts" ? "floating-header" : ""}`}>
-      <Logo />
+      <Logo settings={siteSettings} />
       <nav>
         {headerNav.map(([label, href]) => (
           <button key={href} className={active === href || (active.startsWith("/article") && href === "/posts") ? "active" : ""} onClick={() => openPublicNav(href)}>
@@ -178,6 +220,17 @@ function PublicHeader({ active }: { active: string }) {
         <button className="avatar sm" onClick={() => go("/admin/login")}>站</button>
       </div>
     </header>
+  );
+}
+
+function PublicFooter() {
+  const siteSettings = useSiteSettings(false);
+  if (!siteSettings.footerText && !siteSettings.icpText) return null;
+  return (
+    <footer className="public-footer">
+      {siteSettings.footerText && <span>{siteSettings.footerText}</span>}
+      {siteSettings.icpText && <span>{siteSettings.icpText}</span>}
+    </footer>
   );
 }
 
@@ -250,6 +303,7 @@ function HomePage() {
           ))}
         </section>
       </main>
+      <PublicFooter />
     </>
   );
 }
@@ -333,6 +387,7 @@ function LegacyHomePage() {
           <PublicStatsCard stats={siteStats} />
         </aside>
       </main>
+      <PublicFooter />
     </>
   );
 }
@@ -629,6 +684,7 @@ function ArticlePage({ articleId }: { articleId: number }) {
         )}
       </main>
       )}
+      <PublicFooter />
     </>
   );
 }
@@ -922,6 +978,7 @@ function PostsPage() {
           )}
         </section>
       </main>
+      <PublicFooter />
     </>
   );
 }
@@ -975,6 +1032,7 @@ function AboutPage() {
           </div>
         )}
       </main>
+      <PublicFooter />
     </>
   );
 }
@@ -996,6 +1054,93 @@ function textToTopics(text: string): AboutPageSettings["writingTopics"] {
     const [label = "", url = ""] = line.split("|");
     return { label: label.trim(), url: url.trim() };
   }).filter((item) => item.label);
+}
+
+function SiteSettingsPage() {
+  const [config, setConfig] = useState<SiteSettings>(defaultSiteSettings);
+  const [notice, setNotice] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    let alive = true;
+    api.getAdminSiteSettings()
+      .then((result) => {
+        if (alive) setConfig(result.item);
+      })
+      .catch((error) => {
+        if (!alive) return;
+        setNotice(getApiErrorMessage(error));
+        if (getApiErrorMessage(error).includes("登录")) api.logout();
+      });
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  function updateField<K extends keyof SiteSettings>(key: K, value: SiteSettings[K]) {
+    setConfig((current) => ({ ...current, [key]: value }));
+  }
+
+  async function saveSiteSettings() {
+    setSaving(true);
+    setNotice("");
+    try {
+      const result = await api.updateAdminSiteSettings(config);
+      setConfig(result.item);
+      setNotice("站点基础设置已保存，前台标题和品牌区会同步更新。");
+      emitAdminDataChanged();
+    } catch (error) {
+      setNotice(getApiErrorMessage(error));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <>
+      <AdminTop />
+      <div className="admin-content admin-placeholder">
+        <div className="title-row">
+          <h1>站点设置</h1>
+          <div className="title-actions"><button onClick={saveSiteSettings} disabled={saving}>{saving ? "保存中..." : "保存配置"}</button><button onClick={() => go("/")}>预览前台</button></div>
+        </div>
+        {notice && <p className="admin-hint">{notice}</p>}
+        <section className="card site-config">
+          <div className="settings-panel">
+            <header>
+              <b>品牌信息</b>
+              <span>控制前台导航、后台侧边栏的站点名称、说明和 Logo。</span>
+            </header>
+            <div className="settings-grid">
+              <label>站点名称<input value={config.siteName} onChange={(event) => updateField("siteName", event.target.value)} /></label>
+              <label>站点副标题<input value={config.siteSubtitle} onChange={(event) => updateField("siteSubtitle", event.target.value)} /></label>
+              <label className="wide">Logo URL<input value={config.logoUrl} onChange={(event) => updateField("logoUrl", event.target.value)} placeholder="/assets/logo.png 或 /uploads/..." /></label>
+            </div>
+          </div>
+          <div className="settings-panel">
+            <header>
+              <b>默认 SEO</b>
+              <span>作为页面未单独配置 SEO 时的默认标题和描述。</span>
+            </header>
+            <div className="settings-grid">
+              <label>默认标题<input value={config.defaultSeoTitle} onChange={(event) => updateField("defaultSeoTitle", event.target.value)} /></label>
+              <label className="wide">默认描述<textarea value={config.defaultSeoDescription} onChange={(event) => updateField("defaultSeoDescription", event.target.value)} /></label>
+            </div>
+          </div>
+          <div className="settings-panel wide">
+            <header>
+              <b>页脚文案</b>
+              <span>用于备案号、版权说明等公开展示内容。</span>
+            </header>
+            <div className="settings-grid">
+              <label>ICP备案号<input value={config.icpText} onChange={(event) => updateField("icpText", event.target.value)} placeholder="例如：浙ICP备..." /></label>
+              <label>页脚文案<input value={config.footerText} onChange={(event) => updateField("footerText", event.target.value)} /></label>
+            </div>
+          </div>
+        </section>
+      </div>
+    </>
+  );
 }
 
 function HomeSettingsPage() {
@@ -1670,6 +1815,7 @@ function MessagesPage() {
         </section>
         <aside className="side-stack"><section className="rule-card card"><h3>友好交流</h3><p>请尊重他人、文明发言</p><p>禁止发布广告、恶意链接</p><p>技术讨论请尽量具体清晰</p><p>站长会定期查看并回复</p></section><Card title="最新评论"><MiniComments /></Card><section className="author card"><div className="avatar lg author-photo" style={{ backgroundImage: `url(${ownerPortraitUrl || defaultAboutSettings.portraitUrl})` }}>站</div><h3>站长 <Tag>站长</Tag></h3><p>全栈开发 & 技术分享</p><p>热爱技术，热爱分享。在这里记录学习与实践的点滴。</p></section></aside>
       </main>
+      <PublicFooter />
     </>
   );
 }
@@ -1911,12 +2057,13 @@ const defaultAboutSettings: AboutPageSettings = {
 
 function AdminShell({ editor = false, page = "dashboard" }: { editor?: boolean; page?: string }) {
   const active = editor ? "文章管理" : adminRoutes[page]?.label ?? "仪表盘";
-  return <main className={`admin-app ${editor ? "admin-editor-app" : ""}`}><AdminSidebar active={active} /><section className="admin-main">{editor ? <EditorPage /> : page === "dashboard" ? <DashboardPage /> : page === "about" ? <AboutSettingsPage /> : page === "home" ? <HomeSettingsPage /> : <AdminPlaceholder page={page} />}</section></main>;
+  return <main className={`admin-app ${editor ? "admin-editor-app" : ""}`}><AdminSidebar active={active} /><section className="admin-main">{editor ? <EditorPage /> : page === "dashboard" ? <DashboardPage /> : page === "settings" ? <SiteSettingsPage /> : page === "about" ? <AboutSettingsPage /> : page === "home" ? <HomeSettingsPage /> : <AdminPlaceholder page={page} />}</section></main>;
 }
 
 function AdminSidebar({ active }: { active: string }) {
   const items = Object.values(adminRoutes);
   const [dashboard, setDashboard] = useState<AdminDashboardData>(emptyDashboard);
+  const [siteSettings, setSiteSettings] = useState<SiteSettings>(defaultSiteSettings);
   useEffect(() => {
     let alive = true;
     function loadDashboard() {
@@ -1939,6 +2086,22 @@ function AdminSidebar({ active }: { active: string }) {
       window.removeEventListener("admin-data-changed", loadDashboard);
     };
   }, []);
+  useEffect(() => {
+    let alive = true;
+    function loadSiteSettings() {
+      api.getPublicSiteSettings()
+        .then((result) => {
+          if (alive) setSiteSettings(result.item);
+        })
+        .catch(() => undefined);
+    }
+    loadSiteSettings();
+    window.addEventListener("admin-data-changed", loadSiteSettings);
+    return () => {
+      alive = false;
+      window.removeEventListener("admin-data-changed", loadSiteSettings);
+    };
+  }, []);
   function badge(label: string) {
     const count = label === "文章管理" ? dashboard.counts.posts
       : label === "草稿箱" ? dashboard.counts.draft
@@ -1955,7 +2118,7 @@ function AdminSidebar({ active }: { active: string }) {
     api.logout();
     go("/admin/login");
   }
-  return <aside className="admin-side"><Logo admin /><nav>{items.map((item) => {
+  return <aside className="admin-side"><Logo admin settings={siteSettings} /><nav>{items.map((item) => {
     const itemBadge = badge(item.label);
     return <button key={item.path} className={active === item.label ? "active" : ""} onClick={() => go(item.path)}>{item.label}{itemBadge && <small>{itemBadge}</small>}</button>;
   })}</nav><div className="admin-user"><span className="avatar sm">管</span><span>管理员<small>超级管理员</small></span><button type="button" title="退出登录并使当前后端会话失效" onClick={logoutAdmin}>退出</button></div></aside>;
