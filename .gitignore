@@ -18,6 +18,10 @@ pnpm-debug.log*
 
 # Uploaded/runtime files
 public/uploads/
+backups/
+backup/
+*.dump
+*.sql.gz
 
 # OS/editor noise
 .DS_Store

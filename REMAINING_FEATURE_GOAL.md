@@ -18,7 +18,7 @@
 | --- | --- | --- | --- |
 | 1 | 登录、评论、留言限流 | Done | this commit |
 | 2 | 生产配置和启动安全检查 | Done | this commit |
-| 3 | 数据库和上传目录备份闭环 | Pending | - |
+| 3 | 数据库和上传目录备份闭环 | Done | this commit |
 | 4 | 移动端核心流程复验和修复 | Pending | - |
 | 5 | 前台 mock 兜底和未接入提示收敛 | Pending | - |
 | 6 | 媒体库视频基础信息增强 | Pending | - |
@@ -136,6 +136,17 @@ chore: harden server runtime configuration
 ### 停止条件
 
 按文档能完成一次本地备份流程，且不会误提交备份文件后停止。
+
+### 验收记录
+
+- 新增 `BACKUP.md`，写明数据库备份、数据库恢复、上传目录恢复方法。
+- 新增 `backend/scripts/backup-local.ps1`，可备份 Docker PostgreSQL 和 `public/uploads`。
+- 新增 `backend/scripts/restore-database.ps1`，可把 SQL 备份恢复到指定 Docker PostgreSQL。
+- `.gitignore` 已忽略 `backups/`、`backup/`、`*.dump`、`*.sql.gz`。
+- 使用 `powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\backend\scripts\backup-local.ps1` 完成一次本地备份。
+- 备份产物包含 `blog_dev.sql` 和 `uploads.zip`。
+- `git status --short --ignored backups ...` 显示 `backups/` 为 ignored，不会误提交。
+- 两个 PowerShell 脚本均通过 `[scriptblock]::Create(...)` 解析检查。
 
 ### 提交信息
 
