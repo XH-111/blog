@@ -281,7 +281,18 @@ function postListSql({ keyword, category, tag, year, sort, limit, offset, featur
 
   if (keyword) {
     params.push(`%${keyword.toLowerCase()}%`);
-    where.push(`(lower(p.title) LIKE $${params.length} OR lower(p.excerpt) LIKE $${params.length} OR lower(p.summary) LIKE $${params.length})`);
+    where.push(`(
+      lower(p.title) LIKE $${params.length}
+      OR lower(p.excerpt) LIKE $${params.length}
+      OR lower(p.summary) LIKE $${params.length}
+      OR lower(p.content_markdown) LIKE $${params.length}
+      OR lower(c.name) LIKE $${params.length}
+      OR EXISTS (
+        SELECT 1 FROM post_tags pts
+        JOIN tags ts ON ts.id = pts.tag_id
+        WHERE pts.post_id = p.id AND lower(ts.name) LIKE $${params.length}
+      )
+    )`);
   }
   if (category) {
     params.push(category);
@@ -316,6 +327,7 @@ function postListSql({ keyword, category, tag, year, sort, limit, offset, featur
         p.is_featured, p.featured_order, p.allow_comment,
         p.reading_minutes, p.views_count, p.likes_count, p.comments_count, p.published_at,
         c.id AS category_id, c.name AS category_name, c.slug AS category_slug,
+        CASE WHEN ${keyword ? "true" : "false"} THEN COALESCE(NULLIF(p.summary, ''), NULLIF(p.excerpt, ''), left(p.content_markdown, 180)) ELSE '' END AS search_snippet,
         COALESCE(json_agg(json_build_object('id', t.id, 'name', t.name, 'slug', t.slug) ORDER BY t.name) FILTER (WHERE t.id IS NOT NULL), '[]') AS tags
       FROM posts p
       LEFT JOIN categories c ON c.id = p.category_id
@@ -347,6 +359,7 @@ function mapPost(row) {
     tags: row.tags ?? [],
     isFeatured: row.is_featured,
     featuredOrder: row.featured_order ?? 0,
+    searchSnippet: row.search_snippet || "",
     readingMinutes: row.reading_minutes,
     viewsCount: row.views_count,
     likesCount: row.likes_count,

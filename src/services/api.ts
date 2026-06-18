@@ -203,6 +203,7 @@ type BackendPost = {
   title: string;
   excerpt?: string;
   summary?: string;
+  searchSnippet?: string;
   contentMarkdown?: string;
   status?: "draft" | "published" | "scheduled" | "archived";
   visibility?: "public" | "private" | "password";
@@ -633,6 +634,7 @@ function mapBackendPost(post: BackendPost): Article {
     title: post.title,
     excerpt: post.excerpt ?? "",
     summary: post.summary ?? post.excerpt ?? "",
+    searchSnippet: post.searchSnippet ?? "",
     date: post.publishedAt?.slice(0, 10) ?? "",
     category: post.category?.name ?? "未分类",
     tags: post.tags?.map((tag) => tag.name) ?? [],

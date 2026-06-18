@@ -435,14 +435,32 @@ function ArticleRow({ item }: { item: Article }) {
   );
 }
 
-function ArchiveArticleCard({ item }: { item: Article }) {
+function HighlightedText({ text, keyword }: { text: string; keyword?: string }) {
+  const query = keyword?.trim();
+  if (!query) return <>{text}</>;
+  const lowerText = text.toLowerCase();
+  const lowerQuery = query.toLowerCase();
+  const index = lowerText.indexOf(lowerQuery);
+  if (index < 0) return <>{text}</>;
+  return (
+    <>
+      {text.slice(0, index)}
+      <mark>{text.slice(index, index + query.length)}</mark>
+      {text.slice(index + query.length)}
+    </>
+  );
+}
+
+function ArchiveArticleCard({ item, keyword }: { item: Article; keyword?: string }) {
+  const matchText = keyword?.trim() ? item.searchSnippet || item.summary || item.excerpt : "";
   return (
     <button className="archive-featured-card" onClick={() => go(`/article/${item.id}`)}>
       <Art type={item.image} coverUrl={item.coverUrl} />
       <span>
         <Tag>{item.category}</Tag>
-        <b>{item.title}</b>
-        <small>{item.excerpt}</small>
+        <b><HighlightedText text={item.title} keyword={keyword} /></b>
+        <small><HighlightedText text={item.excerpt} keyword={keyword} /></small>
+        {matchText && <small className="archive-match">匹配内容：<HighlightedText text={matchText} keyword={keyword} /></small>}
         <em>阅读 {item.readingMinutes} 分钟 · {item.date}</em>
       </span>
     </button>
@@ -1115,7 +1133,7 @@ function PostsPage() {
           </div>
           {visibleArticles.length ? (
             <div className="archive-featured-grid">
-              {visibleArticles.map((item) => <ArchiveArticleCard key={item.id} item={item} />)}
+              {visibleArticles.map((item) => <ArchiveArticleCard key={item.id} item={item} keyword={listMode === "search" ? search : undefined} />)}
             </div>
           ) : (
             <section className="archive-empty-state">

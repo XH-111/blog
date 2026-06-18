@@ -11,6 +11,7 @@ export type Article = {
   title: string;
   excerpt: string;
   summary: string;
+  searchSnippet?: string;
   date: string;
   category: string;
   tags: string[];
