@@ -474,6 +474,7 @@ function PublicDataNotice({ show, surface }: { show: boolean; surface: string })
 
 function CodeBlock({ code, language }: { code: string; language?: string }) {
   const [copied, setCopied] = useState(false);
+  const displayLanguage = normalizeCodeLanguage(language);
   async function copyCode() {
     try {
       await navigator.clipboard?.writeText(code);
@@ -484,14 +485,60 @@ function CodeBlock({ code, language }: { code: string; language?: string }) {
     }
   }
   return (
-    <pre className="code-block">
+    <pre className={`code-block language-${displayLanguage}`}>
       <span className="code-block-head">
-        <b>{language || "code"}</b>
+        <b>{displayLanguage}</b>
         <button type="button" onClick={copyCode}>{copied ? "已复制" : "复制"}</button>
       </span>
-      <code>{code}</code>
+      <code>
+        {code.split("\n").map((line, index) => (
+          <span className="code-line" key={`${index}-${line}`}>
+            <span className="code-line-number">{index + 1}</span>
+            <span className="code-line-content">{renderCodeTokens(line, displayLanguage, index)}</span>
+          </span>
+        ))}
+      </code>
     </pre>
   );
+}
+
+function normalizeCodeLanguage(language = "") {
+  const normalized = language.trim().toLowerCase();
+  if (!normalized) return "code";
+  if (["ts", "tsx"].includes(normalized)) return "typescript";
+  if (["js", "jsx", "mjs"].includes(normalized)) return "javascript";
+  if (["sh", "shell", "powershell", "ps1"].includes(normalized)) return "bash";
+  return normalized.replace(/[^a-z0-9-]/g, "") || "code";
+}
+
+const codeKeywords = new Set([
+  "async", "await", "break", "case", "catch", "class", "const", "continue", "default", "else", "export", "extends", "false", "finally", "for", "from", "function", "if", "import", "in", "interface", "let", "new", "null", "return", "switch", "this", "throw", "true", "try", "type", "undefined", "while",
+]);
+
+function renderCodeTokens(line: string, language: string, lineIndex: number) {
+  const tokenPattern = /(\/\/.*$|#.*$|"(?:\\.|[^"])*"|'(?:\\.|[^'])*'|`(?:\\.|[^`])*`|\b\d+(?:\.\d+)?\b|\b[A-Za-z_$][\w$]*\b)/g;
+  const nodes: ReactNode[] = [];
+  let lastIndex = 0;
+  let match: RegExpExecArray | null;
+
+  while ((match = tokenPattern.exec(line)) !== null) {
+    if (match.index > lastIndex) nodes.push(line.slice(lastIndex, match.index));
+    const token = match[0];
+    const className = token.startsWith("//") || (language === "bash" && token.startsWith("#"))
+      ? "comment"
+      : /^['"`]/.test(token)
+        ? "string"
+        : /^\d/.test(token)
+          ? "number"
+          : codeKeywords.has(token)
+            ? "keyword"
+            : "";
+    nodes.push(className ? <span className={`code-token ${className}`} key={`${lineIndex}-${match.index}`}>{token}</span> : token);
+    lastIndex = match.index + token.length;
+  }
+
+  if (lastIndex < line.length) nodes.push(line.slice(lastIndex));
+  return nodes.length ? nodes : " ";
 }
 
 function StatsCard() {
@@ -606,6 +653,21 @@ function ArticlePage({ articleId }: { articleId: number }) {
     };
   }, [article, siteSettings]);
 
+  useEffect(() => {
+    if (!toc.length) return;
+    const observer = new IntersectionObserver((entries) => {
+      const visible = entries
+        .filter((entry) => entry.isIntersecting)
+        .sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top)[0];
+      if (visible?.target.id) setActiveSection(visible.target.id);
+    }, { rootMargin: "-24% 0px -62% 0px", threshold: [0, 0.2, 1] });
+    toc.forEach((section) => {
+      const element = document.getElementById(section.id);
+      if (element) observer.observe(element);
+    });
+    return () => observer.disconnect();
+  }, [toc]);
+
   function jumpToSection(id: string) {
     setActiveSection(id);
     document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -695,6 +757,7 @@ function ArticlePage({ articleId }: { articleId: number }) {
         </main>
       ) : (
       <main className="article-layout">
+        <nav className="mobile-toc card" aria-label="移动端文章目录">{toc.map((section) => <button className={activeSection === section.id ? "active" : ""} key={section.id} onClick={() => jumpToSection(section.id)}>{section.title}</button>)}</nav>
         <aside className="toc card"><h3>文章目录</h3>{toc.map((section) => <button className={activeSection === section.id ? "active" : ""} key={section.id} onClick={() => jumpToSection(section.id)}>{section.title}</button>)}<button onClick={() => scrollTo({ top: 0, behavior: "smooth" })}>回到顶部 ↑</button></aside>
         <article className="paper">
           <div className="cover mountain" style={article.coverUrl ? { backgroundImage: `url(${article.coverUrl})` } : undefined} />
