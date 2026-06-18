@@ -469,7 +469,7 @@ function PublicStatsCard({ stats }: { stats?: PublicSiteStats }) {
 }
 
 function PublicDataNotice({ show, surface }: { show: boolean; surface: string }) {
-  return show ? <div className="note">当前{surface}展示的是前端 mock 兜底数据；后端可用时会自动读取 PostgreSQL。</div> : null;
+  return show ? <div className="note">当前{surface}暂未连接后端，正在显示离线预览数据。</div> : null;
 }
 
 function CodeBlock({ code, language }: { code: string; language?: string }) {
@@ -538,7 +538,7 @@ function ArticlePage({ articleId }: { articleId: number }) {
             go(`/article/${latest.id}`);
           } else {
             setArticleSource(result.source);
-            setArticleNotice(result.source === "mock" ? "后端不可用，当前没有可打开的真实文章。" : "暂无已发布文章。");
+            setArticleNotice(result.source === "mock" ? "内容服务暂不可用，当前没有可打开的文章。" : "暂无已发布文章。");
             setArticle(null);
           }
         })
@@ -626,7 +626,7 @@ function ArticlePage({ articleId }: { articleId: number }) {
       return;
     }
     if (articleSource !== "api") {
-      setLikeNotice("当前为 mock 文章，点赞不会写入数据库。");
+      setLikeNotice("离线预览文章暂不支持点赞。");
       return;
     }
     if (liking) return;
@@ -702,7 +702,7 @@ function ArticlePage({ articleId }: { articleId: number }) {
             <h1>{article.title}</h1>
             <div className="chip-row" aria-busy={articleLoading}><Tag tone="orange">{article.category}</Tag>{article.tags.map((tag) => <Tag key={tag}>{tag}</Tag>)}<span className="meta">▣ {article.date}　◷ 阅读 {article.readingMinutes} 分钟　◎ {article.reads}　♡ {likeCount}</span></div>
             <div className="article-actions" aria-label="文章操作">
-              <button className={liked ? "liked" : ""} onClick={likeArticle} disabled={liking || articleSource !== "api"} title={articleSource !== "api" ? "mock 文章不支持点赞" : liked ? "已点赞" : "点赞文章"}>
+              <button className={liked ? "liked" : ""} onClick={likeArticle} disabled={liking || articleSource !== "api"} title={articleSource !== "api" ? "离线预览文章暂不支持点赞" : liked ? "已点赞" : "点赞文章"}>
                 <span>{liked ? "♥" : "♡"}</span>{liking ? "点赞中..." : liked ? `已点赞 ${likeCount}` : `点赞 ${likeCount}`}
               </button>
               <button onClick={() => document.querySelector(".comments")?.scrollIntoView({ behavior: "smooth", block: "start" })}>
@@ -724,10 +724,10 @@ function ArticlePage({ articleId }: { articleId: number }) {
                 </section>
               );
             })}
-            {articleSource === "mock" && <div className="note">💡 当前为前端 mock 文章详情，后端不可用或文章不存在时使用兜底数据。</div>}
+            {articleSource === "mock" && <div className="note">当前内容服务暂不可用或文章不存在，正在显示离线预览内容。</div>}
             {article.codeSample && <><h3>示例代码</h3><CodeBlock code={article.codeSample} language="typescript" /></>}
             <Pager article={article} />
-            <CommentBox articleId={article.id} value={comment} onChange={setComment} enabled={articleSource === "api" && article.allowComment !== false} disabledReason={articleSource !== "api" ? "当前为 mock 文章，评论不会写入数据库。" : undefined} />
+            <CommentBox articleId={article.id} value={comment} onChange={setComment} enabled={articleSource === "api" && article.allowComment !== false} disabledReason={articleSource !== "api" ? "离线预览文章暂不支持评论提交。" : undefined} />
             <section className="article-related-bottom">
               <h3>推荐阅读</h3>
               {relatedArticles.length ? <div>{relatedArticles.map((item) => <button key={item.id} onClick={() => go(`/article/${item.id}`)}><b>{item.title}</b><small>{item.category} · 阅读 {item.readingMinutes} 分钟</small></button>)}</div> : <p className="soft-text">暂无同分类或同标签文章。</p>}
@@ -737,11 +737,11 @@ function ArticlePage({ articleId }: { articleId: number }) {
         <aside className="side-stack article-side">
           <PublicDataNotice show={articleSideUsingMock} surface="文章页侧栏" />
           <AuthorCard />
-          <Card title="AI 摘要（模拟）"><p className="soft-text">{article.summary}</p><button className="ghost-purple" disabled title="AI 模型任务尚未接入 ai_tasks">AI 思维导图未接入</button></Card>
+          <Card title="文章摘要"><p className="soft-text">{article.summary}</p></Card>
           <Card title="相关文章">{relatedArticles.length ? <MiniList items={relatedArticles} /> : <p className="soft-text">暂无相关文章</p>}</Card>
           <Card title="最新文章">{latestArticles.length ? <ol className="rank-list">{latestArticles.map((item) => <li key={item.id}>{item.title}<time>{item.date.slice(5)}</time></li>)}</ol> : <p className="soft-text">暂无最新文章</p>}</Card>
         </aside>
-        <div className="float-actions"><button onClick={likeArticle} disabled={liking || articleSource !== "api"} title={articleSource !== "api" ? "mock 文章不支持点赞" : liked ? "已点赞" : "点赞"}>{liked ? "♥" : "♡"}</button><button onClick={() => document.querySelector(".comments")?.scrollIntoView({ behavior: "smooth", block: "start" })} title="跳到评论区">评</button><button onClick={copyArticleLink} title="复制文章链接">链</button><button onClick={() => scrollTo(0, 0)} title="回到顶部">↑</button></div>
+        <div className="float-actions"><button onClick={likeArticle} disabled={liking || articleSource !== "api"} title={articleSource !== "api" ? "离线预览文章暂不支持点赞" : liked ? "已点赞" : "点赞"}>{liked ? "♥" : "♡"}</button><button onClick={() => document.querySelector(".comments")?.scrollIntoView({ behavior: "smooth", block: "start" })} title="跳到评论区">评</button><button onClick={copyArticleLink} title="复制文章链接">链</button><button onClick={() => scrollTo(0, 0)} title="回到顶部">↑</button></div>
         {previewImage && (
           <div className="media-modal article-image-modal" role="dialog" aria-modal="true" aria-label="文章图片预览" onClick={() => setPreviewImage(null)}>
             <div className="media-modal-panel article-image-modal-panel" onClick={(event) => event.stopPropagation()}>
@@ -776,7 +776,7 @@ function CommentBox({ articleId, value, onChange, enabled, disabledReason }: { a
         .then((result) => {
           if (!alive) return;
           setComments(result.items);
-          if (result.source === "mock") setMessage("评论接口暂不可用，当前未展示前端假评论。");
+          if (result.source === "mock") setMessage("评论服务暂不可用，当前未展示离线预览评论。");
         })
         .catch((error) => {
           if (alive) setMessage(getApiErrorMessage(error));
@@ -879,7 +879,7 @@ function AuthorCard() {
     };
   }, []);
 
-  return <section className="author card"><div className="avatar lg">山</div><h3>一行代码 <Tag>LV6</Tag></h3><p>全栈开发者 · 技术博主</p>{usingMock && <p className="soft-text">作者统计当前为 mock 兜底数据。</p>}<div className="author-stats"><b>{stats ? stats.posts : "--"}<span>文章</span></b><b>{stats ? api.formatCount(stats.views) : "--"}<span>访问</span></b><b>--<span>粉丝</span></b></div><button disabled title="关注功能尚未接入后端">关注未接入</button></section>;
+  return <section className="author card"><div className="avatar lg">山</div><h3>一行代码 <Tag>LV6</Tag></h3><p>全栈开发者 · 技术博主</p>{usingMock && <p className="soft-text">作者统计暂未连接后端，正在显示离线预览数据。</p>}<div className="author-stats"><b>{stats ? stats.posts : "--"}<span>文章</span></b><b>{stats ? api.formatCount(stats.views) : "--"}<span>访问</span></b></div><button onClick={() => go("/about")}>了解作者</button></section>;
 }
 
 function PostsPage() {
@@ -1916,7 +1916,7 @@ function MessageItem({ item, readonlyMock = false }: { item: Message; readonlyMo
   const [liking, setLiking] = useState(false);
   async function likeMessage() {
     if (readonlyMock) {
-      setLikeNotice("当前为 mock 留言，点赞不会写入数据库。");
+      setLikeNotice("离线预览留言暂不支持点赞。");
       return;
     }
     if (liking) return;
@@ -1939,7 +1939,7 @@ function MessageItem({ item, readonlyMock = false }: { item: Message; readonlyMo
       <div>
         <h3>{item.author}<Tag tone={item.role === "站长" ? "green" : "blue"}>{item.role}</Tag><small> · {item.time}</small></h3>
         <p>{item.content}</p>
-        <button onClick={likeMessage} disabled={liking || !item.approved || readonlyMock} title={readonlyMock ? "mock 留言不支持点赞" : item.approved ? "点赞留言" : "审核通过后可点赞"}>{liked ? "♥" : "♡"} {likesCount}</button>
+        <button onClick={likeMessage} disabled={liking || !item.approved || readonlyMock} title={readonlyMock ? "离线预览留言暂不支持点赞" : item.approved ? "点赞留言" : "审核通过后可点赞"}>{liked ? "♥" : "♡"} {likesCount}</button>
         {likeNotice && <small className="form-notice">{likeNotice}</small>}
         {item.replies?.map((reply) => <MessageItem key={reply.id} item={reply} readonlyMock={readonlyMock} />)}
       </div>
