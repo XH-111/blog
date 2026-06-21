@@ -100,6 +100,10 @@ const API_ERROR_MESSAGES: Record<string, string> = {
   comments_disabled: "这篇文章已关闭评论",
   content_too_long: "内容超过长度限制",
   content_required: "请输入内容",
+  password_required: "请输入当前密码和新密码",
+  password_too_short: "新密码至少需要 8 位",
+  password_unchanged: "新密码不能和当前密码相同",
+  invalid_current_password: "当前密码不正确",
   name_required: "请输入名称",
   invalid_status: "状态不合法",
   invalid_ai_tool: "AI 功能类型不支持",
@@ -302,9 +306,36 @@ export type AdminCommentItem = {
   authorName: string;
   content: string;
   status: string;
+  isVisible: boolean;
+  source: string;
   postTitle?: string;
   likesCount: number;
   createdAt?: string;
+};
+
+export type ImportPreviewRow = {
+  index: number;
+  title: string;
+  slug: string;
+  status: string;
+  commentsCount: number;
+  warnings: string[];
+  errors: string[];
+};
+
+export type ImportPreview = {
+  total: number;
+  valid: number;
+  invalid: number;
+  categories: number;
+  tags: number;
+  comments: number;
+  rows: ImportPreviewRow[];
+};
+
+export type ImportCommitResult = {
+  summary: { total: number; imported: number; skipped: number; failed: number; comments: number };
+  results: Array<{ index: number; ok: boolean; skipped?: boolean; id?: number; title?: string; slug?: string; comments?: number; error?: string; reason?: string }>;
 };
 
 export type PublicCommentItem = {
@@ -452,9 +483,14 @@ export type SiteSettings = {
   siteName: string;
   siteSubtitle: string;
   logoUrl: string;
+  faviconUrl: string;
   defaultSeoTitle: string;
   defaultSeoDescription: string;
+  defaultOgImageUrl: string;
   icpText: string;
+  icpUrl: string;
+  policeText: string;
+  policeUrl: string;
   footerText: string;
 };
 
@@ -561,6 +597,9 @@ type BackendComment = {
   author_name: string;
   content: string;
   status: string;
+  is_visible?: boolean;
+  isVisible?: boolean;
+  source?: string;
   post_title?: string;
   likes_count?: number | string;
   created_at?: string;
@@ -752,6 +791,8 @@ function mapBackendComment(item: BackendComment): AdminCommentItem {
     authorName: item.author_name,
     content: item.content,
     status: item.status,
+    isVisible: item.is_visible ?? item.isVisible ?? true,
+    source: item.source || "user",
     postTitle: item.post_title,
     likesCount: toNumber(item.likes_count),
     createdAt: item.created_at,
@@ -937,9 +978,14 @@ const defaultSiteSettings: SiteSettings = {
   siteName: "全栈博客创作平台",
   siteSubtitle: "记录 · 分享 · 成长",
   logoUrl: "",
+  faviconUrl: "",
   defaultSeoTitle: "全栈博客创作平台",
   defaultSeoDescription: "记录技术探索与项目经验，分享思考与实践。",
+  defaultOgImageUrl: "",
   icpText: "",
+  icpUrl: "",
+  policeText: "",
+  policeUrl: "",
   footerText: "© 2026 全栈博客创作平台",
 };
 
@@ -951,9 +997,14 @@ function normalizeSiteSettings(input?: Partial<SiteSettings>): SiteSettings {
     siteName,
     siteSubtitle: text(source.siteSubtitle, defaultSiteSettings.siteSubtitle),
     logoUrl: text(source.logoUrl, defaultSiteSettings.logoUrl),
+    faviconUrl: text(source.faviconUrl, defaultSiteSettings.faviconUrl),
     defaultSeoTitle: text(source.defaultSeoTitle, defaultSiteSettings.defaultSeoTitle) || siteName,
     defaultSeoDescription: text(source.defaultSeoDescription, defaultSiteSettings.defaultSeoDescription),
+    defaultOgImageUrl: text(source.defaultOgImageUrl, defaultSiteSettings.defaultOgImageUrl),
     icpText: text(source.icpText, defaultSiteSettings.icpText),
+    icpUrl: text(source.icpUrl, defaultSiteSettings.icpUrl),
+    policeText: text(source.policeText, defaultSiteSettings.policeText),
+    policeUrl: text(source.policeUrl, defaultSiteSettings.policeUrl),
     footerText: text(source.footerText, defaultSiteSettings.footerText),
   };
 }
@@ -1347,9 +1398,27 @@ export const api = {
       source: "api" as const,
     };
   },
+  updateCommentVisibility: async (id: number, isVisible: boolean) => {
+    const updatedComment = await requestStrictJson<{ ok?: boolean; item?: BackendComment }>(`/admin/comments/${id}`, { method: "PUT", body: JSON.stringify({ isVisible }) });
+    const item = updatedComment.item ? mapBackendComment(updatedComment.item) : undefined;
+    return { ok: updatedComment.ok ?? true, id: item?.id ?? id, item, source: "api" as const };
+  },
   deleteComment: async (id: number) => {
     const data = await requestStrictJson<{ ok?: boolean; id?: DbId; deleted?: boolean }>(`/admin/comments/${id}`, { method: "DELETE" });
     return { ok: data.ok ?? true, id: toNumberId(data.id ?? id), deleted: data.deleted ?? true, source: "api" as const };
+  },
+  getImportArticleTemplate: async () => {
+    const data = await requestStrictJson<{ items?: unknown[] }>("/admin/import/articles/template");
+    return { items: Array.isArray(data.items) ? data.items : [], source: "api" as const };
+  },
+  previewArticleImport: async (items: unknown[], strategy: "skip" | "rename") => {
+    const data = await requestStrictJson<{ preview?: ImportPreview }>("/admin/import/articles/preview", { method: "POST", body: JSON.stringify({ items, strategy }) });
+    if (!data.preview) throw new ApiError("后端没有返回导入预检结果");
+    return { preview: data.preview, source: "api" as const };
+  },
+  commitArticleImport: async (items: unknown[], strategy: "skip" | "rename") => {
+    const data = await requestStrictJson<ImportCommitResult>("/admin/import/articles/commit", { method: "POST", body: JSON.stringify({ items, strategy }) });
+    return { summary: data.summary, results: data.results, source: "api" as const };
   },
   reviewMessage: async (id: number, status: "approved" | "rejected") => {
     const reviewedMessage = await requestStrictJson<{ ok?: boolean; item?: BackendMessage }>(`/admin/messages/${id}`, { method: "PUT", body: JSON.stringify({ status }) });
@@ -1381,6 +1450,10 @@ export const api = {
     if (data.expiresAt) window.localStorage.setItem(`${ADMIN_TOKEN_KEY}-expires-at`, data.expiresAt);
     emitAuthChanged();
     return { ok: true, token: data.token, expiresAt: data.expiresAt, user: data.user };
+  },
+  changeAdminPassword: async (payload: { currentPassword: string; newPassword: string }) => {
+    const data = await requestStrictJson<{ ok?: boolean }>("/admin/auth/password", { method: "PUT", body: JSON.stringify(payload) });
+    return { ok: data.ok ?? true, source: "api" as const };
   },
   logout: () => {
     const token = getAdminToken();

@@ -103,9 +103,14 @@ const DEFAULT_SITE_SETTINGS = {
   siteName: "全栈博客创作平台",
   siteSubtitle: "记录 · 分享 · 成长",
   logoUrl: "",
+  faviconUrl: "",
   defaultSeoTitle: "全栈博客创作平台",
   defaultSeoDescription: "记录技术探索与项目经验，分享思考与实践。",
+  defaultOgImageUrl: "",
   icpText: "",
+  icpUrl: "",
+  policeText: "",
+  policeUrl: "",
   footerText: "© 2026 全栈博客创作平台",
 };
 
@@ -131,6 +136,11 @@ function checkRateLimit(req, { scope, max, windowMs }) {
     }
   }
   return { limited: false, retryAfterSeconds: 0 };
+}
+
+function clearRateLimit(req, scope) {
+  const ip = getClientIp(req) || "unknown";
+  rateLimitBuckets.delete(`${scope}:${ip}`);
 }
 
 function enforceRateLimit(req, res, options) {
@@ -222,7 +232,13 @@ async function ensureRuntimeSchema() {
     ALTER TABLE posts
       ADD COLUMN IF NOT EXISTS access_password_hash text,
       ADD COLUMN IF NOT EXISTS password_hint text,
-      ADD COLUMN IF NOT EXISTS featured_order integer NOT NULL DEFAULT 0
+      ADD COLUMN IF NOT EXISTS featured_order integer NOT NULL DEFAULT 0,
+      ADD COLUMN IF NOT EXISTS source varchar(40) NOT NULL DEFAULT 'manual'
+  `);
+  await query(`
+    ALTER TABLE comments
+      ADD COLUMN IF NOT EXISTS is_visible boolean NOT NULL DEFAULT true,
+      ADD COLUMN IF NOT EXISTS source varchar(40) NOT NULL DEFAULT 'user'
   `);
   await normalizeFeaturedOrder();
   await query(`
@@ -398,6 +414,12 @@ function parseScheduledAt(value) {
   return Number.isNaN(scheduledAt.getTime()) ? null : scheduledAt;
 }
 
+function parseDateOrNull(value) {
+  if (!value) return null;
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
 function validatePostSchedule(payload) {
   if (payload.status !== "scheduled") return null;
   const scheduledAt = parseScheduledAt(payload.scheduledAt);
@@ -504,12 +526,14 @@ async function writePost(client, payload, id = null) {
     : null;
   const passwordHint = visibility === "password" ? String(payload.passwordHint || "").trim() : "";
   const baseSlug = payload.slug ? slugify(payload.slug) : slugify(title);
-  const slug = id ? payload.slug ? baseSlug : null : `${baseSlug}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+  const slug = id
+    ? payload.slug ? baseSlug : null
+    : payload.preserveSlug ? baseSlug : `${baseSlug}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
   const excerpt = makeExcerpt(contentMarkdown, payload.excerpt);
   const summary = payload.summary || excerpt;
   const categoryId = await ensureCategory(client, payload.categoryName || payload.category || "技术笔记");
   const readingMinutes = payload.readingMinutes ?? estimateReadingMinutes(contentMarkdown);
-  const publishedAt = status === "published" ? new Date() : null;
+  const publishedAt = status === "published" ? parseDateOrNull(payload.publishedAt) || new Date() : null;
   const scheduledAt = parseScheduledAt(payload.scheduledAt);
   const isFeatured = Boolean(payload.isFeatured);
   let featuredOrder = 0;
@@ -540,6 +564,7 @@ async function writePost(client, payload, id = null) {
     readingMinutes,
     publishedAt,
     scheduledAt,
+    String(payload.source || "manual").slice(0, 40),
   ];
 
   const result = id
@@ -563,8 +588,9 @@ async function writePost(client, payload, id = null) {
           reading_minutes = $16,
           published_at = COALESCE($17, published_at),
           scheduled_at = $18,
+          source = $19,
           updated_at = now()
-         WHERE id = $19
+         WHERE id = $20
          RETURNING id`,
         [...values, id],
       )
@@ -572,9 +598,9 @@ async function writePost(client, payload, id = null) {
         `INSERT INTO posts(
           title, slug, excerpt, summary, content_markdown, cover_url, category_id, status,
           is_featured, featured_order, visibility, access_password_hash, password_hint,
-          allow_comment, require_comment_review, reading_minutes, published_at, scheduled_at
+          allow_comment, require_comment_review, reading_minutes, published_at, scheduled_at, source
         )
-        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)
         RETURNING id`,
         values,
       );
@@ -650,6 +676,156 @@ async function refreshTaxonomyCounts(client) {
     WHERE t.id = sub.tag_id
   `);
 }
+
+function normalizeImportArticles(body) {
+  const items = Array.isArray(body) ? body : Array.isArray(body.items) ? body.items : Array.isArray(body.articles) ? body.articles : [];
+  return items.map((item) => item && typeof item === "object" ? item : {});
+}
+
+function normalizeImportComment(comment = {}, index = 0) {
+  const status = ["pending", "approved", "rejected"].includes(comment.status) ? comment.status : "approved";
+  return {
+    authorName: String(comment.authorName || comment.author || `访客 ${index + 1}`).trim().slice(0, 80) || `访客 ${index + 1}`,
+    authorEmail: String(comment.authorEmail || comment.email || "").trim().slice(0, 160),
+    authorSite: String(comment.authorSite || comment.site || "").trim(),
+    content: String(comment.content || "").trim(),
+    status,
+    isVisible: comment.isVisible ?? comment.is_visible ?? comment.visible ?? true,
+    likesCount: Math.max(0, Math.floor(Number(comment.likesCount ?? comment.likes_count ?? 0) || 0)),
+    createdAt: parseDateOrNull(comment.createdAt || comment.created_at),
+    parentIndex: Number.isInteger(comment.parentIndex) ? comment.parentIndex : null,
+  };
+}
+
+async function buildImportPreview(items, { strategy = "skip" } = {}) {
+  const normalized = normalizeImportArticles({ items });
+  const slugs = normalized.map((item) => slugify(item.slug || item.title || "")).filter(Boolean);
+  const existing = slugs.length ? await query("SELECT slug FROM posts WHERE slug = ANY($1::text[])", [slugs]) : { rows: [] };
+  const existingSlugs = new Set(existing.rows.map((row) => row.slug));
+  const categories = new Set();
+  const tags = new Set();
+  let commentsCount = 0;
+  const rows = normalized.map((item, index) => {
+    const title = String(item.title || "").trim();
+    const content = String(item.contentMarkdown || item.content || "").trim();
+    const slug = slugify(item.slug || title || `import-${index + 1}`);
+    const warnings = [];
+    const errors = [];
+    if (!title) errors.push("标题为空");
+    if (!content) errors.push("正文为空");
+    if (item.publishedAt && !parseDateOrNull(item.publishedAt)) errors.push("发布时间格式无效");
+    if (item.createdAt && !parseDateOrNull(item.createdAt)) errors.push("创建时间格式无效");
+    if (existingSlugs.has(slug)) {
+      if (strategy === "skip") warnings.push("slug 已存在，提交时会跳过");
+      if (strategy === "rename") warnings.push("slug 已存在，提交时会自动追加后缀");
+    }
+    const category = String(item.categoryName || item.category || "技术笔记").trim();
+    if (category) categories.add(category);
+    if (Array.isArray(item.tags)) item.tags.forEach((tag) => { if (String(tag).trim()) tags.add(String(tag).trim()); });
+    commentsCount += Array.isArray(item.comments) ? item.comments.length : 0;
+    return { index, title: title || `第 ${index + 1} 篇`, slug, status: item.status || "draft", commentsCount: Array.isArray(item.comments) ? item.comments.length : 0, warnings, errors };
+  });
+  return {
+    total: rows.length,
+    valid: rows.filter((row) => !row.errors.length).length,
+    invalid: rows.filter((row) => row.errors.length).length,
+    categories: categories.size,
+    tags: tags.size,
+    comments: commentsCount,
+    rows,
+  };
+}
+
+async function nextAvailableSlug(client, baseSlug) {
+  let candidate = baseSlug;
+  let suffix = 2;
+  while (true) {
+    const existing = await client.query("SELECT 1 FROM posts WHERE slug = $1 LIMIT 1", [candidate]);
+    if (!existing.rowCount) return candidate;
+    candidate = `${baseSlug}-${suffix}`;
+    suffix += 1;
+  }
+}
+
+async function importOneArticle(client, rawItem, { strategy, adminUserId }) {
+  const title = String(rawItem.title || "").trim();
+  const contentMarkdown = String(rawItem.contentMarkdown || rawItem.content || "").trim();
+  if (!title) throw new Error("标题为空");
+  if (!contentMarkdown) throw new Error("正文为空");
+  const baseSlug = slugify(rawItem.slug || title);
+  const existing = await client.query("SELECT id FROM posts WHERE slug = $1 LIMIT 1", [baseSlug]);
+  if (existing.rowCount && strategy === "skip") return { skipped: true, reason: "slug_exists", slug: baseSlug, title };
+  const slug = existing.rowCount && strategy === "rename" ? await nextAvailableSlug(client, baseSlug) : baseSlug;
+  const status = ["published", "scheduled", "draft"].includes(rawItem.status) ? rawItem.status : "published";
+  const postId = await writePost(client, {
+    ...rawItem,
+    title,
+    contentMarkdown,
+    slug,
+    preserveSlug: true,
+    status,
+    source: "import",
+    adminUserId,
+  });
+  const createdAt = parseDateOrNull(rawItem.createdAt || rawItem.created_at);
+  await client.query(
+    `UPDATE posts
+     SET views_count = $1,
+         likes_count = $2,
+         comments_count = comments_count,
+         created_at = COALESCE($3, created_at),
+         updated_at = COALESCE($4, updated_at)
+     WHERE id = $5`,
+    [
+      Math.max(0, Math.floor(Number(rawItem.viewsCount ?? rawItem.views_count ?? 0) || 0)),
+      Math.max(0, Math.floor(Number(rawItem.likesCount ?? rawItem.likes_count ?? 0) || 0)),
+      createdAt,
+      createdAt,
+      postId,
+    ],
+  );
+  const comments = Array.isArray(rawItem.comments) ? rawItem.comments : [];
+  const insertedComments = [];
+  for (const [index, rawComment] of comments.entries()) {
+    const comment = normalizeImportComment(rawComment, index);
+    if (!comment.content) continue;
+    const parentId = comment.parentIndex != null ? insertedComments[comment.parentIndex] ?? null : null;
+    const inserted = await client.query(
+      `INSERT INTO comments(post_id, parent_id, author_name, author_email, author_site, content, likes_count, status, is_visible, source, created_at, updated_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'admin_import',COALESCE($10, now()),COALESCE($10, now()))
+       RETURNING id`,
+      [postId, parentId, comment.authorName, comment.authorEmail || null, comment.authorSite || null, comment.content, comment.likesCount, comment.status, Boolean(comment.isVisible), comment.createdAt],
+    );
+    insertedComments[index] = Number(inserted.rows[0].id);
+  }
+  await refreshPostCommentCount(client, postId);
+  await refreshTaxonomyCounts(client);
+  return { id: postId, title, slug, comments: insertedComments.filter(Boolean).length };
+}
+
+const IMPORT_ARTICLE_TEMPLATE = [
+  {
+    title: "一次博客系统重构记录",
+    slug: "blog-refactor-notes",
+    summary: "记录一次从功能堆叠到结构梳理的博客重构过程。",
+    contentMarkdown: "# 开始\n\n这里是正文。",
+    category: "项目复盘",
+    tags: ["全栈", "博客", "React"],
+    coverUrl: "/assets/article-cover.png",
+    status: "published",
+    publishedAt: "2025-09-12T10:30:00+08:00",
+    createdAt: "2025-09-12T10:30:00+08:00",
+    viewsCount: 1280,
+    likesCount: 36,
+    readingMinutes: 8,
+    isFeatured: false,
+    allowComment: true,
+    comments: [
+      { authorName: "路过的开发者", authorEmail: "reader@example.com", content: "这篇写得挺真实。", status: "approved", isVisible: true, likesCount: 3, createdAt: "2025-09-13T21:10:00+08:00" },
+      { authorName: "站长", content: "感谢反馈。", status: "approved", isVisible: true, parentIndex: 0, createdAt: "2025-09-13T22:00:00+08:00" },
+    ],
+  },
+];
 
 async function publishDueScheduledPosts() {
   return transaction(async (client) => {
@@ -915,7 +1091,8 @@ async function serveUploadedFile(req, res, url) {
 }
 
 async function handleAdminLogin(req, res) {
-  if (enforceRateLimit(req, res, { scope: "admin-login", max: 5, windowMs: 15 * 60 * 1000 })) return;
+  const loginRateLimitScope = "admin-login";
+  if (enforceRateLimit(req, res, { scope: loginRateLimitScope, max: 20, windowMs: 5 * 60 * 1000 })) return;
   const body = await readBody(req);
   const account = String(body.account || body.username || body.email || "").trim();
   const password = String(body.password || "");
@@ -942,6 +1119,7 @@ async function handleAdminLogin(req, res) {
     const upgradedHash = await hashPassword(password);
     await query("UPDATE admin_users SET password_hash = $1, updated_at = now() WHERE id = $2", [upgradedHash, user.id]);
   }
+  clearRateLimit(req, loginRateLimitScope);
 
   const token = crypto.randomBytes(32).toString("base64url");
   const tokenHash = hashToken(token);
@@ -993,6 +1171,32 @@ async function handleAdminLogout(req, res) {
   if (req.adminSessionId) {
     await query("DELETE FROM admin_sessions WHERE id = $1", [req.adminSessionId]);
   }
+  sendJson(res, 200, { ok: true }, corsHeaders(req));
+}
+
+async function handleAdminChangePassword(req, res) {
+  const body = await readBody(req);
+  const currentPassword = String(body.currentPassword || body.oldPassword || "");
+  const newPassword = String(body.newPassword || body.password || "");
+  if (!currentPassword || !newPassword) {
+    return sendJson(res, 400, { error: "password_required", message: "请输入当前密码和新密码" }, corsHeaders(req));
+  }
+  if (newPassword.length < 8) {
+    return sendJson(res, 400, { error: "password_too_short", message: "新密码至少需要 8 位" }, corsHeaders(req));
+  }
+  if (newPassword === currentPassword) {
+    return sendJson(res, 400, { error: "password_unchanged", message: "新密码不能和当前密码相同" }, corsHeaders(req));
+  }
+  const result = await query("SELECT id, password_hash FROM admin_users WHERE id = $1 AND status = 'active' LIMIT 1", [req.adminUser?.id]);
+  const user = result.rows[0];
+  if (!user || !await verifyPassword(currentPassword, user.password_hash)) {
+    return sendJson(res, 400, { error: "invalid_current_password", message: "当前密码不正确" }, corsHeaders(req));
+  }
+  const nextHash = await hashPassword(newPassword);
+  await transaction(async (client) => {
+    await client.query("UPDATE admin_users SET password_hash = $1, updated_at = now() WHERE id = $2", [nextHash, user.id]);
+    await client.query("DELETE FROM admin_sessions WHERE admin_user_id = $1 AND id <> $2", [user.id, req.adminSessionId ?? 0]);
+  });
   sendJson(res, 200, { ok: true }, corsHeaders(req));
 }
 
@@ -1334,9 +1538,14 @@ function normalizeSiteSettings(value = {}) {
     siteName: text(next.siteName, DEFAULT_SITE_SETTINGS.siteName) || DEFAULT_SITE_SETTINGS.siteName,
     siteSubtitle: text(next.siteSubtitle, DEFAULT_SITE_SETTINGS.siteSubtitle),
     logoUrl: text(next.logoUrl, DEFAULT_SITE_SETTINGS.logoUrl),
+    faviconUrl: text(next.faviconUrl, DEFAULT_SITE_SETTINGS.faviconUrl),
     defaultSeoTitle: text(next.defaultSeoTitle, DEFAULT_SITE_SETTINGS.defaultSeoTitle) || text(next.siteName, DEFAULT_SITE_SETTINGS.siteName),
     defaultSeoDescription: text(next.defaultSeoDescription, DEFAULT_SITE_SETTINGS.defaultSeoDescription),
+    defaultOgImageUrl: text(next.defaultOgImageUrl, DEFAULT_SITE_SETTINGS.defaultOgImageUrl),
     icpText: text(next.icpText, DEFAULT_SITE_SETTINGS.icpText),
+    icpUrl: text(next.icpUrl, DEFAULT_SITE_SETTINGS.icpUrl),
+    policeText: text(next.policeText, DEFAULT_SITE_SETTINGS.policeText),
+    policeUrl: text(next.policeUrl, DEFAULT_SITE_SETTINGS.policeUrl),
     footerText: text(next.footerText, DEFAULT_SITE_SETTINGS.footerText),
   };
 }
@@ -1368,6 +1577,46 @@ async function handleAdminUpdateSiteSettings(req, res) {
     [SITE_SETTING_KEY, JSON.stringify(item)],
   );
   sendJson(res, 200, { item: normalizeSiteSettings(result.rows[0]?.value_json), ok: true, source: "api" }, corsHeaders(req));
+}
+
+async function handleAdminImportTemplate(req, res) {
+  sendJson(res, 200, { items: IMPORT_ARTICLE_TEMPLATE, source: "api" }, corsHeaders(req));
+}
+
+async function handleAdminImportPreview(req, res) {
+  const body = await readBody(req);
+  const items = normalizeImportArticles(body);
+  const strategy = body.strategy === "rename" ? "rename" : "skip";
+  const preview = await buildImportPreview(items, { strategy });
+  sendJson(res, 200, { preview, source: "api" }, corsHeaders(req));
+}
+
+async function handleAdminImportCommit(req, res) {
+  const body = await readBody(req);
+  const items = normalizeImportArticles(body);
+  const strategy = body.strategy === "rename" ? "rename" : "skip";
+  const preview = await buildImportPreview(items, { strategy });
+  if (!items.length) return sendJson(res, 400, { error: "empty_import", message: "请提供要导入的文章 JSON" }, corsHeaders(req));
+  if (preview.invalid) {
+    return sendJson(res, 400, { error: "import_invalid", message: "预检发现无效文章，请修正后再导入", preview }, corsHeaders(req));
+  }
+  const results = [];
+  for (const [index, item] of items.entries()) {
+    try {
+      const result = await transaction((client) => importOneArticle(client, item, { strategy, adminUserId: req.adminUser?.id ?? null }));
+      results.push({ index, ok: !result.skipped, skipped: Boolean(result.skipped), ...result });
+    } catch (error) {
+      results.push({ index, ok: false, error: error?.message || "导入失败", title: item?.title || `第 ${index + 1} 篇` });
+    }
+  }
+  const summary = {
+    total: results.length,
+    imported: results.filter((item) => item.ok).length,
+    skipped: results.filter((item) => item.skipped).length,
+    failed: results.filter((item) => !item.ok && !item.skipped).length,
+    comments: results.reduce((sum, item) => sum + (Number(item.comments) || 0), 0),
+  };
+  sendJson(res, 200, { ok: summary.failed === 0, summary, results, source: "api" }, corsHeaders(req));
 }
 
 function normalizeAboutPage(value = {}) {
@@ -1504,7 +1753,7 @@ async function refreshPostCommentCount(client, postId) {
      SET comments_count = (
        SELECT count(*)::integer
        FROM comments
-       WHERE post_id = $1 AND status = 'approved'
+       WHERE post_id = $1 AND status = 'approved' AND is_visible = true
      )
      WHERE id = $1`,
     [postId],
@@ -1519,7 +1768,7 @@ async function handlePublicComments(req, res, id, url) {
     `SELECT count(*) OVER()::integer AS total_count,
             id, parent_id, author_name, author_site, content, likes_count, status, created_at
      FROM comments
-     WHERE post_id = $1 AND status = 'approved'
+     WHERE post_id = $1 AND status = 'approved' AND is_visible = true
      ORDER BY created_at ASC
      LIMIT $2 OFFSET $3`,
     [id, pageSize, offset],
@@ -2268,7 +2517,7 @@ async function handleAdminComments(req, res, url) {
   const result = await query(
     `SELECT count(*) OVER()::integer AS total_count,
             cm.id, cm.author_name, cm.author_email, cm.author_site, cm.content, cm.likes_count,
-            cm.status, cm.created_at, p.id AS post_id, p.title AS post_title
+            cm.status, cm.is_visible, cm.source, cm.created_at, p.id AS post_id, p.title AS post_title
      FROM comments cm
      LEFT JOIN posts p ON p.id = cm.post_id
      ${where.length ? `WHERE ${where.join(" AND ")}` : ""}
@@ -2282,15 +2531,23 @@ async function handleAdminComments(req, res, url) {
 
 async function handleAdminUpdateComment(req, res, id) {
   const body = await readBody(req);
+  const hasStatus = body.status !== undefined;
   const status = body.status === "rejected" ? "rejected" : body.status === "approved" ? "approved" : "";
-  if (!status) return sendJson(res, 400, { error: "invalid_status" }, corsHeaders(req));
+  const hasVisible = body.isVisible !== undefined || body.is_visible !== undefined || body.visible !== undefined;
+  const isVisible = body.isVisible ?? body.is_visible ?? body.visible;
+  if (hasStatus && !status) return sendJson(res, 400, { error: "invalid_status" }, corsHeaders(req));
+  if (!hasStatus && !hasVisible) return sendJson(res, 400, { error: "empty_update" }, corsHeaders(req));
   const result = await transaction(async (client) => {
     const current = await client.query("SELECT id, post_id, status FROM comments WHERE id = $1 FOR UPDATE", [id]);
     if (!current.rowCount) return current;
     const updated = await client.query(
-      `UPDATE comments SET status = $1, updated_at = now() WHERE id = $2
-       RETURNING id, post_id, author_name, content, likes_count, status, created_at`,
-      [status, id],
+      `UPDATE comments
+       SET status = COALESCE($1, status),
+           is_visible = COALESCE($2, is_visible),
+           updated_at = now()
+       WHERE id = $3
+       RETURNING id, post_id, author_name, content, likes_count, status, is_visible, source, created_at`,
+      [hasStatus ? status : null, hasVisible ? Boolean(isVisible) : null, id],
     );
     if (updated.rowCount) {
       await refreshPostCommentCount(client, updated.rows[0].post_id);
@@ -2784,6 +3041,7 @@ async function handleRequest(req, res) {
       if (!adminUser) return;
     }
     if (req.method === "POST" && url.pathname === "/api/admin/auth/logout") return handleAdminLogout(req, res);
+    if (req.method === "PUT" && url.pathname === "/api/admin/auth/password") return handleAdminChangePassword(req, res);
 
     if (req.method === "GET" && url.pathname === "/api/admin/posts") return handleAdminPosts(req, res, url);
     if (req.method === "POST" && url.pathname === "/api/admin/posts") return handleAdminCreatePost(req, res);
@@ -2815,6 +3073,9 @@ async function handleRequest(req, res) {
     if (req.method === "GET" && url.pathname === "/api/admin/search") return handleAdminSearch(req, res, url);
     if (req.method === "GET" && url.pathname === "/api/admin/site-settings") return handleAdminSiteSettings(req, res);
     if (req.method === "PUT" && url.pathname === "/api/admin/site-settings") return handleAdminUpdateSiteSettings(req, res);
+    if (req.method === "GET" && url.pathname === "/api/admin/import/articles/template") return handleAdminImportTemplate(req, res);
+    if (req.method === "POST" && url.pathname === "/api/admin/import/articles/preview") return handleAdminImportPreview(req, res);
+    if (req.method === "POST" && url.pathname === "/api/admin/import/articles/commit") return handleAdminImportCommit(req, res);
     if (req.method === "GET" && url.pathname === "/api/admin/home-settings") return handleAdminHomeSettings(req, res);
     if (req.method === "PUT" && url.pathname === "/api/admin/home-settings") return handleAdminUpdateHomeSettings(req, res);
     if (req.method === "GET" && url.pathname === "/api/admin/about-settings") return handleAdminAboutSettings(req, res);

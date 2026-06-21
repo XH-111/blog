@@ -78,6 +78,15 @@ This file is a handoff note for continuing the project in a new Codex thread or 
   - `posts.content_markdown`
 - If the media is in use, the backend returns `409 media_in_use`.
 - In-use media is not deleted from the database and the local file is not removed.
+
+### Admin Account Security
+
+- Admin login password inputs support show/hide toggling.
+- Admin backend includes `PUT /api/admin/auth/password` for changing the current administrator password.
+- The password change flow verifies the current password, requires a new password of at least 8 characters, hashes the new password, and invalidates other active sessions for that administrator.
+- The current password cannot be viewed because only the password hash is stored.
+- Admin UI route: `/#/admin/security`.
+- Admin login rate limiting was relaxed to 20 attempts per 5 minutes per client IP, and a successful login clears that client's login rate-limit bucket.
 - This was verified with temporary test data, then the temporary data was deleted.
 
 ### Backend Encoding Repair
@@ -106,12 +115,106 @@ This file is a handoff note for continuing the project in a new Codex thread or 
   - `total=11`
   - `hasMore=True`
 
+### Site Settings
+
+- Site settings now cover more public-site basics:
+  - Logo URL
+  - Favicon URL
+  - Default SEO title and description
+  - Default Open Graph/share image URL
+  - ICP text and link
+  - Police filing text and link
+  - Footer text
+- Admin site settings support selecting or uploading image assets for:
+  - Logo
+  - Favicon
+  - Default share image
+- The site settings page includes a save-before-preview area for:
+  - Navigation brand block
+  - Browser title/favicon preview
+  - Share-card preview
+  - Footer preview
+- Public pages apply the configured favicon and Open Graph metadata when site settings load.
+- Public footer renders ICP and police filing text as links when URLs are configured.
+
+### Article Import And Comment Visibility
+
+- Admin now has a `批量导入` page at `/#/admin/import`.
+- Article import supports JSON paste/import with:
+  - Template loading
+  - Preview/dry-run validation
+  - Commit/import confirmation
+  - Slug conflict strategy: skip existing slugs or auto-rename
+- Import payload can include article fields such as:
+  - `title`, `slug`, `summary`, `contentMarkdown`, `category`, `tags`
+  - `coverUrl`, `status`, `publishedAt`, `createdAt`
+  - `viewsCount`, `likesCount`, `readingMinutes`, `isFeatured`, `allowComment`
+- Import payload can include comments with:
+  - `authorName`, `authorEmail`, `content`, `status`, `isVisible`
+  - `likesCount`, `createdAt`, `parentIndex`
+- Database fields added:
+  - `posts.source`
+  - `comments.is_visible`
+  - `comments.source`
+- Public article comments only show rows where:
+  - `status = 'approved'`
+  - `is_visible = true`
+- Admin comment management can now show/hide comments without deleting them.
+
+### Production Deployment
+
+- Production domain: `https://hechenxu.cn`
+- Server IP: `47.114.127.226`
+- Server app directory: `/opt/blog/app`
+- Production stack:
+  - Docker Compose
+  - PostgreSQL 16 container
+  - Node backend container
+  - Caddy 2 container for HTTPS, static frontend, `/api` reverse proxy, and `/uploads` reverse proxy
+- Production files added locally:
+  - `Dockerfile`
+  - `.dockerignore`
+  - `deploy/Caddyfile`
+  - `deploy/docker-compose.prod.yml`
+  - `deploy/remote-deploy.sh`
+- Docker Hub access from the server timed out, so production images use `docker.m.daocloud.io` mirror prefixes.
+- Old host nginx was stopped and disabled during deployment so Caddy can bind ports 80 and 443.
+- Production deploy command on the server:
+
+```bash
+cd /opt/blog/app
+DOMAIN=hechenxu.cn bash deploy/remote-deploy.sh
+```
+
+- Production status command:
+
+```bash
+cd /opt/blog/app
+docker compose -f deploy/docker-compose.prod.yml ps
+```
+
+- Production logs:
+
+```bash
+cd /opt/blog/app
+docker compose -f deploy/docker-compose.prod.yml logs --tail=100 app
+docker compose -f deploy/docker-compose.prod.yml logs --tail=100 caddy
+```
+
 ## Verification Already Done
 
 - `npm.cmd run build` passed.
 - `node --check backend\src\server.js` passed.
 - `GET http://127.0.0.1:8000/api/health` passed.
 - `GET /api/admin/posts?page=1&pageSize=10` returned 10 items and a total count of 11 after backend restart.
+- `GET/PUT /api/admin/site-settings` was used to verify the new site settings fields can be saved and restored.
+- `GET /api/admin/import/articles/template`, `POST /api/admin/import/articles/preview`, and `POST /api/admin/import/articles/commit` were verified with a temporary imported article, then the temporary article was permanently deleted.
+- Production deployment verified:
+  - `https://hechenxu.cn` returned HTTP 200.
+  - `https://www.hechenxu.cn` returned HTTP 200.
+  - `http://hechenxu.cn` redirected with HTTP 308.
+  - `https://hechenxu.cn/api/health` returned `{ ok: true }`.
+  - `https://hechenxu.cn/api/public/site-settings` returned public site settings.
 - Browser verification confirmed article editor toolbar buttons:
   - `B`, `I`, `H`, `≡`, `</>`, `❞`, `🔗`, `▦`, `▧`, `库`
 - Table button insertion produced a `preview-table`.

@@ -1,7 +1,7 @@
 ﻿import { ChangeEvent, FormEvent, ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { api, getApiErrorMessage } from "./services/api";
 import type { ClipboardEvent, PointerEvent, WheelEvent } from "react";
-import type { AboutPageSettings, AdminAiReviewFocus, AdminAiStatus, AdminAiTaskItem, AdminAiTool, AdminCategoryItem, AdminCommentItem, AdminDashboardData, AdminMediaItem, AdminMessageItem, AdminPostListItem, AdminPostVersionItem, AdminSearchItem, AdminTagItem, HomeEntryCardSetting, HomePageSettings, PublicCommentItem, PublicSiteStats, SiteSettings } from "./services/api";
+import type { AboutPageSettings, AdminAiReviewFocus, AdminAiStatus, AdminAiTaskItem, AdminAiTool, AdminCategoryItem, AdminCommentItem, AdminDashboardData, AdminMediaItem, AdminMessageItem, AdminPostListItem, AdminPostVersionItem, AdminSearchItem, AdminTagItem, HomeEntryCardSetting, HomePageSettings, ImportPreview, PublicCommentItem, PublicSiteStats, SiteSettings } from "./services/api";
 import type { Article, Message } from "./types";
 
 const nav = [
@@ -42,9 +42,14 @@ const defaultSiteSettings: SiteSettings = {
   siteName: "全栈博客创作平台",
   siteSubtitle: "记录 · 分享 · 成长",
   logoUrl: "",
+  faviconUrl: "",
   defaultSeoTitle: "全栈博客创作平台",
   defaultSeoDescription: "记录技术探索与项目经验，分享思考与实践。",
+  defaultOgImageUrl: "",
   icpText: "",
+  icpUrl: "",
+  policeText: "",
+  policeUrl: "",
   footerText: "© 2026 全栈博客创作平台",
 };
 
@@ -159,6 +164,7 @@ function useSiteSettings(applyDocumentMeta = false) {
             const description = document.querySelector<HTMLMetaElement>('meta[name="description"]');
             if (description) description.content = result.item.defaultSeoDescription;
           }
+          applySiteDocumentSettings(result.item);
         })
         .catch(() => {
           if (applyDocumentMeta) document.title = defaultSiteSettings.defaultSeoTitle;
@@ -177,6 +183,53 @@ function useSiteSettings(applyDocumentMeta = false) {
 function setMetaDescription(content: string) {
   const description = document.querySelector<HTMLMetaElement>('meta[name="description"]');
   if (description) description.content = content;
+}
+
+function setNamedMeta(name: string, content: string) {
+  let meta = document.querySelector<HTMLMetaElement>(`meta[name="${name}"]`);
+  if (!content) {
+    meta?.remove();
+    return;
+  }
+  if (!meta) {
+    meta = document.createElement("meta");
+    meta.name = name;
+    document.head.appendChild(meta);
+  }
+  meta.content = content;
+}
+
+function setPropertyMeta(property: string, content: string) {
+  let meta = document.querySelector<HTMLMetaElement>(`meta[property="${property}"]`);
+  if (!content) {
+    meta?.remove();
+    return;
+  }
+  if (!meta) {
+    meta = document.createElement("meta");
+    meta.setAttribute("property", property);
+    document.head.appendChild(meta);
+  }
+  meta.content = content;
+}
+
+function applySiteDocumentSettings(settings: SiteSettings) {
+  let favicon = document.querySelector<HTMLLinkElement>('link[rel="icon"]');
+  if (settings.faviconUrl) {
+    if (!favicon) {
+      favicon = document.createElement("link");
+      favicon.rel = "icon";
+      document.head.appendChild(favicon);
+    }
+    favicon.href = settings.faviconUrl;
+  } else {
+    favicon?.remove();
+  }
+  setPropertyMeta("og:site_name", settings.siteName);
+  setPropertyMeta("og:title", settings.defaultSeoTitle || settings.siteName);
+  setPropertyMeta("og:description", settings.defaultSeoDescription);
+  setPropertyMeta("og:image", settings.defaultOgImageUrl);
+  setNamedMeta("twitter:card", settings.defaultOgImageUrl ? "summary_large_image" : "");
 }
 
 function Logo({ admin = false, settings = defaultSiteSettings }: { admin?: boolean; settings?: SiteSettings }) {
@@ -245,11 +298,12 @@ function PublicHeader({ active }: { active: string }) {
 
 function PublicFooter() {
   const siteSettings = useSiteSettings(false);
-  if (!siteSettings.footerText && !siteSettings.icpText) return null;
+  if (!siteSettings.footerText && !siteSettings.icpText && !siteSettings.policeText) return null;
   return (
     <footer className="public-footer">
       {siteSettings.footerText && <span>{siteSettings.footerText}</span>}
-      {siteSettings.icpText && <span>{siteSettings.icpText}</span>}
+      {siteSettings.icpText && (siteSettings.icpUrl ? <a href={siteSettings.icpUrl} target="_blank" rel="noreferrer">{siteSettings.icpText}</a> : <span>{siteSettings.icpText}</span>)}
+      {siteSettings.policeText && (siteSettings.policeUrl ? <a href={siteSettings.policeUrl} target="_blank" rel="noreferrer">{siteSettings.policeText}</a> : <span>{siteSettings.policeText}</span>)}
     </footer>
   );
 }
@@ -1326,6 +1380,11 @@ function SiteSettingsPage() {
   const [config, setConfig] = useState<SiteSettings>(defaultSiteSettings);
   const [notice, setNotice] = useState("");
   const [saving, setSaving] = useState(false);
+  const [mediaPickerTarget, setMediaPickerTarget] = useState<"logoUrl" | "faviconUrl" | "defaultOgImageUrl" | null>(null);
+  const [siteMediaItems, setSiteMediaItems] = useState<AdminMediaItem[]>([]);
+  const [mediaLoading, setMediaLoading] = useState(false);
+  const [uploadingTarget, setUploadingTarget] = useState<"logoUrl" | "faviconUrl" | "defaultOgImageUrl" | null>(null);
+  const siteFileInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
     let alive = true;
@@ -1345,6 +1404,50 @@ function SiteSettingsPage() {
 
   function updateField<K extends keyof SiteSettings>(key: K, value: SiteSettings[K]) {
     setConfig((current) => ({ ...current, [key]: value }));
+  }
+
+  async function openSiteMediaPicker(target: "logoUrl" | "faviconUrl" | "defaultOgImageUrl") {
+    setMediaPickerTarget(target);
+    setMediaLoading(true);
+    setNotice("");
+    try {
+      const result = await api.getAdminMedia({ pageSize: 100, type: "image" });
+      setSiteMediaItems(result.items.filter((item) => item.mimeType.startsWith("image/")));
+    } catch (error) {
+      setNotice(getApiErrorMessage(error));
+    } finally {
+      setMediaLoading(false);
+    }
+  }
+
+  function selectSiteMedia(item: AdminMediaItem) {
+    if (!mediaPickerTarget) return;
+    updateField(mediaPickerTarget, item.url);
+    setMediaPickerTarget(null);
+    setNotice(`已选择${siteMediaTargetLabel(mediaPickerTarget)}：${mediaDisplayName(item)}`);
+  }
+
+  function startSiteUpload(target: "logoUrl" | "faviconUrl" | "defaultOgImageUrl") {
+    setUploadingTarget(target);
+    siteFileInputRef.current?.click();
+  }
+
+  async function uploadSiteImage(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file || !uploadingTarget) return;
+    setSaving(true);
+    setNotice("");
+    try {
+      const result = await api.uploadMedia(file, file.name);
+      updateField(uploadingTarget, result.item.url);
+      setNotice(`${siteMediaTargetLabel(uploadingTarget)}已上传并填入，保存后前台生效。`);
+    } catch (error) {
+      setNotice(getApiErrorMessage(error));
+    } finally {
+      setSaving(false);
+      setUploadingTarget(null);
+    }
   }
 
   async function saveSiteSettings() {
@@ -1371,6 +1474,7 @@ function SiteSettingsPage() {
           <div className="title-actions"><button onClick={saveSiteSettings} disabled={saving}>{saving ? "保存中..." : "保存配置"}</button><button onClick={() => go("/")}>预览前台</button></div>
         </div>
         {notice && <p className="admin-hint">{notice}</p>}
+        <input ref={siteFileInputRef} className="visually-hidden" type="file" accept="image/*" onChange={uploadSiteImage} />
         <section className="card site-config">
           <div className="settings-panel">
             <header>
@@ -1380,29 +1484,232 @@ function SiteSettingsPage() {
             <div className="settings-grid">
               <label>站点名称<input value={config.siteName} onChange={(event) => updateField("siteName", event.target.value)} /></label>
               <label>站点副标题<input value={config.siteSubtitle} onChange={(event) => updateField("siteSubtitle", event.target.value)} /></label>
-              <label className="wide">Logo URL<input value={config.logoUrl} onChange={(event) => updateField("logoUrl", event.target.value)} placeholder="/assets/logo.png 或 /uploads/..." /></label>
+              <label className="wide">Logo 图片<div className="inline-picker"><input value={config.logoUrl} onChange={(event) => updateField("logoUrl", event.target.value)} placeholder="/assets/logo.png 或 /uploads/..." /><button type="button" onClick={() => openSiteMediaPicker("logoUrl")}>媒体库</button><button type="button" onClick={() => startSiteUpload("logoUrl")}>上传</button><button type="button" onClick={() => updateField("logoUrl", "")}>清空</button></div></label>
+              <label className="wide">浏览器图标 Favicon<div className="inline-picker"><input value={config.faviconUrl} onChange={(event) => updateField("faviconUrl", event.target.value)} placeholder="/assets/favicon.png 或 /uploads/..." /><button type="button" onClick={() => openSiteMediaPicker("faviconUrl")}>媒体库</button><button type="button" onClick={() => startSiteUpload("faviconUrl")}>上传</button><button type="button" onClick={() => updateField("faviconUrl", "")}>清空</button></div></label>
             </div>
           </div>
           <div className="settings-panel">
             <header>
-              <b>默认 SEO</b>
-              <span>作为页面未单独配置 SEO 时的默认标题和描述。</span>
+              <b>默认 SEO 与分享</b>
+              <span>作为页面未单独配置 SEO 时的默认标题、描述和分享图。</span>
             </header>
             <div className="settings-grid">
               <label>默认标题<input value={config.defaultSeoTitle} onChange={(event) => updateField("defaultSeoTitle", event.target.value)} /></label>
               <label className="wide">默认描述<textarea value={config.defaultSeoDescription} onChange={(event) => updateField("defaultSeoDescription", event.target.value)} /></label>
+              <label className="wide">默认分享图<div className="inline-picker"><input value={config.defaultOgImageUrl} onChange={(event) => updateField("defaultOgImageUrl", event.target.value)} placeholder="/assets/share-cover.png 或 /uploads/..." /><button type="button" onClick={() => openSiteMediaPicker("defaultOgImageUrl")}>媒体库</button><button type="button" onClick={() => startSiteUpload("defaultOgImageUrl")}>上传</button><button type="button" onClick={() => updateField("defaultOgImageUrl", "")}>清空</button></div></label>
             </div>
           </div>
           <div className="settings-panel wide">
             <header>
               <b>页脚文案</b>
-              <span>用于备案号、版权说明等公开展示内容。</span>
+              <span>用于备案号、公安备案、版权说明等公开展示内容；留空则自动隐藏。</span>
             </header>
             <div className="settings-grid">
               <label>ICP备案号<input value={config.icpText} onChange={(event) => updateField("icpText", event.target.value)} placeholder="例如：浙ICP备..." /></label>
+              <label>ICP备案链接<input value={config.icpUrl} onChange={(event) => updateField("icpUrl", event.target.value)} placeholder="https://beian.miit.gov.cn/" /></label>
+              <label>公安备案号<input value={config.policeText} onChange={(event) => updateField("policeText", event.target.value)} placeholder="例如：浙公网安备..." /></label>
+              <label>公安备案链接<input value={config.policeUrl} onChange={(event) => updateField("policeUrl", event.target.value)} placeholder="https://www.beian.gov.cn/..." /></label>
               <label>页脚文案<input value={config.footerText} onChange={(event) => updateField("footerText", event.target.value)} /></label>
             </div>
           </div>
+          <div className="settings-panel wide">
+            <header>
+              <b>保存前预览</b>
+              <span>这里展示导航品牌、页脚、SEO 分享卡片的大致效果。</span>
+            </header>
+            <div className="site-preview-grid">
+              <div className="site-preview-card">
+                <span>品牌区</span>
+                <Logo settings={config} />
+              </div>
+              <div className="site-preview-card">
+                <span>浏览器与分享</span>
+                <div className="site-browser-preview">
+                  <i style={config.faviconUrl ? { backgroundImage: `url(${config.faviconUrl})` } : undefined}>{config.faviconUrl ? "" : "✦"}</i>
+                  <b>{config.defaultSeoTitle || config.siteName}</b>
+                </div>
+                <div className="site-share-preview">
+                  {config.defaultOgImageUrl ? <img src={config.defaultOgImageUrl} alt="默认分享图预览" /> : <div>分享图未配置</div>}
+                  <section>
+                    <b>{config.defaultSeoTitle || config.siteName}</b>
+                    <p>{config.defaultSeoDescription || "默认描述为空，搜索和分享时可能缺少摘要。"}</p>
+                  </section>
+                </div>
+              </div>
+              <div className="site-preview-card">
+                <span>页脚</span>
+                <footer className="public-footer site-footer-preview">
+                  {config.footerText && <span>{config.footerText}</span>}
+                  {config.icpText && <span>{config.icpText}</span>}
+                  {config.policeText && <span>{config.policeText}</span>}
+                  {!config.footerText && !config.icpText && !config.policeText && <span>页脚已隐藏</span>}
+                </footer>
+              </div>
+            </div>
+          </div>
+        </section>
+        {mediaPickerTarget && (
+          <div className="media-modal" role="dialog" aria-modal="true" aria-label={`选择${siteMediaTargetLabel(mediaPickerTarget)}`} onClick={() => setMediaPickerTarget(null)}>
+            <div className="media-modal-panel media-picker-panel" onClick={(event) => event.stopPropagation()}>
+              <header><b>选择{siteMediaTargetLabel(mediaPickerTarget)}</b><button type="button" onClick={() => setMediaPickerTarget(null)}>关闭</button></header>
+              {mediaLoading ? <p className="soft-text">正在读取媒体库...</p> : siteMediaItems.length ? (
+                <div className="media-picker-grid">
+                  {siteMediaItems.map((item) => (
+                    <button type="button" key={item.id} onClick={() => selectSiteMedia(item)}>
+                      <img src={item.url} alt={item.altText || item.originalName} />
+                      <span>{mediaDisplayName(item)}</span>
+                    </button>
+                  ))}
+                </div>
+              ) : <p className="soft-text">媒体库暂无图片</p>}
+            </div>
+          </div>
+        )}
+      </div>
+    </>
+  );
+}
+
+function ImportArticlesPage() {
+  const [jsonText, setJsonText] = useState("");
+  const [strategy, setStrategy] = useState<"skip" | "rename">("skip");
+  const [preview, setPreview] = useState<ImportPreview | null>(null);
+  const [result, setResult] = useState<{ summary: { total: number; imported: number; skipped: number; failed: number; comments: number }; results: Array<{ index: number; ok: boolean; skipped?: boolean; title?: string; slug?: string; comments?: number; error?: string; reason?: string }> } | null>(null);
+  const [notice, setNotice] = useState("");
+  const [loading, setLoading] = useState(false);
+
+  function parseImportJson() {
+    const parsed = JSON.parse(jsonText);
+    if (Array.isArray(parsed)) return parsed;
+    if (Array.isArray(parsed.items)) return parsed.items;
+    if (Array.isArray(parsed.articles)) return parsed.articles;
+    throw new Error("JSON 顶层必须是数组，或包含 items/articles 数组");
+  }
+
+  async function loadTemplate() {
+    setLoading(true);
+    setNotice("");
+    try {
+      const template = await api.getImportArticleTemplate();
+      setJsonText(JSON.stringify(template.items, null, 2));
+      setPreview(null);
+      setResult(null);
+      setNotice("模板已填入编辑框，可以直接改内容后预检。");
+    } catch (error) {
+      setNotice(getApiErrorMessage(error));
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function previewImport() {
+    setLoading(true);
+    setNotice("");
+    setResult(null);
+    try {
+      const items = parseImportJson();
+      const response = await api.previewArticleImport(items, strategy);
+      setPreview(response.preview);
+      setNotice(response.preview.invalid ? "预检发现问题，请先修正错误项。" : "预检通过，可以确认导入。");
+    } catch (error) {
+      setPreview(null);
+      setNotice(getApiErrorMessage(error));
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function commitImport() {
+    if (!preview || preview.invalid) {
+      setNotice("请先通过预检再导入。");
+      return;
+    }
+    setLoading(true);
+    setNotice("");
+    try {
+      const items = parseImportJson();
+      const response = await api.commitArticleImport(items, strategy);
+      setResult(response);
+      setNotice(`导入完成：成功 ${response.summary.imported} 篇，跳过 ${response.summary.skipped} 篇，失败 ${response.summary.failed} 篇。`);
+      emitAdminDataChanged();
+    } catch (error) {
+      setNotice(getApiErrorMessage(error));
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <>
+      <AdminTop />
+      <div className="admin-content admin-placeholder">
+        <div className="title-row">
+          <h1>批量导入文章</h1>
+          <div className="title-actions">
+            <button type="button" onClick={loadTemplate} disabled={loading}>填入模板</button>
+            <button type="button" onClick={previewImport} disabled={loading || !jsonText.trim()}>预检</button>
+            <button type="button" onClick={commitImport} disabled={loading || !preview || preview.invalid > 0}>确认导入</button>
+          </div>
+        </div>
+        {notice && <p className="admin-hint">{notice}</p>}
+        <section className="card import-config">
+          <div className="settings-panel">
+            <header>
+              <b>导入策略</b>
+              <span>用于迁移旧博客、补录历史文章和初始化展示数据。建议先预检，再确认导入。</span>
+            </header>
+            <div className="settings-grid single">
+              <label>slug 冲突处理<select value={strategy} onChange={(event) => { setStrategy(event.target.value as "skip" | "rename"); setPreview(null); setResult(null); }}><option value="skip">跳过已存在 slug</option><option value="rename">自动追加后缀</option></select></label>
+            </div>
+            <div className="import-help">
+              <b>支持字段</b>
+              <p>文章：title、slug、summary、contentMarkdown、category、tags、coverUrl、status、publishedAt、createdAt、viewsCount、likesCount、readingMinutes、isFeatured、allowComment。</p>
+              <p>评论：authorName、authorEmail、content、status、isVisible、likesCount、createdAt、parentIndex。</p>
+            </div>
+          </div>
+          <div className="settings-panel">
+            <header>
+              <b>JSON 内容</b>
+              <span>可以粘贴数组，也可以粘贴包含 items 或 articles 的对象。</span>
+            </header>
+            <textarea className="import-json" value={jsonText} onChange={(event) => { setJsonText(event.target.value); setPreview(null); setResult(null); }} placeholder='[{"title":"文章标题","contentMarkdown":"# 正文"}]' />
+          </div>
+          {preview && (
+            <div className="settings-panel wide">
+              <header>
+                <b>预检结果</b>
+                <span>共 {preview.total} 篇，有效 {preview.valid} 篇，错误 {preview.invalid} 篇，评论 {preview.comments} 条，涉及 {preview.categories} 个分类和 {preview.tags} 个标签。</span>
+              </header>
+              <div className="import-preview-list">
+                {preview.rows.map((row) => (
+                  <article key={row.index} className={row.errors.length ? "has-error" : row.warnings.length ? "has-warning" : ""}>
+                    <b>{row.index + 1}. {row.title}</b>
+                    <small>{row.slug} · {row.status} · {row.commentsCount} 条评论</small>
+                    {row.errors.map((item) => <p key={item}>错误：{item}</p>)}
+                    {row.warnings.map((item) => <p key={item}>提示：{item}</p>)}
+                  </article>
+                ))}
+              </div>
+            </div>
+          )}
+          {result && (
+            <div className="settings-panel wide">
+              <header>
+                <b>导入结果</b>
+                <span>成功 {result.summary.imported} 篇，跳过 {result.summary.skipped} 篇，失败 {result.summary.failed} 篇，导入评论 {result.summary.comments} 条。</span>
+              </header>
+              <div className="import-preview-list">
+                {result.results.map((row) => (
+                  <article key={row.index} className={!row.ok && !row.skipped ? "has-error" : row.skipped ? "has-warning" : ""}>
+                    <b>{row.index + 1}. {row.title || "未命名文章"}</b>
+                    <small>{row.skipped ? "已跳过" : row.ok ? `已导入 ${row.slug || ""}` : "失败"}{row.comments ? ` · ${row.comments} 条评论` : ""}</small>
+                    {row.error && <p>错误：{row.error}</p>}
+                    {row.reason && <p>原因：{row.reason}</p>}
+                  </article>
+                ))}
+              </div>
+            </div>
+          )}
         </section>
       </div>
     </>
@@ -2158,6 +2465,7 @@ function AdminLogin() {
   const [loading, setLoading] = useState(false);
   const [account, setAccount] = useState("admin");
   const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState("");
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -2191,13 +2499,81 @@ function AdminLogin() {
         <h2>登录后台</h2>
         <p>请输入管理员账号密码</p>
         <label>账号<input value={account} onChange={(event) => setAccount(event.target.value)} placeholder="管理员账号或邮箱" /></label>
-        <label>密码<input value={password} onChange={(event) => setPassword(event.target.value)} placeholder="请输入密码" type="password" /></label>
+        <label>密码<span className="password-field"><input value={password} onChange={(event) => setPassword(event.target.value)} placeholder="请输入密码" type={showPassword ? "text" : "password"} /><button type="button" onClick={() => setShowPassword((value) => !value)}>{showPassword ? "隐藏" : "查看"}</button></span></label>
         {error && <p className="form-notice">{error}</p>}
         <div className="row-between"><label className="check"><input type="checkbox" />记住我</label><a>忘记密码</a></div>
         <button className="primary" disabled={loading}>{loading ? "登录中..." : "登录管理后台"}</button>
         <div className="warning"><b>安全提示</b><span>管理接口必须带 Bearer token，未登录时后端会返回 401。</span></div>
       </form>
     </main>
+  );
+}
+
+function AccountSecurityPage() {
+  const [form, setForm] = useState({ currentPassword: "", newPassword: "", confirmPassword: "" });
+  const [showPasswords, setShowPasswords] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [notice, setNotice] = useState("");
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setNotice("");
+    if (!form.currentPassword || !form.newPassword || !form.confirmPassword) {
+      setNotice("请填写当前密码、新密码和确认密码。");
+      return;
+    }
+    if (form.newPassword !== form.confirmPassword) {
+      setNotice("两次输入的新密码不一致。");
+      return;
+    }
+    if (form.newPassword.length < 8) {
+      setNotice("新密码至少需要 8 位。");
+      return;
+    }
+    setSaving(true);
+    try {
+      await api.changeAdminPassword({ currentPassword: form.currentPassword, newPassword: form.newPassword });
+      setForm({ currentPassword: "", newPassword: "", confirmPassword: "" });
+      setNotice("密码已修改。其它已登录会话会失效，当前会话继续可用。");
+    } catch (error) {
+      setNotice(getApiErrorMessage(error));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <>
+      <AdminTop />
+      <div className="admin-content admin-placeholder">
+        <div className="title-row">
+          <h1>账号安全</h1>
+        </div>
+        {notice && <p className="admin-hint">{notice}</p>}
+        <section className="card security-config">
+          <form className="settings-panel security-form" onSubmit={submit}>
+            <header>
+              <b>修改管理员密码</b>
+              <span>系统不会保存明文密码，因此不能查看当前密码原文；这里只能查看你正在输入的新旧密码。</span>
+            </header>
+            <label>当前密码<span className="password-field"><input type={showPasswords ? "text" : "password"} value={form.currentPassword} onChange={(event) => setForm((current) => ({ ...current, currentPassword: event.target.value }))} autoComplete="current-password" /><button type="button" onClick={() => setShowPasswords((value) => !value)}>{showPasswords ? "隐藏" : "查看"}</button></span></label>
+            <label>新密码<span className="password-field"><input type={showPasswords ? "text" : "password"} value={form.newPassword} onChange={(event) => setForm((current) => ({ ...current, newPassword: event.target.value }))} autoComplete="new-password" placeholder="至少 8 位" /><button type="button" onClick={() => setShowPasswords((value) => !value)}>{showPasswords ? "隐藏" : "查看"}</button></span></label>
+            <label>确认新密码<span className="password-field"><input type={showPasswords ? "text" : "password"} value={form.confirmPassword} onChange={(event) => setForm((current) => ({ ...current, confirmPassword: event.target.value }))} autoComplete="new-password" /><button type="button" onClick={() => setShowPasswords((value) => !value)}>{showPasswords ? "隐藏" : "查看"}</button></span></label>
+            <button className="primary" disabled={saving}>{saving ? "保存中..." : "保存新密码"}</button>
+          </form>
+          <section className="settings-panel">
+            <header>
+              <b>为什么不能查看原密码</b>
+              <span>后台只保存密码哈希，无法从数据库反推出原密码。这是正常且更安全的设计。</span>
+            </header>
+            <div className="import-help">
+              <p>如果忘记密码，可以在服务器上通过环境变量或临时脚本重置管理员密码。</p>
+              <p>修改密码后，请把新密码保存在你的密码管理器里，不要写进代码仓库。</p>
+            </div>
+          </section>
+        </section>
+      </div>
+    </>
   );
 }
 
@@ -2211,9 +2587,11 @@ const adminRoutes: Record<string, { label: string; path: string }> = {
   comments: { label: "评论审核", path: "/admin/comments" },
   messages: { label: "留言管理", path: "/admin/messages" },
   media: { label: "媒体库", path: "/admin/media" },
+  import: { label: "批量导入", path: "/admin/import" },
   about: { label: "关于页配置", path: "/admin/about-config" },
   home: { label: "首页配置", path: "/admin/home-config" },
   settings: { label: "站点设置", path: "/admin/settings" },
+  security: { label: "账号安全", path: "/admin/security" },
 };
 
 const adminRouteAliases: Record<string, string> = {
@@ -2292,6 +2670,12 @@ function mediaDisplayName(item: AdminMediaItem) {
   return cleanMediaText(item.altText ?? "") || cleanMediaText(item.originalName) || cleanMediaText(mediaUrlFileName(item.url)) || `媒体 #${item.id}`;
 }
 
+function siteMediaTargetLabel(target: "logoUrl" | "faviconUrl" | "defaultOgImageUrl") {
+  if (target === "logoUrl") return "Logo";
+  if (target === "faviconUrl") return "Favicon";
+  return "默认分享图";
+}
+
 function isVideoMedia(item: AdminMediaItem) {
   return item.mimeType.startsWith("video/");
 }
@@ -2358,7 +2742,7 @@ const defaultAboutSettings: AboutPageSettings = {
 
 function AdminShell({ editor = false, page = "dashboard" }: { editor?: boolean; page?: string }) {
   const active = editor ? "文章管理" : adminRoutes[page]?.label ?? "仪表盘";
-  return <main className={`admin-app ${editor ? "admin-editor-app" : ""}`}><AdminSidebar active={active} /><section className="admin-main">{editor ? <EditorPage /> : page === "dashboard" ? <DashboardPage /> : page === "settings" ? <SiteSettingsPage /> : page === "about" ? <AboutSettingsPage /> : page === "home" ? <HomeSettingsPage /> : <AdminPlaceholder page={page} />}</section></main>;
+  return <main className={`admin-app ${editor ? "admin-editor-app" : ""}`}><AdminSidebar active={active} /><section className="admin-main">{editor ? <EditorPage /> : page === "dashboard" ? <DashboardPage /> : page === "settings" ? <SiteSettingsPage /> : page === "security" ? <AccountSecurityPage /> : page === "about" ? <AboutSettingsPage /> : page === "home" ? <HomeSettingsPage /> : page === "import" ? <ImportArticlesPage /> : <AdminPlaceholder page={page} />}</section></main>;
 }
 
 function AdminSidebar({ active }: { active: string }) {
@@ -2846,6 +3230,17 @@ function AdminPlaceholder({ page }: { page: string }) {
     }
   }
 
+  async function toggleCommentVisibility(id: number, isVisible: boolean) {
+    try {
+      const result = await api.updateCommentVisibility(id, isVisible);
+      if (result.item) setAdminComments((items) => items.map((item) => item.id === id ? { ...item, ...result.item } : item));
+      setActionNotice(isVisible ? "评论已设为前台可见。" : "评论已隐藏，后台仍可管理。");
+      emitAdminDataChanged();
+    } catch (error) {
+      setActionNotice(getApiErrorMessage(error));
+    }
+  }
+
   async function deleteMessage(id: number) {
     if (!window.confirm("确定删除这条留言吗？若它有回复，回复也会一起删除。")) return;
     try {
@@ -2970,9 +3365,12 @@ function AdminPlaceholder({ page }: { page: string }) {
                 key: `comment-${item.id}`,
                 id: item.id,
                 text: `${item.authorName} · ${item.content}${item.postTitle ? ` · ${item.postTitle}` : ""}`,
-                status: reviewStatus(item.status),
+                status: `${reviewStatus(item.status)} · ${item.isVisible ? "前台可见" : "已隐藏"}${item.source === "admin_import" ? " · 导入" : ""}`,
                 href: "",
-                actions: [{ label: "删除", title: "删除这条评论，保存到 comments", run: () => deleteComment(item.id) }],
+                actions: [
+                  { label: item.isVisible ? "隐藏" : "显示", title: item.isVisible ? "后台保留，但前台不再展示这条评论" : "允许前台展示这条已通过评论", run: () => toggleCommentVisibility(item.id, !item.isVisible) },
+                  { label: "删除", title: "删除这条评论，保存到 comments", run: () => deleteComment(item.id) },
+                ],
                 review: { kind: "comment" as const, id: item.id, status: item.status },
               }))
             : page === "messages"
@@ -3006,7 +3404,7 @@ function AdminPlaceholder({ page }: { page: string }) {
             : page === "tags"
               ? [{ label: "批量删除标签", danger: true, run: () => batchDeleteTags() }]
               : page === "comments"
-                ? [{ label: "批量通过", danger: false, run: () => batchReview("comment", "approved") }, { label: "批量驳回", danger: false, run: () => batchReview("comment", "rejected") }, { label: "批量删除", danger: true, run: () => batchDeleteComments() }]
+                ? [{ label: "批量通过", danger: false, run: () => batchReview("comment", "approved") }, { label: "批量驳回", danger: false, run: () => batchReview("comment", "rejected") }, { label: "批量显示", danger: false, run: () => batchChangeCommentVisibility(true) }, { label: "批量隐藏", danger: false, run: () => batchChangeCommentVisibility(false) }, { label: "批量删除", danger: true, run: () => batchDeleteComments() }]
                 : page === "messages"
                   ? [{ label: "批量通过", danger: false, run: () => batchReview("message", "approved") }, { label: "批量驳回", danger: false, run: () => batchReview("message", "rejected") }, { label: "批量删除", danger: true, run: () => batchDeleteMessages() }]
                   : [];
@@ -3082,6 +3480,13 @@ function AdminPlaceholder({ page }: { page: string }) {
     runBatch("批量删除评论", async (row) => {
       const result = await api.deleteComment(row.id);
       setAdminComments((items) => items.filter((item) => item.id !== result.id));
+    });
+  }
+
+  function batchChangeCommentVisibility(isVisible: boolean) {
+    runBatch(isVisible ? "批量显示评论" : "批量隐藏评论", async (row) => {
+      const result = await api.updateCommentVisibility(row.id, isVisible);
+      if (result.item) setAdminComments((items) => items.map((item) => item.id === row.id ? { ...item, ...result.item } : item));
     });
   }
 

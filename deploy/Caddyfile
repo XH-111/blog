@@ -1,0 +1,21 @@
+{
+	email admin@hechenxu.cn
+}
+
+hechenxu.cn, www.hechenxu.cn {
+	encode gzip zstd
+
+	handle /api/* {
+		reverse_proxy app:8000
+	}
+
+	handle /uploads/* {
+		reverse_proxy app:8000
+	}
+
+	handle {
+		root * /srv
+		try_files {path} /index.html
+		file_server
+	}
+}

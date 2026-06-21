@@ -1,0 +1,11 @@
+node_modules
+dist
+.git
+*.log
+backend/.env
+.env
+public/uploads
+backups
+backup
+*.dump
+*.sql.gz
