@@ -53,6 +53,8 @@ CREATE TABLE IF NOT EXISTS media_assets (
   mime_type varchar(120),
   file_size bigint,
   url text NOT NULL,
+  thumbnail_url text,
+  display_url text,
   storage_path text,
   width integer,
   height integer,

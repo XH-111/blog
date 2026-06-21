@@ -276,6 +276,8 @@ export type AdminMediaItem = {
   mimeType: string;
   fileSize?: number;
   url: string;
+  thumbnailUrl?: string;
+  displayUrl?: string;
   width?: number;
   height?: number;
   altText?: string;
@@ -566,6 +568,10 @@ type BackendMedia = {
   mime_type?: string;
   file_size?: number | string;
   url: string;
+  thumbnail_url?: string;
+  thumbnailUrl?: string;
+  display_url?: string;
+  displayUrl?: string;
   width?: number;
   height?: number;
   alt_text?: string;
@@ -755,6 +761,8 @@ function mapBackendMedia(item: BackendMedia): AdminMediaItem {
     mimeType: item.mime_type ?? "application/octet-stream",
     fileSize: toNumber(item.file_size),
     url: resolveBackendAssetUrl(item.url) ?? item.url,
+    thumbnailUrl: resolveBackendAssetUrl(item.thumbnail_url ?? item.thumbnailUrl),
+    displayUrl: resolveBackendAssetUrl(item.display_url ?? item.displayUrl),
     width: item.width,
     height: item.height,
     altText: item.alt_text,

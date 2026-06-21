@@ -89,6 +89,15 @@ This file is a handoff note for continuing the project in a new Codex thread or 
 - Admin login rate limiting was relaxed to 20 attempts per 5 minutes per client IP, and a successful login clears that client's login rate-limit bucket.
 - This was verified with temporary test data, then the temporary data was deleted.
 
+### Media Rendering Performance
+
+- Image uploads now keep the original file and generate lightweight WebP variants:
+  - `thumbnail_url` for media lists and picker grids.
+  - `display_url` for cover-style rendering such as article cards, homepage cover, logo/share image selection, and about/project display images.
+- Existing image media can be backfilled with `backend/scripts/generate-media-variants.js`.
+- Production deploy runs the media variant backfill after seed.
+- Production Caddy serves `/uploads/*` directly from the mounted uploads directory instead of proxying uploaded media through Node.
+
 ### Backend Encoding Repair
 
 - `DEFAULT_ABOUT_PAGE` in `backend/src/server.js` was rewritten with stable normal Chinese/ASCII strings after old mojibake strings caused syntax problems.

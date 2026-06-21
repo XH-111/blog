@@ -2,6 +2,7 @@
 import crypto from "node:crypto";
 import { mkdir, readFile, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
+import sharp from "sharp";
 import { config } from "./config.js";
 import { closePool, query, transaction } from "./db.js";
 
@@ -240,6 +241,11 @@ async function ensureRuntimeSchema() {
       ADD COLUMN IF NOT EXISTS is_visible boolean NOT NULL DEFAULT true,
       ADD COLUMN IF NOT EXISTS source varchar(40) NOT NULL DEFAULT 'user'
   `);
+  await query(`
+    ALTER TABLE media_assets
+      ADD COLUMN IF NOT EXISTS thumbnail_url text,
+      ADD COLUMN IF NOT EXISTS display_url text
+  `);
   await normalizeFeaturedOrder();
   await query(`
     CREATE TABLE IF NOT EXISTS post_versions (
@@ -300,6 +306,12 @@ async function removeUploadedFile(storagePath) {
   }
 }
 
+async function removeUploadedUrl(url) {
+  if (!url || !String(url).startsWith("/uploads/")) return;
+  const relative = decodeURIComponent(String(url).replace(/^\/uploads\//, ""));
+  await removeUploadedFile(path.resolve(uploadRoot, relative));
+}
+
 function postListSql({ keyword, category, tag, year, sort, limit, offset, featured }) {
   const params = [];
   const where = ["p.status = 'published'", "p.visibility IN ('public', 'password')"];
@@ -348,7 +360,7 @@ function postListSql({ keyword, category, tag, year, sort, limit, offset, featur
     text: `
       SELECT
         count(*) OVER()::integer AS total_count,
-        p.id, p.title, p.slug, p.excerpt, p.summary, p.cover_url, p.status, p.visibility, p.password_hint,
+        p.id, p.title, p.slug, p.excerpt, p.summary, COALESCE(NULLIF(m.display_url, ''), p.cover_url) AS cover_url, p.status, p.visibility, p.password_hint,
         p.is_featured, p.featured_order, p.allow_comment,
         p.reading_minutes, p.views_count, p.likes_count, p.comments_count, p.published_at,
         c.id AS category_id, c.name AS category_name, c.slug AS category_slug,
@@ -356,10 +368,11 @@ function postListSql({ keyword, category, tag, year, sort, limit, offset, featur
         COALESCE(json_agg(json_build_object('id', t.id, 'name', t.name, 'slug', t.slug) ORDER BY t.name) FILTER (WHERE t.id IS NOT NULL), '[]') AS tags
       FROM posts p
       LEFT JOIN categories c ON c.id = p.category_id
+      LEFT JOIN media_assets m ON m.url = p.cover_url
       LEFT JOIN post_tags pt ON pt.post_id = p.id
       LEFT JOIN tags t ON t.id = pt.tag_id
       WHERE ${where.join(" AND ")}
-      GROUP BY p.id, c.id
+      GROUP BY p.id, c.id, m.display_url
       ORDER BY ${orderBy}
       LIMIT $${params.length - 1} OFFSET $${params.length}
     `,
@@ -1073,6 +1086,36 @@ function contentTypeForFile(filePath) {
   return "application/octet-stream";
 }
 
+function uploadUrlFromStoragePath(storagePath) {
+  const relative = path.relative(uploadRoot, storagePath).split(path.sep).join("/");
+  return `/uploads/${relative}`;
+}
+
+async function createImageVariants(file, uploadDir, baseName, randomId) {
+  if (!["image/jpeg", "image/png", "image/webp"].includes(file.mimeType)) {
+    return { thumbnailUrl: "", displayUrl: "", width: null, height: null };
+  }
+  try {
+    const image = sharp(file.buffer, { failOn: "none" }).rotate();
+    const metadata = await image.metadata();
+    const thumbnailPath = path.join(uploadDir, `${baseName}-${randomId}-thumb.webp`);
+    const displayPath = path.join(uploadDir, `${baseName}-${randomId}-display.webp`);
+    await Promise.all([
+      image.clone().resize({ width: 480, height: 360, fit: "inside", withoutEnlargement: true }).webp({ quality: 72 }).toFile(thumbnailPath),
+      image.clone().resize({ width: 1400, height: 900, fit: "inside", withoutEnlargement: true }).webp({ quality: 78 }).toFile(displayPath),
+    ]);
+    return {
+      thumbnailUrl: uploadUrlFromStoragePath(thumbnailPath),
+      displayUrl: uploadUrlFromStoragePath(displayPath),
+      width: metadata.width ?? null,
+      height: metadata.height ?? null,
+    };
+  } catch (error) {
+    console.warn("image variant generation failed", error?.message || error);
+    return { thumbnailUrl: "", displayUrl: "", width: null, height: null };
+  }
+}
+
 async function serveUploadedFile(req, res, url) {
   const relative = decodeURIComponent(url.pathname.replace(/^\/uploads\//, ""));
   const absolute = path.resolve(uploadRoot, relative);
@@ -1232,14 +1275,16 @@ async function handlePublicPostDetail(req, res, id) {
   const result = await query(
     `
       SELECT
-        p.*, c.id AS category_id, c.name AS category_name, c.slug AS category_slug,
+        p.*, COALESCE(NULLIF(m.display_url, ''), p.cover_url) AS cover_url,
+        c.id AS category_id, c.name AS category_name, c.slug AS category_slug,
         COALESCE(json_agg(DISTINCT jsonb_build_object('id', t.id, 'name', t.name, 'slug', t.slug)) FILTER (WHERE t.id IS NOT NULL), '[]') AS tags
       FROM posts p
       LEFT JOIN categories c ON c.id = p.category_id
+      LEFT JOIN media_assets m ON m.url = p.cover_url
       LEFT JOIN post_tags pt ON pt.post_id = p.id
       LEFT JOIN tags t ON t.id = pt.tag_id
       WHERE p.id = $1 AND p.status = 'published' AND p.visibility IN ('public', 'password')
-      GROUP BY p.id, c.id
+      GROUP BY p.id, c.id, m.display_url
     `,
     [id],
   );
@@ -1268,7 +1313,7 @@ async function handlePublicRelatedPosts(req, res, id) {
         SELECT tag_id FROM post_tags WHERE post_id = $1
       )
       SELECT
-        p.id, p.title, p.slug, p.excerpt, p.summary, p.cover_url, p.status, p.visibility, p.password_hint,
+        p.id, p.title, p.slug, p.excerpt, p.summary, COALESCE(NULLIF(m.display_url, ''), p.cover_url) AS cover_url, p.status, p.visibility, p.password_hint,
         p.is_featured, p.allow_comment,
         p.reading_minutes, p.views_count, p.likes_count, p.comments_count, p.published_at,
         c.id AS category_id, c.name AS category_name, c.slug AS category_slug,
@@ -1277,13 +1322,14 @@ async function handlePublicRelatedPosts(req, res, id) {
         count(DISTINCT ct.tag_id)::integer AS tag_score
       FROM posts p
       LEFT JOIN categories c ON c.id = p.category_id
+      LEFT JOIN media_assets m ON m.url = p.cover_url
       LEFT JOIN post_tags pt ON pt.post_id = p.id
       LEFT JOIN tags t ON t.id = pt.tag_id
       LEFT JOIN current_tags ct ON ct.tag_id = pt.tag_id
       WHERE p.id <> $1
         AND p.status = 'published'
         AND p.visibility IN ('public', 'password')
-      GROUP BY p.id, c.id
+      GROUP BY p.id, c.id, m.display_url
       HAVING CASE WHEN p.category_id = (SELECT category_id FROM current_post) THEN 1 ELSE 0 END > 0
         OR count(DISTINCT ct.tag_id) > 0
       ORDER BY tag_score DESC, category_score DESC, p.published_at DESC NULLS LAST
@@ -1890,17 +1936,18 @@ async function handleAdminPosts(req, res, url) {
     `
       SELECT
         count(*) OVER()::integer AS total_count,
-        p.id, p.title, p.slug, p.excerpt, p.summary, p.cover_url, p.status, p.visibility, p.password_hint,
+        p.id, p.title, p.slug, p.excerpt, p.summary, COALESCE(NULLIF(m.display_url, ''), p.cover_url) AS cover_url, p.status, p.visibility, p.password_hint,
         p.access_password_hash, p.is_featured, p.featured_order, p.allow_comment,
         p.reading_minutes, p.views_count, p.likes_count, p.comments_count, p.published_at,
         c.id AS category_id, c.name AS category_name, c.slug AS category_slug,
         COALESCE(json_agg(json_build_object('id', t.id, 'name', t.name, 'slug', t.slug) ORDER BY t.name) FILTER (WHERE t.id IS NOT NULL), '[]') AS tags
       FROM posts p
       LEFT JOIN categories c ON c.id = p.category_id
+      LEFT JOIN media_assets m ON m.url = p.cover_url
       LEFT JOIN post_tags pt ON pt.post_id = p.id
       LEFT JOIN tags t ON t.id = pt.tag_id
       ${where.length ? `WHERE ${where.join(" AND ")}` : ""}
-      GROUP BY p.id, c.id
+      GROUP BY p.id, c.id, m.display_url
       ORDER BY p.is_featured DESC, p.featured_order ASC, p.updated_at DESC
       LIMIT $${params.length - 1} OFFSET $${params.length}
     `,
@@ -2295,7 +2342,7 @@ async function handleAdminMedia(req, res, url) {
   params.push(pageSize, offset);
   const existing = await query(
     `SELECT count(*) OVER()::integer AS total_count,
-            id, file_name, original_name, mime_type, file_size, url, width, height, alt_text, created_at
+            id, file_name, original_name, mime_type, file_size, url, thumbnail_url, display_url, width, height, alt_text, created_at
      FROM media_assets
      ${where.length ? `WHERE ${where.join(" AND ")}` : ""}
      ORDER BY created_at DESC
@@ -2332,12 +2379,26 @@ async function handleAdminUploadMedia(req, res) {
   await writeFile(storagePath, file.buffer);
   const storageName = [year, month, day, fileName].join("/");
   const url = `/uploads/${storageName}`;
+  const variants = isImage ? await createImageVariants(file, uploadDir, baseName, randomId) : { thumbnailUrl: "", displayUrl: "", width: null, height: null };
 
   const result = await query(
-    `INSERT INTO media_assets(file_name, original_name, mime_type, file_size, url, storage_path, alt_text, uploaded_by)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
-     RETURNING id, file_name, original_name, mime_type, file_size, url, storage_path, width, height, alt_text, created_at`,
-    [storageName, file.originalName, file.mimeType, file.buffer.length, url, storagePath, fields.altText || file.originalName, req.adminUser?.id ?? null],
+    `INSERT INTO media_assets(file_name, original_name, mime_type, file_size, url, thumbnail_url, display_url, storage_path, width, height, alt_text, uploaded_by)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+     RETURNING id, file_name, original_name, mime_type, file_size, url, thumbnail_url, display_url, storage_path, width, height, alt_text, created_at`,
+    [
+      storageName,
+      file.originalName,
+      file.mimeType,
+      file.buffer.length,
+      url,
+      variants.thumbnailUrl,
+      variants.displayUrl,
+      storagePath,
+      variants.width,
+      variants.height,
+      fields.altText || file.originalName,
+      req.adminUser?.id ?? null,
+    ],
   );
 
   sendJson(res, 201, { item: result.rows[0], ok: true }, corsHeaders(req));
@@ -2350,7 +2411,7 @@ async function handleAdminUpdateMedia(req, res, id) {
     `UPDATE media_assets
      SET alt_text = $1
      WHERE id = $2
-     RETURNING id, file_name, original_name, mime_type, file_size, url, storage_path, width, height, alt_text, created_at`,
+     RETURNING id, file_name, original_name, mime_type, file_size, url, thumbnail_url, display_url, storage_path, width, height, alt_text, created_at`,
     [altText, id],
   );
   if (!result.rowCount) return sendJson(res, 404, { error: "media_not_found", message: "媒体文件不存在" }, corsHeaders(req));
@@ -2363,7 +2424,7 @@ function escapeLikePattern(value) {
 
 async function handleAdminDeleteMedia(req, res, id) {
   const media = await query(
-    `SELECT id, url, storage_path
+    `SELECT id, url, thumbnail_url, display_url, storage_path
      FROM media_assets
      WHERE id = $1`,
     [id],
@@ -2389,6 +2450,8 @@ async function handleAdminDeleteMedia(req, res, id) {
 
   await query("DELETE FROM media_assets WHERE id = $1", [id]);
   await removeUploadedFile(media.rows[0].storage_path);
+  await removeUploadedUrl(media.rows[0].thumbnail_url);
+  await removeUploadedUrl(media.rows[0].display_url);
   sendJson(res, 200, { id, ok: true, deleted: true }, corsHeaders(req));
 }
 

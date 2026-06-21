@@ -1422,7 +1422,7 @@ function SiteSettingsPage() {
 
   function selectSiteMedia(item: AdminMediaItem) {
     if (!mediaPickerTarget) return;
-    updateField(mediaPickerTarget, item.url);
+    updateField(mediaPickerTarget, mediaDisplayUrl(item));
     setMediaPickerTarget(null);
     setNotice(`已选择${siteMediaTargetLabel(mediaPickerTarget)}：${mediaDisplayName(item)}`);
   }
@@ -1440,7 +1440,7 @@ function SiteSettingsPage() {
     setNotice("");
     try {
       const result = await api.uploadMedia(file, file.name);
-      updateField(uploadingTarget, result.item.url);
+      updateField(uploadingTarget, mediaDisplayUrl(result.item));
       setNotice(`${siteMediaTargetLabel(uploadingTarget)}已上传并填入，保存后前台生效。`);
     } catch (error) {
       setNotice(getApiErrorMessage(error));
@@ -1556,7 +1556,7 @@ function SiteSettingsPage() {
                 <div className="media-picker-grid">
                   {siteMediaItems.map((item) => (
                     <button type="button" key={item.id} onClick={() => selectSiteMedia(item)}>
-                      <img src={item.url} alt={item.altText || item.originalName} />
+                      <img src={mediaPreviewUrl(item)} alt={item.altText || item.originalName} loading="lazy" />
                       <span>{mediaDisplayName(item)}</span>
                     </button>
                   ))}
@@ -1811,7 +1811,7 @@ function HomeSettingsPage() {
     setConfig((current) => ({
       ...current,
       coverType: isVideo ? "video" : "image",
-      coverUrl: isVideo ? current.coverUrl : item.url,
+      coverUrl: isVideo ? current.coverUrl : mediaDisplayUrl(item),
       coverVideoUrl: isVideo ? item.url : current.coverVideoUrl,
       coverPositionX: 50,
       coverPositionY: 50,
@@ -1984,7 +1984,7 @@ function HomeSettingsPage() {
                     <button type="button" key={item.id} onClick={() => selectHomeMedia(item)}>
                       {item.mimeType.startsWith("video/")
                         ? <video src={item.url} muted playsInline />
-                        : <img src={item.url} alt={item.altText || item.originalName} />}
+                        : <img src={mediaPreviewUrl(item)} alt={item.altText || item.originalName} loading="lazy" />}
                       <span>{item.mimeType.startsWith("video/") ? "视频 · " : ""}{mediaDisplayName(item)}</span>
                     </button>
                   ))}
@@ -2124,11 +2124,11 @@ function AboutSettingsPage() {
 
   function selectAboutMedia(item: AdminMediaItem) {
     if (mediaTarget === "portrait") {
-      updateField("portraitUrl", item.url);
+      updateField("portraitUrl", mediaDisplayUrl(item));
     } else if (mediaTarget === "wechatQr") {
-      updateField("wechatQrUrl", item.url);
+      updateField("wechatQrUrl", mediaDisplayUrl(item));
     } else if (mediaTarget === "project") {
-      updateProject(mediaProjectIndex, { imageUrl: item.url });
+      updateProject(mediaProjectIndex, { imageUrl: mediaDisplayUrl(item) });
     }
     setMediaTarget(null);
     setNotice(`已选择图片：${item.originalName}`);
@@ -2251,7 +2251,7 @@ function AboutSettingsPage() {
               <header><b>选择图片</b><button type="button" onClick={() => setMediaTarget(null)}>关闭</button></header>
               {mediaLoading ? <p className="soft-text">正在读取媒体库...</p> : aboutMediaItems.length ? (
                 <div className="media-picker-grid">
-                  {aboutMediaItems.map((item) => <button type="button" key={item.id} onClick={() => selectAboutMedia(item)}><img src={item.url} alt={item.altText || item.originalName} /><span>{item.originalName}</span></button>)}
+                  {aboutMediaItems.map((item) => <button type="button" key={item.id} onClick={() => selectAboutMedia(item)}><img src={mediaPreviewUrl(item)} alt={item.altText || item.originalName} loading="lazy" /><span>{item.originalName}</span></button>)}
                 </div>
               ) : <p className="soft-text">媒体库暂无图片</p>}
             </div>
@@ -2668,6 +2668,14 @@ function cleanMediaText(value = "") {
 
 function mediaDisplayName(item: AdminMediaItem) {
   return cleanMediaText(item.altText ?? "") || cleanMediaText(item.originalName) || cleanMediaText(mediaUrlFileName(item.url)) || `媒体 #${item.id}`;
+}
+
+function mediaPreviewUrl(item: AdminMediaItem) {
+  return item.thumbnailUrl || item.displayUrl || item.url;
+}
+
+function mediaDisplayUrl(item: AdminMediaItem) {
+  return item.displayUrl || item.thumbnailUrl || item.url;
 }
 
 function siteMediaTargetLabel(target: "logoUrl" | "faviconUrl" | "defaultOgImageUrl") {
@@ -3602,7 +3610,7 @@ function AdminPlaceholder({ page }: { page: string }) {
               </div>
             </div>
           )}
-          {loading ? <p className="soft-text">正在读取数据...</p> : rows.length ? rows.map((row) => <div className={`admin-row ${row.href ? "clickable" : ""} ${row.media ? "media-row" : ""} ${selectedKeys.includes(row.key) ? "selected" : ""}`} key={row.key} onClick={() => row.href && go(row.href)}>{batchMode && <label className="row-check" onClick={(event) => event.stopPropagation()}><input type="checkbox" checked={selectedKeys.includes(row.key)} onChange={(event) => setRowSelected(row.key, event.target.checked)} /><span className="visually-hidden">选择 {row.text}</span></label>}{row.media && <button className={`media-thumb ${isVideoMedia(row.media) ? "video-thumb" : ""}`} type="button" style={isVideoMedia(row.media) ? undefined : { backgroundImage: `url(${row.media.url})` }} onClick={(event) => { event.stopPropagation(); setPreviewMedia(row.media!); }} aria-label={`查看 ${row.text}`}>{isVideoMedia(row.media) && <><video src={row.media.url} muted preload="metadata" /><span>视频</span></>}</button>}{row.media ? <span className="media-text"><b>{row.text}</b><small>{mediaMetaText(row.media)}</small></span> : <span>{row.text}</span>}<div className="admin-row-actions"><small>{row.status}</small>{row.actions?.map((action) => <button key={action.label} title={action.title} onClick={(event) => { event.stopPropagation(); if (action.href) go(action.href); action.run?.(); }}>{action.label}</button>)}{row.review && row.review.status !== "approved" && <button onClick={(event) => { event.stopPropagation(); reviewRow(row.review!.kind, row.review!.id, "approved"); }}>通过</button>}{row.review && row.review.status !== "rejected" && <button onClick={(event) => { event.stopPropagation(); reviewRow(row.review!.kind, row.review!.id, "rejected"); }}>驳回</button>}</div></div>) : <p className="soft-text">{emptyText}</p>}
+          {loading ? <p className="soft-text">正在读取数据...</p> : rows.length ? rows.map((row) => <div className={`admin-row ${row.href ? "clickable" : ""} ${row.media ? "media-row" : ""} ${selectedKeys.includes(row.key) ? "selected" : ""}`} key={row.key} onClick={() => row.href && go(row.href)}>{batchMode && <label className="row-check" onClick={(event) => event.stopPropagation()}><input type="checkbox" checked={selectedKeys.includes(row.key)} onChange={(event) => setRowSelected(row.key, event.target.checked)} /><span className="visually-hidden">选择 {row.text}</span></label>}{row.media && <button className={`media-thumb ${isVideoMedia(row.media) ? "video-thumb" : ""}`} type="button" style={isVideoMedia(row.media) ? undefined : { backgroundImage: `url(${mediaPreviewUrl(row.media)})` }} onClick={(event) => { event.stopPropagation(); setPreviewMedia(row.media!); }} aria-label={`查看 ${row.text}`}>{isVideoMedia(row.media) && <><video src={row.media.url} muted preload="metadata" /><span>视频</span></>}</button>}{row.media ? <span className="media-text"><b>{row.text}</b><small>{mediaMetaText(row.media)}</small></span> : <span>{row.text}</span>}<div className="admin-row-actions"><small>{row.status}</small>{row.actions?.map((action) => <button key={action.label} title={action.title} onClick={(event) => { event.stopPropagation(); if (action.href) go(action.href); action.run?.(); }}>{action.label}</button>)}{row.review && row.review.status !== "approved" && <button onClick={(event) => { event.stopPropagation(); reviewRow(row.review!.kind, row.review!.id, "approved"); }}>通过</button>}{row.review && row.review.status !== "rejected" && <button onClick={(event) => { event.stopPropagation(); reviewRow(row.review!.kind, row.review!.id, "rejected"); }}>驳回</button>}</div></div>) : <p className="soft-text">{emptyText}</p>}
           {(page === "posts" || page === "drafts" || page === "trash") && !loading && (
             <div className="admin-pagination">
               <button disabled={postPage <= 1} onClick={() => { setPostPage((value) => Math.max(1, value - 1)); setSelectedKeys([]); }}>上一页</button>
@@ -4246,7 +4254,7 @@ function EditorPage() {
     try {
       setNotice("正在上传封面...");
       const result = await api.uploadMedia(file, file.name);
-      setCoverUrl(result.item.url);
+      setCoverUrl(mediaDisplayUrl(result.item));
       setCoverName(result.item.originalName);
       setNotice(`封面已上传并写入媒体库：${result.item.originalName}`);
       emitAdminDataChanged();
@@ -4302,7 +4310,7 @@ function EditorPage() {
     if (mediaPickerTarget === "body") {
       insertMarkdownAtCursor(`![${item.altText || item.originalName}](${item.url})`, `已从媒体库插入图片：${item.originalName}`);
     } else {
-      setCoverUrl(item.url);
+      setCoverUrl(mediaDisplayUrl(item));
       setCoverName(item.originalName);
       setNotice(`已从媒体库选择封面：${item.originalName}`);
     }
@@ -4757,7 +4765,7 @@ function EditorPage() {
               <header><b>{mediaPickerTarget === "cover" ? "选择封面图" : "插入正文图片"}</b><button type="button" onClick={() => setMediaPickerOpen(false)}>关闭</button></header>
               {mediaPickerLoading ? <p className="soft-text">正在读取媒体库...</p> : editorMediaItems.length ? (
                 <div className="media-picker-grid">
-                  {editorMediaItems.map((item) => <button key={item.id} type="button" onClick={() => chooseEditorMedia(item)}><img src={item.url} alt={item.altText || item.originalName} /><span>{item.originalName}</span></button>)}
+                  {editorMediaItems.map((item) => <button key={item.id} type="button" onClick={() => chooseEditorMedia(item)}><img src={mediaPreviewUrl(item)} alt={item.altText || item.originalName} loading="lazy" /><span>{item.originalName}</span></button>)}
                 </div>
               ) : <p className="soft-text">媒体库暂无可用图片。</p>}
             </div>

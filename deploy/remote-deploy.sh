@@ -56,4 +56,8 @@ if ! docker compose -f deploy/docker-compose.prod.yml exec -T app node backend/s
   echo "seed failed or already partially applied; inspect logs if admin login is unavailable"
 fi
 
+if ! docker compose -f deploy/docker-compose.prod.yml exec -T app node backend/scripts/generate-media-variants.js; then
+  echo "media variant generation failed; uploaded originals are still available"
+fi
+
 docker compose -f deploy/docker-compose.prod.yml ps
