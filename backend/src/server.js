@@ -3193,6 +3193,8 @@ await runScheduledPostPublisher();
 warnRuntimeConfig();
 
 const server = http.createServer(handleRequest);
+server.requestTimeout = 10 * 60 * 1000;
+server.headersTimeout = 10 * 60 * 1000 + 5000;
 const scheduledPublisherTimer = setInterval(runScheduledPostPublisher, 60 * 1000);
 
 server.listen(config.port, config.host, () => {

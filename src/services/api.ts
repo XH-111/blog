@@ -165,7 +165,7 @@ async function requestStrictJson<T>(path: string, init?: ApiRequestInit): Promis
   } catch (error) {
     if (error instanceof ApiError) throw error;
     if (isAbortError(error)) {
-      throw new ApiError("请求超时或被中断，请稍后重试");
+      throw new ApiError(path === "/admin/media" ? "媒体上传超时或被中断，请检查网络后重试；较大的视频可能需要等待数分钟。" : "请求超时或被中断，请稍后重试");
     }
     throw new ApiError("无法连接后端服务，请确认本地后端已启动");
   } finally {
@@ -1288,7 +1288,8 @@ export const api = {
     const formData = new FormData();
     formData.set("file", file);
     if (altText) formData.set("altText", altText);
-    const data = await requestStrictJson<{ item?: BackendMedia }>("/admin/media", { method: "POST", body: formData });
+    const uploadTimeoutMs = Math.max(120000, Math.min(600000, Math.ceil(file.size / (64 * 1024)) * 1000));
+    const data = await requestStrictJson<{ item?: BackendMedia }>("/admin/media", { method: "POST", body: formData, timeoutMs: uploadTimeoutMs });
     if (!data.item) throw new ApiError("后端没有返回已上传的媒体文件");
     return { item: mapBackendMedia(data.item), source: "api" as const };
   },
