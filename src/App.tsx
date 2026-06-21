@@ -1302,17 +1302,56 @@ function PostsPage() {
   );
 }
 
+const ABOUT_PAGE_CACHE_KEY = "blog-public-about-cache";
+
+function readCachedAboutSettings() {
+  try {
+    const cached = window.sessionStorage.getItem(ABOUT_PAGE_CACHE_KEY);
+    if (!cached) return null;
+    const parsed = JSON.parse(cached) as Partial<AboutPageSettings>;
+    return {
+      ...defaultAboutSettings,
+      ...parsed,
+      skills: Array.isArray(parsed.skills) ? parsed.skills : defaultAboutSettings.skills,
+      projects: Array.isArray(parsed.projects) ? parsed.projects : defaultAboutSettings.projects,
+      writingTopics: Array.isArray(parsed.writingTopics) ? parsed.writingTopics : defaultAboutSettings.writingTopics,
+      timeline: Array.isArray(parsed.timeline) ? parsed.timeline : defaultAboutSettings.timeline,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function cacheAboutSettings(item: AboutPageSettings) {
+  try {
+    window.sessionStorage.setItem(ABOUT_PAGE_CACHE_KEY, JSON.stringify(item));
+  } catch {
+    // Ignore storage failures; the fresh API result is already rendered.
+  }
+}
+
 function AboutPage() {
-  const [aboutConfig, setAboutConfig] = useState<AboutPageSettings>(defaultAboutSettings);
+  const cachedAbout = readCachedAboutSettings();
+  const [aboutConfig, setAboutConfig] = useState<AboutPageSettings | null>(cachedAbout);
   const [aboutUsingMock, setAboutUsingMock] = useState(false);
+  const [aboutLoading, setAboutLoading] = useState(!cachedAbout);
   const [wechatQrOpen, setWechatQrOpen] = useState(false);
 
   useEffect(() => {
     let alive = true;
     api.getPublicAbout().then((aboutResult) => {
       if (!alive) return;
-      setAboutConfig(aboutResult.item);
-      setAboutUsingMock(aboutResult.source === "mock");
+      if (aboutResult.source !== "mock") {
+        setAboutConfig(aboutResult.item);
+        cacheAboutSettings(aboutResult.item);
+      } else if (!cachedAbout) {
+        setAboutConfig(aboutResult.item);
+      }
+      setAboutUsingMock(aboutResult.source === "mock" && !cachedAbout);
+      setAboutLoading(false);
+    }).catch(() => {
+      if (!alive) return;
+      setAboutLoading(false);
     });
     return () => {
       alive = false;
@@ -1324,8 +1363,22 @@ function AboutPage() {
     if (url.startsWith("/")) go(url);
     else window.open(url, "_blank", "noreferrer");
   };
-  const aboutSkills = aboutConfig.skills.filter((item) => item.trim() && item.trim() !== "…");
-  const portrait = useSafeImageUrl(aboutConfig.portraitUrl, defaultAboutSettings.portraitUrl);
+  const aboutSkills = aboutConfig?.skills.filter((item) => item.trim() && item.trim() !== "…") ?? [];
+  const portrait = useSafeImageUrl(aboutConfig?.portraitUrl, defaultAboutSettings.portraitUrl);
+
+  if (!aboutConfig) {
+    return (
+      <>
+        <PublicHeader active="/about" />
+        <main className="page about-layout">
+          <section className="about-main card about-loading">
+            <p className="soft-text">{aboutLoading ? "正在读取关于页..." : "关于页暂时无法加载，请稍后刷新。"}</p>
+          </section>
+        </main>
+        <PublicFooter />
+      </>
+    );
+  }
 
   return (
     <>
