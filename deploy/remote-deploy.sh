@@ -50,7 +50,7 @@ if systemctl is-active --quiet apache2 2>/dev/null; then
   systemctl disable apache2 || true
 fi
 
-docker compose -f deploy/docker-compose.prod.yml up -d --build
+docker compose -f deploy/docker-compose.prod.yml up -d --build --force-recreate app caddy
 
 if ! docker compose -f deploy/docker-compose.prod.yml exec -T app node backend/scripts/seed.js; then
   echo "seed failed or already partially applied; inspect logs if admin login is unavailable"
