@@ -124,14 +124,17 @@ function isAbortError(error: unknown) {
   return false;
 }
 
-async function requestJson<T>(path: string, fallback: T, init?: RequestInit): Promise<T> {
+type ApiRequestInit = RequestInit & { timeoutMs?: number };
+
+async function requestJson<T>(path: string, fallback: T, init?: ApiRequestInit): Promise<T> {
+  const { timeoutMs = 5000, ...requestInit } = init ?? {};
   const controller = new AbortController();
-  const timer = window.setTimeout(() => controller.abort(), 1200);
+  const timer = window.setTimeout(() => controller.abort(), timeoutMs);
   try {
     const response = await fetch(`${API_BASE}${path}`, {
-      ...init,
+      ...requestInit,
       signal: controller.signal,
-      headers: requestHeaders(path, init),
+      headers: requestHeaders(path, requestInit),
     });
     if (!response.ok) return fallback;
     return (await response.json()) as T;
@@ -141,8 +144,6 @@ async function requestJson<T>(path: string, fallback: T, init?: RequestInit): Pr
     window.clearTimeout(timer);
   }
 }
-
-type ApiRequestInit = RequestInit & { timeoutMs?: number };
 
 async function requestStrictJson<T>(path: string, init?: ApiRequestInit): Promise<T> {
   const { timeoutMs = 5000, ...requestInit } = init ?? {};
@@ -1157,11 +1158,11 @@ export const api = {
     return { item: normalizeSiteSettings(data.item), source: data.source === "mock" ? "mock" as const : "api" as const };
   },
   getPublicHome: async () => {
-    const data = await requestJson<{ item?: Partial<HomePageSettings>; source?: "mock" }>("/public/home", { item: defaultHomePageSettings, source: "mock" });
+    const data = await requestJson<{ item?: Partial<HomePageSettings>; source?: "mock" }>("/public/home", { item: defaultHomePageSettings, source: "mock" }, { timeoutMs: 10000 });
     return { item: normalizeHomePageSettings(data.item), source: data.source === "mock" ? "mock" as const : "api" as const };
   },
   getPublicAbout: async () => {
-    const data = await requestJson<{ item?: Partial<AboutPageSettings>; source?: "mock" }>("/public/about", { item: defaultAboutPageSettings, source: "mock" });
+    const data = await requestJson<{ item?: Partial<AboutPageSettings>; source?: "mock" }>("/public/about", { item: defaultAboutPageSettings, source: "mock" }, { timeoutMs: 10000 });
     return { item: normalizeAboutPageSettings(data.item), source: data.source === "mock" ? "mock" as const : "api" as const };
   },
   getArticle: async (id: number) => {

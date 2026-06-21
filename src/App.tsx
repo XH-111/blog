@@ -1998,12 +1998,20 @@ function HomeSettingsPage() {
   );
 }
 
+type AboutTimelineEditorItem = AboutPageSettings["timeline"][number] & { editorKey: string };
+
+let aboutTimelineEditorKeySeed = 0;
+
+function withAboutTimelineKeys(items: AboutPageSettings["timeline"]): AboutTimelineEditorItem[] {
+  return items.map((item) => ({ ...item, editorKey: `timeline-${aboutTimelineEditorKeySeed += 1}` }));
+}
+
 function AboutSettingsPage() {
   const [config, setConfig] = useState<AboutPageSettings>(defaultAboutSettings);
   const [skillsText, setSkillsText] = useState(listToText(defaultAboutSettings.skills));
   const [projects, setProjects] = useState<AboutPageSettings["projects"]>(defaultAboutSettings.projects);
   const [topicsText, setTopicsText] = useState(topicsToText(defaultAboutSettings.writingTopics));
-  const [timeline, setTimeline] = useState<AboutPageSettings["timeline"]>(defaultAboutSettings.timeline);
+  const [timeline, setTimeline] = useState<AboutTimelineEditorItem[]>(() => withAboutTimelineKeys(defaultAboutSettings.timeline));
   const [aboutMediaItems, setAboutMediaItems] = useState<AdminMediaItem[]>([]);
   const [mediaTarget, setMediaTarget] = useState<"portrait" | "project" | "wechatQr" | null>(null);
   const [mediaProjectIndex, setMediaProjectIndex] = useState(0);
@@ -2020,7 +2028,7 @@ function AboutSettingsPage() {
         setSkillsText(listToText(result.item.skills));
         setProjects(result.item.projects);
         setTopicsText(topicsToText(result.item.writingTopics));
-        setTimeline(result.item.timeline);
+        setTimeline(withAboutTimelineKeys(result.item.timeline));
       })
       .catch((error) => {
         if (!alive) return;
@@ -2063,7 +2071,7 @@ function AboutSettingsPage() {
   }
 
   function addTimelineItem() {
-    setTimeline((items) => [...items, { year: "", title: "", description: "" }]);
+    setTimeline((items) => [...items, { year: "", title: "", description: "", editorKey: `timeline-${aboutTimelineEditorKeySeed += 1}` }]);
   }
 
   function removeTimelineItem(index: number) {
@@ -2185,7 +2193,7 @@ function AboutSettingsPage() {
                 <button type="button" onClick={addTimelineItem}>新增时间线</button>
               </header>
               {timeline.map((item, index) => (
-                <article key={`${item.year}-${item.title}-${index}`}>
+                <article key={item.editorKey}>
                   <div className="project-card-head">
                     <b>经历 {index + 1}</b>
                     <div className="entry-card-actions">
