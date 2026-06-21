@@ -9,8 +9,8 @@ hechenxu.cn, www.hechenxu.cn {
 		reverse_proxy app:8000
 	}
 
-	handle /uploads/* {
-		root * /srv
+	handle_path /uploads/* {
+		root * /uploads
 		header Cache-Control "public, max-age=31536000, immutable"
 		file_server
 	}
