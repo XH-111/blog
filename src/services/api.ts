@@ -511,9 +511,22 @@ export type AdminAiStatus = {
   model?: string | null;
   responsesModel?: string | null;
   webSearchEnabled?: boolean;
+  keySource?: "database" | "env" | "none" | string;
+  maskedApiKey?: string;
   tasksTableReady: boolean;
   tasksCount: number;
   message: string;
+};
+
+export type AdminAiSettings = {
+  hasApiKey: boolean;
+  maskedApiKey: string;
+  keySource: "database" | "env" | "none" | string;
+  qwenModel: string;
+  qwenResponsesModel: string;
+  webSearchEnabled: boolean;
+  encryptedAtRest?: boolean;
+  encryptionAvailable?: boolean;
 };
 
 export type AdminAiTool = "summary" | "polish" | "comment";
@@ -1537,10 +1550,52 @@ export const api = {
       model: data.model ?? null,
       responsesModel: data.responsesModel ?? null,
       webSearchEnabled: Boolean(data.webSearchEnabled),
+      keySource: data.keySource ?? "none",
+      maskedApiKey: data.maskedApiKey ?? "",
       tasksTableReady: Boolean(data.tasksTableReady),
       tasksCount: Number(data.tasksCount ?? 0),
       message: data.message ?? "AI 模型服务尚未接入；当前仅支持前端模拟预览。",
     };
+  },
+  getAdminAiSettings: async (): Promise<AdminAiSettings> => {
+    const data = await requestStrictJson<{ item?: Partial<AdminAiSettings> }>("/admin/ai/settings");
+    const item = data.item ?? {};
+    return {
+      hasApiKey: Boolean(item.hasApiKey),
+      maskedApiKey: item.maskedApiKey ?? "",
+      keySource: item.keySource ?? "none",
+      qwenModel: item.qwenModel || "qwen-plus",
+      qwenResponsesModel: item.qwenResponsesModel || "qwen-plus",
+      webSearchEnabled: Boolean(item.webSearchEnabled),
+      encryptedAtRest: Boolean(item.encryptedAtRest),
+      encryptionAvailable: Boolean(item.encryptionAvailable),
+    };
+  },
+  updateAdminAiSettings: async (payload: { qwenApiKey?: string; clearApiKey?: boolean; qwenModel: string; qwenResponsesModel: string; webSearchEnabled: boolean }): Promise<{ item: AdminAiSettings }> => {
+    const data = await requestStrictJson<{ ok?: boolean; item?: Partial<AdminAiSettings> }>("/admin/ai/settings", {
+      method: "PUT",
+      body: JSON.stringify(payload),
+    });
+    const item = data.item ?? {};
+    return {
+      item: {
+        hasApiKey: Boolean(item.hasApiKey),
+        maskedApiKey: item.maskedApiKey ?? "",
+        keySource: item.keySource ?? "none",
+        qwenModel: item.qwenModel || payload.qwenModel || "qwen-plus",
+        qwenResponsesModel: item.qwenResponsesModel || payload.qwenResponsesModel || "qwen-plus",
+        webSearchEnabled: Boolean(item.webSearchEnabled),
+        encryptedAtRest: Boolean(item.encryptedAtRest),
+        encryptionAvailable: Boolean(item.encryptionAvailable),
+      },
+    };
+  },
+  testAdminAiSettings: async (): Promise<{ ok: boolean; message: string; model?: string }> => {
+    const data = await requestStrictJson<{ ok?: boolean; message?: string; model?: string }>("/admin/ai/test", {
+      method: "POST",
+      timeoutMs: 45000,
+    });
+    return { ok: Boolean(data.ok), message: data.message || "AI 配置测试通过", model: data.model };
   },
   getAiTasks: async (limit = 20): Promise<{ items: AdminAiTaskItem[] }> => {
     const data = await requestStrictJson<{ items?: AdminAiTaskItem[] }>(`/admin/ai/tasks?limit=${encodeURIComponent(String(limit))}`);

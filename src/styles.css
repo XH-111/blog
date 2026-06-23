@@ -832,6 +832,15 @@ pre button { position: absolute; right: 12px; top: 10px; color: #fff; border: 1p
 .import-preview-list small { color: var(--muted); line-height: 1.45; }
 .import-preview-list p { margin: 0; color: #a34000; font-size: 13px; line-height: 1.5; }
 .security-config { display: grid; grid-template-columns: minmax(360px, .8fr) minmax(360px, 1fr); gap: 18px; align-items: start; }
+.ai-settings-config { display: grid; grid-template-columns: minmax(360px, .9fr) minmax(360px, 1fr); gap: 18px; align-items: start; }
+.ai-key-status { display: grid; gap: 6px; padding: 12px; border: 1px solid #e6eef3; border-radius: 8px; background: #fff; }
+.ai-key-status span { width: fit-content; padding: 3px 9px; border-radius: 999px; font-size: 12px; font-weight: 900; }
+.ai-key-status span.ok { color: #04756f; background: #dff8f4; }
+.ai-key-status span.warn { color: #a35b00; background: #fff1d8; }
+.ai-key-status b { color: #142235; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 15px; }
+.ai-key-status small { color: #65758a; line-height: 1.5; }
+.ai-clear-key, .ai-settings-switch { align-items: center; gap: 8px; color: #33475f; font-weight: 800; }
+.ai-clear-key input, .ai-settings-switch input { width: 18px; height: 18px; min-height: 18px; accent-color: var(--teal); }
 .security-form label { display: grid; gap: 8px; color: #314359; font-weight: 800; }
 .security-form input { min-height: 40px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 7px; color: #172033; background: #fff; }
 .security-form .primary { min-height: 40px; border-radius: 7px; color: #fff; background: var(--teal); font-weight: 900; }
@@ -970,7 +979,7 @@ pre button { position: absolute; right: 12px; top: 10px; color: #fff; border: 1p
   .admin-content, .admin-stats { display: block; }
   .editor-split { grid-template-columns: 1fr; }
   .editor-actions { position: static; margin: 12px 0; }
-  .about-config, .home-config, .import-config, .security-config, .settings-grid, .project-editor article, .timeline-editor article, .home-entry-editor article, .project-form-grid, .site-preview-grid, .site-share-preview { grid-template-columns: 1fr; }
+  .about-config, .home-config, .import-config, .security-config, .ai-settings-config, .settings-grid, .project-editor article, .timeline-editor article, .home-entry-editor article, .project-form-grid, .site-preview-grid, .site-share-preview { grid-template-columns: 1fr; }
   .inline-picker { grid-template-columns: 1fr; }
   .inline-picker button { min-height: 38px; }
   .media-filter-bar, .moderation-filter-bar { grid-template-columns: 1fr; }

@@ -30,6 +30,7 @@ export const config = {
   databaseUrl: process.env.DATABASE_URL ?? "postgres://blog:blog123456@127.0.0.1:5432/blog_dev",
   adminDefaultPassword: process.env.ADMIN_DEFAULT_PASSWORD ?? "password",
   adminSessionDays: Number(process.env.ADMIN_SESSION_DAYS ?? 7),
+  settingsSecret: process.env.SETTINGS_SECRET ?? "",
   qwenApiKey: process.env.DASHSCOPE_API_KEY ?? process.env.QWEN_API_KEY ?? "",
   qwenBaseUrl: process.env.QWEN_BASE_URL ?? "https://dashscope.aliyuncs.com/compatible-mode/v1",
   qwenModel: process.env.QWEN_MODEL ?? "qwen-plus",

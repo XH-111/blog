@@ -1,7 +1,7 @@
 ﻿import { ChangeEvent, FormEvent, ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { api, getApiErrorMessage } from "./services/api";
 import type { ClipboardEvent, PointerEvent, WheelEvent } from "react";
-import type { AboutPageSettings, AdminAiReviewFocus, AdminAiStatus, AdminAiTaskItem, AdminAiTool, AdminCategoryItem, AdminCommentItem, AdminDashboardData, AdminMediaItem, AdminMessageItem, AdminPostListItem, AdminPostVersionItem, AdminSearchItem, AdminTagItem, HomeEntryCardSetting, HomePageSettings, ImportPreview, PublicCommentItem, PublicSiteStats, SiteSettings } from "./services/api";
+import type { AboutPageSettings, AdminAiReviewFocus, AdminAiSettings, AdminAiStatus, AdminAiTaskItem, AdminAiTool, AdminCategoryItem, AdminCommentItem, AdminDashboardData, AdminMediaItem, AdminMessageItem, AdminPostListItem, AdminPostVersionItem, AdminSearchItem, AdminTagItem, HomeEntryCardSetting, HomePageSettings, ImportPreview, PublicCommentItem, PublicSiteStats, SiteSettings } from "./services/api";
 import type { Article, Message } from "./types";
 
 const nav = [
@@ -2638,6 +2638,134 @@ function AccountSecurityPage() {
   );
 }
 
+const defaultAiSettings: AdminAiSettings = {
+  hasApiKey: false,
+  maskedApiKey: "",
+  keySource: "none",
+  qwenModel: "qwen-plus",
+  qwenResponsesModel: "qwen-plus",
+  webSearchEnabled: false,
+  encryptedAtRest: false,
+  encryptionAvailable: false,
+};
+
+function AiSettingsPage() {
+  const [settings, setSettings] = useState<AdminAiSettings>(defaultAiSettings);
+  const [apiKey, setApiKey] = useState("");
+  const [showKey, setShowKey] = useState(false);
+  const [clearApiKey, setClearApiKey] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [testing, setTesting] = useState(false);
+  const [notice, setNotice] = useState("");
+
+  useEffect(() => {
+    let alive = true;
+    api.getAdminAiSettings()
+      .then((result) => {
+        if (alive) setSettings(result);
+      })
+      .catch((error) => {
+        if (!alive) return;
+        setNotice(getApiErrorMessage(error));
+        if (getApiErrorMessage(error).includes("登录")) api.logout();
+      });
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  function updateField<K extends keyof AdminAiSettings>(key: K, value: AdminAiSettings[K]) {
+    setSettings((current) => ({ ...current, [key]: value }));
+  }
+
+  async function saveAiSettings() {
+    setSaving(true);
+    setNotice("");
+    try {
+      const result = await api.updateAdminAiSettings({
+        qwenApiKey: apiKey,
+        clearApiKey,
+        qwenModel: settings.qwenModel,
+        qwenResponsesModel: settings.qwenResponsesModel,
+        webSearchEnabled: settings.webSearchEnabled,
+      });
+      setSettings(result.item);
+      setApiKey("");
+      setClearApiKey(false);
+      setNotice("AI 设置已保存。编辑器里的摘要、评论和润色会使用这份配置。");
+    } catch (error) {
+      setNotice(getApiErrorMessage(error));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function testAiSettings() {
+    setTesting(true);
+    setNotice("");
+    try {
+      const result = await api.testAdminAiSettings();
+      setNotice(`${result.message}${result.model ? `（${result.model}）` : ""}`);
+    } catch (error) {
+      setNotice(getApiErrorMessage(error));
+    } finally {
+      setTesting(false);
+    }
+  }
+
+  const keySourceText = settings.keySource === "database" ? "后台数据库配置" : settings.keySource === "env" ? "服务器环境变量" : "未配置";
+
+  return (
+    <>
+      <AdminTop />
+      <div className="admin-content admin-placeholder">
+        <div className="title-row">
+          <h1>AI 设置</h1>
+          <div className="title-actions"><button onClick={testAiSettings} disabled={testing || saving || !settings.hasApiKey}>{testing ? "测试中..." : "测试连接"}</button><button onClick={saveAiSettings} disabled={saving || testing}>{saving ? "保存中..." : "保存配置"}</button></div>
+        </div>
+        {notice && <p className="admin-hint">{notice}</p>}
+        <section className="card ai-settings-config">
+          <div className="settings-panel">
+            <header>
+              <b>千问 API Key</b>
+              <span>只保存在后端，浏览器不会拿到明文；留空保存时表示不修改现有 Key。</span>
+            </header>
+            <div className="ai-key-status">
+              <span className={settings.hasApiKey ? "ok" : "warn"}>{settings.hasApiKey ? "已配置" : "未配置"}</span>
+              <b>{settings.maskedApiKey || "暂无 Key"}</b>
+              <small>来源：{keySourceText}</small>
+              <small>{settings.encryptedAtRest ? "数据库中已加密保存" : settings.encryptionAvailable ? "下次保存会加密入库" : "建议在服务器 .env 配置 SETTINGS_SECRET 以启用入库加密"}</small>
+            </div>
+            <label>API Key<span className="password-field"><input type={showKey ? "text" : "password"} value={apiKey} onChange={(event) => { setApiKey(event.target.value); if (event.target.value) setClearApiKey(false); }} placeholder={settings.hasApiKey ? "留空表示不修改现有 Key" : "请输入 DashScope / 千问 API Key"} autoComplete="off" /><button type="button" onClick={() => setShowKey((value) => !value)}>{showKey ? "隐藏" : "查看"}</button></span></label>
+            <label className="check ai-clear-key"><input type="checkbox" checked={clearApiKey} onChange={(event) => { setClearApiKey(event.target.checked); if (event.target.checked) setApiKey(""); }} />清空已保存的后台 Key</label>
+          </div>
+          <div className="settings-panel">
+            <header>
+              <b>模型与联网</b>
+              <span>普通摘要/润色走 Chat Completions；AI 评论可选择启用百炼 web_search 工具。</span>
+            </header>
+            <div className="settings-grid">
+              <label>普通模型<input value={settings.qwenModel} onChange={(event) => updateField("qwenModel", event.target.value)} placeholder="qwen-plus" /></label>
+              <label>联网评论模型<input value={settings.qwenResponsesModel} onChange={(event) => updateField("qwenResponsesModel", event.target.value)} placeholder="qwen-plus" /></label>
+              <label className="check ai-settings-switch"><input type="checkbox" checked={settings.webSearchEnabled} onChange={(event) => updateField("webSearchEnabled", event.target.checked)} />允许 AI 评论使用百炼联网搜索</label>
+            </div>
+          </div>
+          <div className="settings-panel wide">
+            <header>
+              <b>安全说明</b>
+              <span>推荐只在后台服务器调用模型，不要把 Key 写到前端代码、文章内容或公开接口。</span>
+            </header>
+            <div className="import-help">
+              <p>后台配置优先级高于服务器环境变量；如果后台没有配置 Key，会自动兜底使用服务器 `.env` 中的 `DASHSCOPE_API_KEY` 或 `QWEN_API_KEY`。</p>
+              <p>如需数据库加密保存，请在服务器 `.env` 增加长度至少 16 位的 `SETTINGS_SECRET`，保存一次 AI 设置后生效。</p>
+            </div>
+          </div>
+        </section>
+      </div>
+    </>
+  );
+}
+
 const adminRoutes: Record<string, { label: string; path: string }> = {
   dashboard: { label: "仪表盘", path: "/admin" },
   posts: { label: "文章管理", path: "/admin/posts" },
@@ -2652,6 +2780,7 @@ const adminRoutes: Record<string, { label: string; path: string }> = {
   about: { label: "关于页配置", path: "/admin/about-config" },
   home: { label: "首页配置", path: "/admin/home-config" },
   settings: { label: "站点设置", path: "/admin/settings" },
+  ai: { label: "AI 设置", path: "/admin/ai-settings" },
   security: { label: "账号安全", path: "/admin/security" },
 };
 
@@ -2811,7 +2940,7 @@ const defaultAboutSettings: AboutPageSettings = {
 
 function AdminShell({ editor = false, page = "dashboard" }: { editor?: boolean; page?: string }) {
   const active = editor ? "文章管理" : adminRoutes[page]?.label ?? "仪表盘";
-  return <main className={`admin-app ${editor ? "admin-editor-app" : ""}`}><AdminSidebar active={active} /><section className="admin-main">{editor ? <EditorPage /> : page === "dashboard" ? <DashboardPage /> : page === "settings" ? <SiteSettingsPage /> : page === "security" ? <AccountSecurityPage /> : page === "about" ? <AboutSettingsPage /> : page === "home" ? <HomeSettingsPage /> : page === "import" ? <ImportArticlesPage /> : <AdminPlaceholder page={page} />}</section></main>;
+  return <main className={`admin-app ${editor ? "admin-editor-app" : ""}`}><AdminSidebar active={active} /><section className="admin-main">{editor ? <EditorPage /> : page === "dashboard" ? <DashboardPage /> : page === "settings" ? <SiteSettingsPage /> : page === "ai" ? <AiSettingsPage /> : page === "security" ? <AccountSecurityPage /> : page === "about" ? <AboutSettingsPage /> : page === "home" ? <HomeSettingsPage /> : page === "import" ? <ImportArticlesPage /> : <AdminPlaceholder page={page} />}</section></main>;
 }
 
 function AdminSidebar({ active }: { active: string }) {

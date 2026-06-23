@@ -12,6 +12,7 @@ const MESSAGE_CONTENT_MAX_LENGTH = 2000;
 const ABOUT_SETTING_KEY = "about_page";
 const HOME_SETTING_KEY = "home_page";
 const SITE_SETTING_KEY = "site_basic";
+const AI_SETTING_KEY = "ai_settings";
 const AI_INPUT_MAX_CHARS = 12000;
 const AI_INSTRUCTION_MAX_CHARS = 800;
 const AI_COMMENT_FOCUS_LABELS = {
@@ -113,6 +114,12 @@ const DEFAULT_SITE_SETTINGS = {
   policeText: "",
   policeUrl: "",
   footerText: "© 2026 全栈博客创作平台",
+};
+
+const DEFAULT_AI_SETTINGS = {
+  qwenModel: "qwen-plus",
+  qwenResponsesModel: "qwen-plus",
+  webSearchEnabled: false,
 };
 
 const rateLimitBuckets = new Map();
@@ -1625,6 +1632,143 @@ async function handleAdminUpdateSiteSettings(req, res) {
   sendJson(res, 200, { item: normalizeSiteSettings(result.rows[0]?.value_json), ok: true, source: "api" }, corsHeaders(req));
 }
 
+function maskSecret(value = "") {
+  const text = String(value || "").trim();
+  if (!text) return "";
+  if (text.length <= 8) return `${text.slice(0, 2)}****${text.slice(-2)}`;
+  return `${text.slice(0, 4)}****${text.slice(-4)}`;
+}
+
+function encryptSettingSecret(value = "") {
+  const text = String(value || "").trim();
+  const secret = String(config.settingsSecret || "").trim();
+  if (!text) return { encrypted: false, value: "" };
+  if (secret.length < 16) return { encrypted: false, value: text };
+  const iv = crypto.randomBytes(12);
+  const key = crypto.createHash("sha256").update(secret).digest();
+  const cipher = crypto.createCipheriv("aes-256-gcm", key, iv);
+  const encrypted = Buffer.concat([cipher.update(text, "utf8"), cipher.final()]);
+  return {
+    encrypted: true,
+    algorithm: "aes-256-gcm",
+    iv: iv.toString("base64"),
+    tag: cipher.getAuthTag().toString("base64"),
+    value: encrypted.toString("base64"),
+  };
+}
+
+function decryptSettingSecret(secretValue) {
+  if (!secretValue) return "";
+  if (typeof secretValue === "string") return secretValue.trim();
+  if (!secretValue.encrypted) return String(secretValue.value || "").trim();
+  const secret = String(config.settingsSecret || "").trim();
+  if (secret.length < 16) return "";
+  try {
+    const key = crypto.createHash("sha256").update(secret).digest();
+    const decipher = crypto.createDecipheriv("aes-256-gcm", key, Buffer.from(secretValue.iv, "base64"));
+    decipher.setAuthTag(Buffer.from(secretValue.tag, "base64"));
+    return Buffer.concat([decipher.update(Buffer.from(secretValue.value, "base64")), decipher.final()]).toString("utf8").trim();
+  } catch (error) {
+    console.warn("Failed to decrypt AI settings secret", error);
+    return "";
+  }
+}
+
+function normalizeAiSettingFields(value = {}) {
+  const next = value && typeof value === "object" ? value : {};
+  const text = (input, fallback = "") => {
+    const result = input === undefined || input === null ? fallback : String(input).trim();
+    return result;
+  };
+  return {
+    qwenModel: text(next.qwenModel, config.qwenModel || DEFAULT_AI_SETTINGS.qwenModel) || DEFAULT_AI_SETTINGS.qwenModel,
+    qwenResponsesModel: text(next.qwenResponsesModel, config.qwenResponsesModel || DEFAULT_AI_SETTINGS.qwenResponsesModel) || DEFAULT_AI_SETTINGS.qwenResponsesModel,
+    webSearchEnabled: Boolean(next.webSearchEnabled),
+  };
+}
+
+async function getStoredAiSettingsValue() {
+  const result = await query("SELECT value_json FROM site_settings WHERE key = $1", [AI_SETTING_KEY]);
+  return result.rows[0]?.value_json && typeof result.rows[0].value_json === "object" ? result.rows[0].value_json : {};
+}
+
+async function getAiRuntimeSettings() {
+  const stored = await getStoredAiSettingsValue();
+  const dbKey = decryptSettingSecret(stored.qwenApiKey);
+  const envKey = String(config.qwenApiKey || "").trim();
+  const fields = normalizeAiSettingFields({
+    qwenModel: stored.qwenModel || config.qwenModel,
+    qwenResponsesModel: stored.qwenResponsesModel || config.qwenResponsesModel,
+    webSearchEnabled: stored.webSearchEnabled === undefined ? config.aiWebSearchEnabled : stored.webSearchEnabled,
+  });
+  const apiKey = dbKey || envKey;
+  return {
+    ...fields,
+    apiKey,
+    hasApiKey: Boolean(apiKey),
+    maskedApiKey: maskSecret(apiKey),
+    keySource: dbKey ? "database" : envKey ? "env" : "none",
+    encryptedAtRest: Boolean(stored.qwenApiKey?.encrypted),
+    encryptionAvailable: String(config.settingsSecret || "").trim().length >= 16,
+  };
+}
+
+function publicAiSettings(runtime) {
+  return {
+    hasApiKey: runtime.hasApiKey,
+    maskedApiKey: runtime.maskedApiKey,
+    keySource: runtime.keySource,
+    qwenModel: runtime.qwenModel,
+    qwenResponsesModel: runtime.qwenResponsesModel,
+    webSearchEnabled: runtime.webSearchEnabled,
+    encryptedAtRest: runtime.encryptedAtRest,
+    encryptionAvailable: runtime.encryptionAvailable,
+  };
+}
+
+async function handleAdminAiSettings(req, res) {
+  const runtime = await getAiRuntimeSettings();
+  sendJson(res, 200, { item: publicAiSettings(runtime), source: "api" }, corsHeaders(req));
+}
+
+async function handleAdminUpdateAiSettings(req, res) {
+  const body = await readBody(req);
+  const input = body.item ?? body;
+  const stored = await getStoredAiSettingsValue();
+  const currentKey = decryptSettingSecret(stored.qwenApiKey);
+  const nextFields = normalizeAiSettingFields(input);
+  const incomingKey = String(input.qwenApiKey || "").trim();
+  const nextKey = input.clearApiKey ? "" : incomingKey || currentKey;
+  const storedValue = {
+    ...nextFields,
+    qwenApiKey: encryptSettingSecret(nextKey),
+  };
+  await query(
+    `INSERT INTO site_settings(key, value_json, updated_at)
+     VALUES ($1, $2::jsonb, now())
+     ON CONFLICT (key)
+     DO UPDATE SET value_json = EXCLUDED.value_json, updated_at = now()
+     RETURNING value_json`,
+    [AI_SETTING_KEY, JSON.stringify(storedValue)],
+  );
+  const runtime = await getAiRuntimeSettings();
+  sendJson(res, 200, { ok: true, item: publicAiSettings(runtime), source: "api" }, corsHeaders(req));
+}
+
+async function handleAdminTestAiSettings(req, res) {
+  const runtime = await getAiRuntimeSettings();
+  if (!runtime.apiKey) {
+    return sendJson(res, 400, { error: "ai_not_configured", message: "请先在后台 AI 设置中配置千问 API Key。" }, corsHeaders(req));
+  }
+  try {
+    const result = await callQwenChat([{ role: "user", content: "请只回复：AI 配置测试通过" }], runtime);
+    sendJson(res, 200, { ok: true, message: result, provider: "qwen", model: runtime.qwenModel }, corsHeaders(req));
+  } catch (error) {
+    const code = error?.name === "AbortError" ? "ai_timeout" : error?.code || "ai_provider_error";
+    sendJson(res, code === "ai_not_configured" ? 400 : 502, { error: code, message: error.message }, corsHeaders(req));
+  }
+}
+
 async function handleAdminImportTemplate(req, res) {
   sendJson(res, 200, { items: IMPORT_ARTICLE_TEMPLATE, source: "api" }, corsHeaders(req));
 }
@@ -2739,8 +2883,9 @@ function buildAiMessages(tool, body) {
   ];
 }
 
-async function callQwenChat(messages) {
-  const apiKey = config.qwenApiKey.trim();
+async function callQwenChat(messages, runtimeSettings) {
+  const settings = runtimeSettings || await getAiRuntimeSettings();
+  const apiKey = settings.apiKey.trim();
   if (!apiKey) {
     const error = new Error("Qwen API key is not configured");
     error.code = "ai_not_configured";
@@ -2757,7 +2902,7 @@ async function callQwenChat(messages) {
         "content-type": "application/json",
       },
       body: JSON.stringify({
-        model: config.qwenModel,
+        model: settings.qwenModel,
         messages,
         temperature: 0.35,
       }),
@@ -2842,8 +2987,9 @@ function parsePolishResult(text) {
   return { result: raw, notes: "模型未返回结构化说明，已保留润色后的正文结果。" };
 }
 
-async function callQwenResponses(messages) {
-  const apiKey = config.qwenApiKey.trim();
+async function callQwenResponses(messages, runtimeSettings) {
+  const settings = runtimeSettings || await getAiRuntimeSettings();
+  const apiKey = settings.apiKey.trim();
   if (!apiKey) {
     const error = new Error("Qwen API key is not configured");
     error.code = "ai_not_configured";
@@ -2860,7 +3006,7 @@ async function callQwenResponses(messages) {
         "content-type": "application/json",
       },
       body: JSON.stringify({
-        model: config.qwenResponsesModel,
+        model: settings.qwenResponsesModel,
         input: messages,
         tools: [
           { type: "web_search" },
@@ -2888,7 +3034,8 @@ async function callQwenResponses(messages) {
   }
 }
 
-async function createAiTask(req, tool, body) {
+async function createAiTask(req, tool, body, runtimeSettings) {
+  const settings = runtimeSettings || await getAiRuntimeSettings();
   try {
     const result = await query(
       `INSERT INTO ai_tasks(task_type, source_type, source_id, input_text, result_json, status, created_by)
@@ -2899,7 +3046,7 @@ async function createAiTask(req, tool, body) {
         "post",
         Number(body.postId || body.post_id || 0) || null,
         trimAiInput(body.content),
-        JSON.stringify({ title: body.title || "", summary: body.summary || "", provider: "qwen", model: body.enableWebSearch ? config.qwenResponsesModel : config.qwenModel, enableWebSearch: Boolean(body.enableWebSearch), userInstruction: trimAiInstruction(body.userInstruction || body.instruction), reviewFocus: body.reviewFocus || null }),
+        JSON.stringify({ title: body.title || "", summary: body.summary || "", provider: "qwen", model: body.enableWebSearch ? settings.qwenResponsesModel : settings.qwenModel, enableWebSearch: Boolean(body.enableWebSearch), userInstruction: trimAiInstruction(body.userInstruction || body.instruction), reviewFocus: body.reviewFocus || null }),
         req.adminUser?.id ?? null,
       ],
     );
@@ -2924,17 +3071,20 @@ async function finishAiTask(taskId, status, resultJson) {
 
 async function handleAdminAiStatus(req, res) {
   const tasks = await query("SELECT count(*)::integer AS count FROM ai_tasks");
-  const enabled = Boolean(config.qwenApiKey.trim());
+  const settings = await getAiRuntimeSettings();
+  const enabled = settings.hasApiKey;
   sendJson(res, 200, {
     enabled,
     mode: enabled ? "api" : "mock",
     provider: enabled ? "qwen" : null,
-    model: enabled ? config.qwenModel : null,
-    responsesModel: enabled ? config.qwenResponsesModel : null,
-    webSearchEnabled: enabled && config.aiWebSearchEnabled,
+    model: enabled ? settings.qwenModel : null,
+    responsesModel: enabled ? settings.qwenResponsesModel : null,
+    webSearchEnabled: enabled && settings.webSearchEnabled,
+    keySource: settings.keySource,
+    maskedApiKey: settings.maskedApiKey,
     tasksTableReady: true,
     tasksCount: tasks.rows[0]?.count ?? 0,
-    message: enabled ? `千问已接入，当前模型：${config.qwenModel}` : "请在 backend/.env 配置 DASHSCOPE_API_KEY 后重启后端，AI 功能才会调用千问。",
+    message: enabled ? `千问已接入，当前模型：${settings.qwenModel}` : "请在后台 AI 设置中配置千问 API Key，或在服务器环境变量中配置 DASHSCOPE_API_KEY。",
   }, corsHeaders(req));
 }
 
@@ -3007,22 +3157,23 @@ async function handleAdminAiRun(req, res) {
   if (!title && !content) {
     return sendJson(res, 400, { error: "ai_content_required", message: "Title or content is required" }, corsHeaders(req));
   }
-  if (!config.qwenApiKey.trim()) {
-    return sendJson(res, 400, { error: "ai_not_configured", message: "请在 backend/.env 配置 DASHSCOPE_API_KEY 后重启后端。" }, corsHeaders(req));
+  const settings = await getAiRuntimeSettings();
+  if (!settings.apiKey.trim()) {
+    return sendJson(res, 400, { error: "ai_not_configured", message: "请在后台 AI 设置中配置千问 API Key。" }, corsHeaders(req));
   }
 
   const useWebSearch = tool === "comment" && body.enableWebSearch === true;
-  if (useWebSearch && !config.aiWebSearchEnabled) {
-    return sendJson(res, 400, { error: "ai_web_search_disabled", message: "AI web search is disabled on the backend." }, corsHeaders(req));
+  if (useWebSearch && !settings.webSearchEnabled) {
+    return sendJson(res, 400, { error: "ai_web_search_disabled", message: "AI web search is disabled. Please enable it in admin AI settings." }, corsHeaders(req));
   }
 
-  const taskId = await createAiTask(req, tool, body);
+  const taskId = await createAiTask(req, tool, body, settings);
   try {
     const response = useWebSearch
-      ? await callQwenResponses(buildAiMessages(tool, body))
-      : { result: await callQwenChat(buildAiMessages(tool, body)), sources: [] };
+      ? await callQwenResponses(buildAiMessages(tool, body), settings)
+      : { result: await callQwenChat(buildAiMessages(tool, body), settings), sources: [] };
     const polishResult = tool === "polish" ? parsePolishResult(response.result) : { result: response.result, notes: "" };
-    const model = useWebSearch ? config.qwenResponsesModel : config.qwenModel;
+    const model = useWebSearch ? settings.qwenResponsesModel : settings.qwenModel;
     await finishAiTask(taskId, "succeeded", { result: polishResult.result, notes: polishResult.notes, sources: response.sources, provider: "qwen", model, enableWebSearch: useWebSearch });
     sendJson(res, 200, {
       ok: true,
@@ -3160,6 +3311,9 @@ async function handleRequest(req, res) {
     if (req.method === "DELETE" && adminTag) return handleAdminDeleteTag(req, res, Number(adminTag[1]));
     if (req.method === "GET" && url.pathname === "/api/admin/comments") return handleAdminComments(req, res, url);
     if (req.method === "GET" && url.pathname === "/api/admin/messages") return handleAdminMessages(req, res, url);
+    if (req.method === "GET" && url.pathname === "/api/admin/ai/settings") return handleAdminAiSettings(req, res);
+    if (req.method === "PUT" && url.pathname === "/api/admin/ai/settings") return handleAdminUpdateAiSettings(req, res);
+    if (req.method === "POST" && url.pathname === "/api/admin/ai/test") return handleAdminTestAiSettings(req, res);
     if (req.method === "GET" && url.pathname === "/api/admin/ai/status") return handleAdminAiStatus(req, res);
     if (req.method === "GET" && url.pathname === "/api/admin/ai/tasks") return handleAdminAiTasks(req, res, url);
     if (req.method === "POST" && url.pathname === "/api/admin/ai/run") return handleAdminAiRun(req, res);
