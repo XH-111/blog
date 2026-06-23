@@ -4028,10 +4028,12 @@ function collectMarkdownTable(lines: string[], startIndex: number, keyPrefix: st
   return {
     nextIndex: index - 1,
     node: (
-      <table className="preview-table" key={`${keyPrefix}-table-${startIndex}`}>
-        <thead><tr>{headers.map((cell, cellIndex) => <th key={cellIndex}>{renderInlineMarkdown(cell, `${keyPrefix}-th-${startIndex}-${cellIndex}`, options)}</th>)}</tr></thead>
-        <tbody>{rows.map((row, rowIndex) => <tr key={rowIndex}>{row.map((cell, cellIndex) => <td key={cellIndex}>{renderInlineMarkdown(cell, `${keyPrefix}-td-${startIndex}-${rowIndex}-${cellIndex}`, options)}</td>)}</tr>)}</tbody>
-      </table>
+      <div className="markdown-table-scroll" key={`${keyPrefix}-table-${startIndex}`}>
+        <table className="preview-table">
+          <thead><tr>{headers.map((cell, cellIndex) => <th key={cellIndex}>{renderInlineMarkdown(cell, `${keyPrefix}-th-${startIndex}-${cellIndex}`, options)}</th>)}</tr></thead>
+          <tbody>{rows.map((row, rowIndex) => <tr key={rowIndex}>{row.map((cell, cellIndex) => <td key={cellIndex}>{renderInlineMarkdown(cell, `${keyPrefix}-td-${startIndex}-${rowIndex}-${cellIndex}`, options)}</td>)}</tr>)}</tbody>
+        </table>
+      </div>
     ),
   };
 }
@@ -4087,6 +4089,15 @@ function renderArticleMarkdown(markdown: string, keyPrefix: string, options: Mar
       const table = collectMarkdownTable(lines, index, keyPrefix, options);
       blocks.push(table.node);
       index = table.nextIndex;
+    } else if (line.startsWith("# ")) {
+      flushList(index);
+      blocks.push(<h2 key={`${keyPrefix}-h2-${index}`}>{renderInlineMarkdown(line.replace(/^#\s+/, ""), `${keyPrefix}-h2-${index}`, options)}</h2>);
+    } else if (line.startsWith("## ")) {
+      flushList(index);
+      blocks.push(<h3 key={`${keyPrefix}-h3-${index}`}>{renderInlineMarkdown(line.replace(/^##\s+/, ""), `${keyPrefix}-h3-${index}`, options)}</h3>);
+    } else if (line.startsWith("### ")) {
+      flushList(index);
+      blocks.push(<h4 key={`${keyPrefix}-h4-${index}`}>{renderInlineMarkdown(line.replace(/^###\s+/, ""), `${keyPrefix}-h4-${index}`, options)}</h4>);
     } else if (line.startsWith("> ")) {
       flushList(index);
       blocks.push(<blockquote key={`${keyPrefix}-quote-${index}`}>{renderInlineMarkdown(line.replace(/^>\s+/, ""), `${keyPrefix}-quote-${index}`, options)}</blockquote>);
