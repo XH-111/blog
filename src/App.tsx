@@ -592,7 +592,7 @@ function ProjectCover({ url, badge, title }: { url?: string; badge?: string; tit
   const image = useSafeImageUrl(url, "/assets/about-project-blogcore.png");
   return (
     <div className="project-cover art wide">
-      <img src={image.url} onError={image.onError} alt={title} />
+      <img src={image.url} onError={image.onError} alt={title} loading="lazy" />
       {badge && <span>{badge}</span>}
     </div>
   );
@@ -882,8 +882,14 @@ function ArticlePage({ articleId }: { articleId: number }) {
         </main>
       ) : (
       <main className="article-layout">
-        <nav className="mobile-toc card" aria-label="移动端文章目录">{toc.map((section) => <button className={activeSection === section.id ? "active" : ""} key={section.id} onClick={() => jumpToSection(section.id)}>{section.title}</button>)}</nav>
-        <aside className="toc card"><h3>文章目录</h3>{toc.map((section) => <button className={activeSection === section.id ? "active" : ""} key={section.id} onClick={() => jumpToSection(section.id)}>{section.title}</button>)}<button onClick={() => scrollTo({ top: 0, behavior: "smooth" })}>回到顶部 ↑</button></aside>
+        <nav className="mobile-toc card" aria-label="移动端文章目录">{toc.map((section) => <button className={`toc-level-${section.level} ${activeSection === section.id ? "active" : ""}`} key={section.id} onClick={() => jumpToSection(section.id)}>{section.title}</button>)}</nav>
+        <aside className="toc card">
+          <h3>文章目录</h3>
+          <div className="toc-list">
+            {toc.map((section) => <button className={`toc-level-${section.level} ${activeSection === section.id ? "active" : ""}`} key={section.id} onClick={() => jumpToSection(section.id)}>{section.title}</button>)}
+          </div>
+          <button className="toc-top" onClick={() => scrollTo({ top: 0, behavior: "smooth" })}>回到顶部 ↑</button>
+        </aside>
         <article className="paper">
           <div className="cover mountain" style={article.coverUrl ? { backgroundImage: `url(${article.coverUrl})` } : undefined} />
           <div className="paper-body">
@@ -1332,9 +1338,8 @@ function cacheAboutSettings(item: AboutPageSettings) {
 
 function AboutPage() {
   const cachedAbout = readCachedAboutSettings();
-  const [aboutConfig, setAboutConfig] = useState<AboutPageSettings | null>(cachedAbout);
+  const [aboutConfig, setAboutConfig] = useState<AboutPageSettings>(cachedAbout ?? defaultAboutSettings);
   const [aboutUsingMock, setAboutUsingMock] = useState(false);
-  const [aboutLoading, setAboutLoading] = useState(!cachedAbout);
   const [wechatQrOpen, setWechatQrOpen] = useState(false);
 
   useEffect(() => {
@@ -1348,10 +1353,8 @@ function AboutPage() {
         setAboutConfig(aboutResult.item);
       }
       setAboutUsingMock(aboutResult.source === "mock" && !cachedAbout);
-      setAboutLoading(false);
     }).catch(() => {
-      if (!alive) return;
-      setAboutLoading(false);
+      if (alive && !cachedAbout) setAboutUsingMock(true);
     });
     return () => {
       alive = false;
@@ -1366,27 +1369,13 @@ function AboutPage() {
   const aboutSkills = aboutConfig?.skills.filter((item) => item.trim() && item.trim() !== "…") ?? [];
   const portrait = useSafeImageUrl(aboutConfig?.portraitUrl, defaultAboutSettings.portraitUrl);
 
-  if (!aboutConfig) {
-    return (
-      <>
-        <PublicHeader active="/about" />
-        <main className="page about-layout">
-          <section className="about-main card about-loading">
-            <p className="soft-text">{aboutLoading ? "正在读取关于页..." : "关于页暂时无法加载，请稍后刷新。"}</p>
-          </section>
-        </main>
-        <PublicFooter />
-      </>
-    );
-  }
-
   return (
     <>
       <PublicHeader active="/about" />
       <main className="page about-layout">
         <section className="about-main card">
           <div className="profile">
-            <img className="portrait" src={portrait.url} onError={portrait.onError} alt={aboutConfig.title || "关于我头像"} />
+            <img className="portrait" src={portrait.url} onError={portrait.onError} alt={aboutConfig.title || "关于我头像"} loading="eager" />
             <div className="profile-text"><h1>{aboutConfig.title} <Tag>{aboutConfig.badge}</Tag></h1><p>{aboutConfig.subtitle}</p><h3>{aboutConfig.introTitle}</h3><p>{aboutConfig.intro}</p><div className="contact"><span>⌖ {aboutConfig.location}</span><span>✉ {aboutConfig.email}</span><span>☎ {aboutConfig.phone}</span></div></div>
           </div>
           <hr />
