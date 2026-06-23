@@ -4045,12 +4045,17 @@ function renderArticleMarkdown(markdown: string, keyPrefix: string, options: Mar
   let code: string[] = [];
   let codeLanguage = "";
   let list: ReactNode[] = [];
+  let orderedList: ReactNode[] = [];
   let checklist: ReactNode[] = [];
 
   function flushList(index: number) {
     if (list.length) {
       blocks.push(<ul className="markdown-list" key={`${keyPrefix}-list-${index}`}>{list}</ul>);
       list = [];
+    }
+    if (orderedList.length) {
+      blocks.push(<ol className="markdown-list markdown-ordered-list" key={`${keyPrefix}-ordered-list-${index}`}>{orderedList}</ol>);
+      orderedList = [];
     }
     if (checklist.length) {
       blocks.push(<div className="markdown-checklist" key={`${keyPrefix}-checklist-${index}`}>{checklist}</div>);
@@ -4104,6 +4109,8 @@ function renderArticleMarkdown(markdown: string, keyPrefix: string, options: Mar
     } else if (/^- \[[ x]\]/.test(line)) {
       const checked = line.includes("[x]");
       checklist.push(<label className="preview-check" key={`${keyPrefix}-check-${index}`}><input type="checkbox" checked={checked} readOnly />{renderInlineMarkdown(line.replace(/^- \[[ x]\]\s*/, ""), `${keyPrefix}-check-${index}`, options)}</label>);
+    } else if (/^\d+\.\s+/.test(line)) {
+      orderedList.push(<li key={`${keyPrefix}-oli-${index}`}>{renderInlineMarkdown(line.replace(/^\d+\.\s+/, ""), `${keyPrefix}-oli-${index}`, options)}</li>);
     } else if (line.startsWith("- ")) {
       list.push(<li key={`${keyPrefix}-li-${index}`}>{renderInlineMarkdown(line.replace(/^-\s+/, ""), `${keyPrefix}-li-${index}`, options)}</li>);
     } else {

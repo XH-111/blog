@@ -485,11 +485,18 @@ function makeExcerpt(content, explicit) {
 function parseSections(content) {
   const lines = String(content || "").split(/\r?\n/);
   const sections = [];
-  let current = null;
+  let current = { anchor: "content", title: "正文", level: 2, body: "" };
+  let buffer = [];
+  const flush = () => {
+    if (!current) return;
+    current.body = buffer.join("\n").trim();
+    if (current.body || current.title !== "正文") sections.push(current);
+    buffer = [];
+  };
   for (const line of lines) {
     const match = line.match(/^(#{2,3})\s+(.+)$/);
     if (match) {
-      if (current) sections.push(current);
+      flush();
       current = {
         anchor: slugify(match[2]),
         title: match[2].trim(),
@@ -498,12 +505,10 @@ function parseSections(content) {
       };
       continue;
     }
-    if (current && line.trim()) {
-      current.body = current.body ? `${current.body}\n${line.trim()}` : line.trim();
-    }
+    buffer.push(line);
   }
-  if (current) sections.push(current);
-  return sections.length ? sections : [{ anchor: "content", title: "正文", level: 2, body: makeExcerpt(content) }];
+  flush();
+  return sections.length ? sections : [{ anchor: "content", title: "正文", level: 2, body: String(content || "").trim() }];
 }
 
 async function ensureCategory(client, name = "技术笔记") {

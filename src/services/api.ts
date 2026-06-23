@@ -694,6 +694,52 @@ function plainTextExcerpt(value = "", maxLength = 150) {
     .slice(0, maxLength);
 }
 
+function slugifySectionTitle(value: string, fallback: string) {
+  const slug = value
+    .trim()
+    .toLowerCase()
+    .replace(/[`*_~()[\]{}<>]/g, "")
+    .replace(/[^a-z0-9\u4e00-\u9fa5]+/gi, "-")
+    .replace(/^-+|-+$/g, "");
+  return slug || fallback;
+}
+
+function buildSectionsFromMarkdown(markdown = ""): NonNullable<BackendPost["sections"]> {
+  const content = String(markdown || "").replace(/\r\n/g, "\n").trim();
+  if (!content) return [];
+  const lines = content.split("\n");
+  const sections: NonNullable<BackendPost["sections"]> = [];
+  let current: { id: string; title: string; level: 2 | 3; body: string } | null = null;
+  let buffer: string[] = [];
+
+  function flush() {
+    if (!current) return;
+    current.body = buffer.join("\n").trim();
+    sections.push(current);
+    buffer = [];
+  }
+
+  for (const line of lines) {
+    const heading = line.match(/^(#{1,3})\s+(.+)$/);
+    if (heading) {
+      const rawTitle = heading[2].trim();
+      const level = heading[1].length >= 3 ? 3 : 2;
+      if (current) {
+        flush();
+      } else if (buffer.some((item) => item.trim())) {
+        sections.push({ id: "intro", title: "正文", level: 2, body: buffer.join("\n").trim() });
+        buffer = [];
+      }
+      current = { id: slugifySectionTitle(rawTitle, `section-${sections.length + 1}`), title: rawTitle, level, body: "" };
+      continue;
+    }
+    if (!current) current = { id: "content", title: "正文", level: 2, body: "" };
+    buffer.push(line);
+  }
+  flush();
+  return sections.length ? sections : [{ id: "content", title: "正文", level: 2, body: content }];
+}
+
 function inferImage(post: BackendPost): Article["image"] {
   const text = `${post.title} ${post.tags?.map((tag) => tag.name).join(" ") ?? ""}`.toLowerCase();
   if (text.includes("docker")) return "docker";
@@ -709,6 +755,7 @@ function mapBackendPost(post: BackendPost): Article {
   const excerpt = plainTextExcerpt(rawExcerpt) || plainTextExcerpt(rawSummary);
   const summary = plainTextExcerpt(rawSummary, 220) || excerpt;
   const searchSnippet = plainTextExcerpt(post.searchSnippet ?? rawSummary, 220);
+  const markdownSections = buildSectionsFromMarkdown(post.contentMarkdown);
   return {
     id: toNumberId(post.id),
     title: post.title,
@@ -732,7 +779,11 @@ function mapBackendPost(post: BackendPost): Article {
     passwordRequired: post.passwordRequired ?? post.visibility === "password",
     passwordHint: post.passwordHint ?? "",
     locked: Boolean(post.locked),
-    sections: post.sections?.length ? post.sections : [{ id: "content", title: "正文", level: 2, body: post.summary ?? post.excerpt ?? "" }],
+    sections: markdownSections.length
+      ? markdownSections
+      : post.sections?.length
+        ? post.sections
+        : [{ id: "content", title: "正文", level: 2, body: post.summary ?? post.excerpt ?? "" }],
     previousId: post.previousPost ? toNumberId(post.previousPost.id) : undefined,
     previousTitle: post.previousPost?.title,
     nextId: post.nextPost ? toNumberId(post.nextPost.id) : undefined,
