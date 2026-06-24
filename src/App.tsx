@@ -4035,6 +4035,7 @@ function renderArticleMarkdown(markdown: string, keyPrefix: string, options: Mar
   let codeLanguage = "";
   let list: ReactNode[] = [];
   let orderedList: ReactNode[] = [];
+  let orderedListStart = 1;
   let checklist: ReactNode[] = [];
 
   function flushList(index: number) {
@@ -4043,8 +4044,9 @@ function renderArticleMarkdown(markdown: string, keyPrefix: string, options: Mar
       list = [];
     }
     if (orderedList.length) {
-      blocks.push(<ol className="markdown-list markdown-ordered-list" key={`${keyPrefix}-ordered-list-${index}`}>{orderedList}</ol>);
+      blocks.push(<ol className="markdown-list markdown-ordered-list" start={orderedListStart} key={`${keyPrefix}-ordered-list-${index}`}>{orderedList}</ol>);
       orderedList = [];
+      orderedListStart = 1;
     }
     if (checklist.length) {
       blocks.push(<div className="markdown-checklist" key={`${keyPrefix}-checklist-${index}`}>{checklist}</div>);
@@ -4099,7 +4101,9 @@ function renderArticleMarkdown(markdown: string, keyPrefix: string, options: Mar
       const checked = line.includes("[x]");
       checklist.push(<label className="preview-check" key={`${keyPrefix}-check-${index}`}><input type="checkbox" checked={checked} readOnly />{renderInlineMarkdown(line.replace(/^- \[[ x]\]\s*/, ""), `${keyPrefix}-check-${index}`, options)}</label>);
     } else if (/^\d+\.\s+/.test(line)) {
-      orderedList.push(<li key={`${keyPrefix}-oli-${index}`}>{renderInlineMarkdown(line.replace(/^\d+\.\s+/, ""), `${keyPrefix}-oli-${index}`, options)}</li>);
+      const orderedMatch = line.match(/^(\d+)\.\s+(.+)$/);
+      if (!orderedList.length) orderedListStart = Number(orderedMatch?.[1] ?? 1) || 1;
+      orderedList.push(<li key={`${keyPrefix}-oli-${index}`}>{renderInlineMarkdown(orderedMatch?.[2] ?? line.replace(/^\d+\.\s+/, ""), `${keyPrefix}-oli-${index}`, options)}</li>);
     } else if (line.startsWith("- ")) {
       list.push(<li key={`${keyPrefix}-li-${index}`}>{renderInlineMarkdown(line.replace(/^-\s+/, ""), `${keyPrefix}-li-${index}`, options)}</li>);
     } else {
