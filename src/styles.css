@@ -234,9 +234,15 @@ pre button { position: absolute; right: 12px; top: 10px; color: #fff; border: 1p
 .comment-compose { border: 1px solid var(--line); border-radius: 7px; background: #fff; overflow: hidden; }
 .comment-meta { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); border-bottom: 1px solid var(--line); }
 .comment-meta input + input { border-left: 1px solid var(--line); }
-.comment-input input { width: 100%; height: 42px; padding: 0 14px; border: 0; box-shadow: none; }
-.comment-tools { display: flex; gap: 16px; height: 30px; align-items: center; padding: 0 14px; color: #667386; border-top: 1px solid #edf2f4; font-size: 13px; }
-.comment-input button { background: var(--teal); color: #fff; border-radius: 7px; height: 40px; }
+.comment-meta input { width: 100%; height: 42px; padding: 0 14px; border: 0; box-shadow: none; }
+.comment-compose > textarea { width: 100%; min-height: 78px; padding: 12px 14px; border: 0; border-radius: 0; resize: vertical; line-height: 1.75; box-shadow: none; }
+.comment-tools { display: flex; flex-wrap: wrap; gap: 8px 12px; min-height: 40px; align-items: center; padding: 6px 14px; color: #667386; border-top: 1px solid #edf2f4; font-size: 13px; }
+.comment-tools small { margin-left: auto; white-space: nowrap; }
+.emoji-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.emoji-row span { color: #536273; font-size: 13px; font-weight: 800; }
+.emoji-row button { width: 30px; height: 30px; display: inline-grid; place-items: center; border: 1px solid #e1eaee; border-radius: 999px; background: #fff; font-size: 15px; line-height: 1; }
+.emoji-row button:hover, .emoji-row button:focus-visible { border-color: rgba(7,155,149,.36); background: #e9fbf8; }
+.comment-input > button { background: var(--teal); color: #fff; border-radius: 7px; height: 40px; }
 .comment-closed { margin: 10px 0; padding: 14px 16px; border: 1px solid #dbe7ea; border-radius: 7px; color: #536273; background: #f6faf9; }
 .comment-thread { margin-top: 12px; display: flex; flex-direction: column; gap: 10px; }
 .friendly-empty { display: grid; justify-items: center; gap: 6px; padding: 22px 16px; border: 1px dashed #d5e5e6; border-radius: 8px; color: var(--muted); text-align: center; background: #fbfefe; }
@@ -384,6 +390,8 @@ pre button { position: absolute; right: 12px; top: 10px; color: #fff; border: 1p
 .message-form textarea { min-height: 120px; padding: 14px; resize: vertical; }
 .message-form footer { display: flex; align-items: center; gap: 16px; }
 .message-form footer small { margin-left: auto; color: var(--muted); }
+.message-compose-tools .emoji-row { flex: 1 1 auto; }
+.message-compose-tools > button { flex: 0 0 auto; }
 .message-form button:disabled { opacity: .58; cursor: not-allowed; }
 .form-notice { margin: 10px 0 0; padding: 10px 12px; border: 1px solid #f4c7c3; border-radius: 7px; color: #9f2f24; background: #fff7f6; font-size: 13px; }
 .message-tabs { display: flex; align-items: center; gap: 28px; border-bottom: 1px solid var(--line); }
@@ -996,7 +1004,7 @@ pre button { position: absolute; right: 12px; top: 10px; color: #fff; border: 1p
   .pager { grid-template-columns: 1fr; }
   .comment-input { grid-template-columns: 1fr; }
   .comment-input > .avatar { display: none; }
-  .comment-input button { width: 100%; }
+  .comment-input > button { width: 100%; }
   .float-actions { display: none; }
   .hero-card, .featured-card, .article-row, .profile, .form-grid, .project-grid { grid-template-columns: 1fr; height: auto; }
   .profile { grid-template-areas: "portrait" "text"; gap: 18px; }
@@ -1036,7 +1044,7 @@ pre button { position: absolute; right: 12px; top: 10px; color: #fff; border: 1p
   .message-form { padding: 18px; }
   .message-form footer { align-items: stretch; flex-direction: column; }
   .message-form footer small { margin-left: 0; }
-  .message-form footer button { width: 100%; }
+  .message-form footer > button { width: 100%; }
   .message-tabs { gap: 16px; overflow-x: auto; }
   .message-item { grid-template-columns: 44px 1fr; }
   .message-item > .avatar { width: 44px; height: 44px; }
@@ -1209,7 +1217,7 @@ pre button { position: absolute; right: 12px; top: 10px; color: #fff; border: 1p
   .comment-compose { border-radius: 14px; }
   .comment-meta { grid-template-columns: 1fr; }
   .comment-meta input + input { border-left: 0; border-top: 1px solid var(--line); }
-  .comment-input button { height: 44px; border-radius: 14px; }
+  .comment-input > button { height: 44px; border-radius: 14px; }
   .article-related-bottom { margin: 26px 0 4px; padding: 16px; border-radius: 18px; }
   .article-related-bottom > div { grid-template-columns: 1fr; }
 
@@ -1268,7 +1276,7 @@ pre button { position: absolute; right: 12px; top: 10px; color: #fff; border: 1p
   .message-form input, .message-form textarea { border-radius: 14px; }
   .message-form textarea { min-height: 160px; line-height: 1.75; }
   .message-form footer { gap: 10px; }
-  .message-form footer button { min-height: 44px; border-radius: 14px; }
+  .message-form footer > button { min-height: 44px; border-radius: 14px; }
   .message-tabs { gap: 6px; margin: 14px 0 12px; padding: 5px; border: 0; border-radius: 16px; background: #eaf1f0; scrollbar-width: none; }
   .message-tabs::-webkit-scrollbar { display: none; }
   .message-tabs button { flex: 0 0 auto; min-height: 38px; padding: 0 12px; border-radius: 12px; white-space: nowrap; }

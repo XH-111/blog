@@ -60,6 +60,7 @@ const ADMIN_LIST_PAGE_SIZE = 10;
 const ADMIN_MEDIA_PAGE_SIZE = 10;
 const PUBLIC_COMMENT_PAGE_SIZE = 10;
 const PUBLIC_MESSAGE_PAGE_SIZE = 10;
+const QUICK_EMOJIS = ["😊", "👍", "👏", "❤️", "😂", "🙏"];
 
 function useRoute() {
   const [path, setPath] = useState(location.hash.replace("#", "") || "/");
@@ -1084,6 +1085,11 @@ function CommentBox({ articleId, value, onChange, enabled, disabledReason }: { a
     }
   }
 
+  function appendCommentEmoji(emoji: string) {
+    if (!enabled || value.length >= COMMENT_CONTENT_MAX_LENGTH) return;
+    onChange(`${value}${emoji}`.slice(0, COMMENT_CONTENT_MAX_LENGTH));
+  }
+
   const title = enabled ? "发表评论" : "评论已关闭";
 
   return (
@@ -1099,8 +1105,14 @@ function CommentBox({ articleId, value, onChange, enabled, disabledReason }: { a
               <input value={commenter.authorName} onChange={(event) => setCommenter((current) => ({ ...current, authorName: event.target.value }))} placeholder="昵称" />
               <input value={commenter.authorEmail} onChange={(event) => setCommenter((current) => ({ ...current, authorEmail: event.target.value }))} placeholder="邮箱（不会公开）" />
             </div>
-            <input value={value} maxLength={COMMENT_CONTENT_MAX_LENGTH} onChange={(event) => onChange(event.target.value)} placeholder="写下你的评论..." />
-            <div className="comment-tools"><span>表情</span><span>#</span><span>&lt;/&gt;</span><span>引用</span><small>{value.length}/{COMMENT_CONTENT_MAX_LENGTH}</small></div>
+            <textarea value={value} maxLength={COMMENT_CONTENT_MAX_LENGTH} onChange={(event) => onChange(event.target.value)} placeholder="写下你的评论..." />
+            <div className="comment-tools" aria-label="评论表情快捷输入">
+              <span>表情</span>
+              <div className="emoji-row">
+                {QUICK_EMOJIS.map((emoji) => <button type="button" key={emoji} onClick={() => appendCommentEmoji(emoji)} aria-label={`插入表情 ${emoji}`}>{emoji}</button>)}
+              </div>
+              <small>{value.length}/{COMMENT_CONTENT_MAX_LENGTH}</small>
+            </div>
           </div>
           <button onClick={submitComment} disabled={submitting || !value.trim() || !commenter.authorName.trim() || !commenter.authorEmail.trim()}>{submitting ? "提交中..." : "发表评论"}</button>
         </div>
@@ -2481,6 +2493,10 @@ function MessagesPage() {
     }
   }
 
+  function appendMessageEmoji(emoji: string) {
+    setForm((current) => ({ ...current, content: `${current.content}${emoji}`.slice(0, MESSAGE_CONTENT_MAX_LENGTH) }));
+  }
+
   return (
     <>
       <PublicHeader active="/messages" />
@@ -2498,7 +2514,14 @@ function MessagesPage() {
               <label>网站（可选）<input value={form.site} onChange={(event) => setForm({ ...form, site: event.target.value })} placeholder="https://your-site.com" /></label>
             </div>
             <label>写下你的留言 *<textarea value={form.content} onChange={(event) => setForm({ ...form, content: event.target.value })} maxLength={MESSAGE_CONTENT_MAX_LENGTH} placeholder="欢迎留言交流，分享你的想法或问题..." /></label>
-            <footer><span>☺　▧　&lt;/&gt;</span><small>{form.content.length} / {MESSAGE_CONTENT_MAX_LENGTH}</small><button disabled={submitting || !form.author.trim() || !form.email.trim() || !form.content.trim()}>{submitting ? "提交中..." : "发布留言"}</button></footer>
+            <footer className="message-compose-tools">
+              <div className="emoji-row" aria-label="留言表情快捷输入">
+                <span>表情</span>
+                {QUICK_EMOJIS.map((emoji) => <button type="button" key={emoji} onClick={() => appendMessageEmoji(emoji)} aria-label={`插入表情 ${emoji}`}>{emoji}</button>)}
+              </div>
+              <small>{form.content.length} / {MESSAGE_CONTENT_MAX_LENGTH}</small>
+              <button disabled={submitting || !form.author.trim() || !form.email.trim() || !form.content.trim()}>{submitting ? "提交中..." : "发布留言"}</button>
+            </footer>
             {submitNotice && <p className="form-notice">{submitNotice}</p>}
           </form>
           <div className="message-tabs">
