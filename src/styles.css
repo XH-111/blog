@@ -47,6 +47,8 @@ input:focus, textarea:focus, select:focus { border-color: var(--teal); box-shado
 .admin-search-panel small, .admin-search-panel p { margin: 0; color: var(--muted); font-size: 12px; }
 .round, .avatar { display: grid; place-items: center; border: 1px solid var(--line); border-radius: 50%; background: #fff; }
 .round, .avatar.sm { width: 42px; height: 42px; }
+.admin-entry-button { min-width: 58px; height: 38px; padding: 0 14px; border: 1px solid rgba(7, 155, 149, .32); border-radius: 8px; color: var(--teal-dark); background: #e9fbf8; font-weight: 800; }
+.admin-entry-button:hover { border-color: rgba(7, 155, 149, .52); background: #dcf7f4; }
 .avatar { position: relative; color: #fff; background: radial-gradient(circle at 50% 34%, #f2c5a6 0 18%, transparent 19%), radial-gradient(circle at 50% 78%, #f4f7fb 0 30%, transparent 31%), linear-gradient(135deg, #1d4f7a, #9fd4e5); font-weight: 700; flex: 0 0 auto; aspect-ratio: 1 / 1; overflow: hidden; }
 .avatar::after { content: ""; position: absolute; left: 26%; right: 26%; top: 20%; height: 16%; border-radius: 50% 50% 35% 35%; background: #1f2937; }
 .avatar { text-indent: -999px; text-shadow: none; }
@@ -930,6 +932,7 @@ pre button { position: absolute; right: 12px; top: 10px; color: #fff; border: 1p
 [data-theme="dark"] .admin-mobile-menu-button { color: var(--ink); }
 [data-theme="dark"] .admin-mobile-menu-button { border-color: #293548; background: #111827; }
 [data-theme="dark"] .admin-mobile-new-button { color: #fff; background: var(--teal); }
+[data-theme="dark"] .admin-entry-button { color: #9be7df; border-color: #23484c; background: #123b3d; }
 
 @media (min-width: 1680px) {
   .public-header { grid-template-columns: minmax(340px, .95fr) minmax(380px, 1.1fr) minmax(340px, .95fr); padding-inline: clamp(70px, 6vw, 112px); }
@@ -959,7 +962,9 @@ pre button { position: absolute; right: 12px; top: 10px; color: #fff; border: 1p
   .page, .home-landing, .public-footer { width: min(100% - 28px, 100%); }
   .public-header { grid-template-columns: 1fr; height: auto; gap: 12px; padding: 14px 16px; }
   .public-header nav { order: 3; justify-content: start; overflow-x: auto; gap: 22px; }
-  .header-tools { display: none; }
+  .header-tools { order: 2; width: 100%; display: grid; grid-template-columns: minmax(0, 1fr) 42px auto; gap: 10px; }
+  .header-tools .search-mini { width: 100%; }
+  .admin-entry-button { min-width: 64px; height: 42px; padding: 0 12px; }
   .page, .article-layout, .archive-layout, .about-layout, .two-col, .login-page, .admin-app, .editor { display: block; }
   .login-page { padding: 28px; }
   .login-copy { max-width: none; }

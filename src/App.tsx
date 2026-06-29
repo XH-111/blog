@@ -297,8 +297,8 @@ function PublicHeader({ active }: { active: string }) {
           <input value={headerSearch} onChange={(event) => setHeaderSearch(event.target.value)} placeholder="搜索文章..." />
           <button aria-label="搜索文章">⌕</button>
         </form>
-        <button className="round" onClick={toggleTheme}>◐</button>
-        <button className="avatar sm" onClick={() => go("/admin/login")}>站</button>
+        <button className="round" onClick={toggleTheme} aria-label="切换深色模式">◐</button>
+        <button className="admin-entry-button" onClick={() => go("/admin/login")}>后台</button>
       </div>
     </header>
   );
