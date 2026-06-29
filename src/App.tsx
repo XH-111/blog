@@ -282,25 +282,38 @@ function PublicHeader({ active }: { active: string }) {
     document.documentElement.dataset.theme = next;
     localStorage.setItem("blog-theme", next);
   }
+  function isPublicNavActive(href: string) {
+    return active === href || (active.startsWith("/article") && href === "/posts");
+  }
   return (
-    <header className={`public-header ${active.startsWith("/article") ? "article-header" : ""} ${active === "/posts" ? "floating-header" : ""}`}>
-      <Logo settings={siteSettings} />
-      <nav>
+    <>
+      <header className={`public-header ${active.startsWith("/article") ? "article-header" : ""} ${active === "/posts" ? "floating-header" : ""}`}>
+        <Logo settings={siteSettings} />
+        <nav className="desktop-nav" aria-label="主导航">
+          {headerNav.map(([label, href]) => (
+            <button key={href} className={isPublicNavActive(href) ? "active" : ""} onClick={() => openPublicNav(href)}>
+              {label}
+            </button>
+          ))}
+        </nav>
+        <div className="header-tools">
+          <form className="search-mini" onSubmit={submitSearch}>
+            <input value={headerSearch} onChange={(event) => setHeaderSearch(event.target.value)} placeholder="搜索文章..." />
+            <button aria-label="搜索文章">⌕</button>
+          </form>
+          <button className="round" onClick={toggleTheme} aria-label="切换深色模式">◐</button>
+          <button className="admin-entry-button" onClick={() => go("/admin/login")}>后台</button>
+        </div>
+      </header>
+      <nav className="mobile-bottom-nav" aria-label="移动端主导航">
         {headerNav.map(([label, href]) => (
-          <button key={href} className={active === href || (active.startsWith("/article") && href === "/posts") ? "active" : ""} onClick={() => openPublicNav(href)}>
-            {label}
+          <button key={href} className={isPublicNavActive(href) ? "active" : ""} onClick={() => openPublicNav(href)}>
+            <span className={`mobile-nav-icon mobile-nav-${href === "/" ? "home" : href.slice(1)}`} aria-hidden="true" />
+            <b>{label === "留言板" ? "留言" : label}</b>
           </button>
         ))}
       </nav>
-      <div className="header-tools">
-        <form className="search-mini" onSubmit={submitSearch}>
-          <input value={headerSearch} onChange={(event) => setHeaderSearch(event.target.value)} placeholder="搜索文章..." />
-          <button aria-label="搜索文章">⌕</button>
-        </form>
-        <button className="round" onClick={toggleTheme} aria-label="切换深色模式">◐</button>
-        <button className="admin-entry-button" onClick={() => go("/admin/login")}>后台</button>
-      </div>
-    </header>
+    </>
   );
 }
 
