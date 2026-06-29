@@ -404,8 +404,8 @@ function postListSql({ keyword, category, tag, year, sort, limit, offset, featur
   }
 
   const orderBy = featured
-    ? "p.featured_order ASC, p.published_at DESC"
-    : sort === "hot" ? "p.views_count DESC, p.published_at DESC" : "p.published_at DESC";
+    ? "p.featured_order ASC, p.published_at DESC, p.id DESC"
+    : sort === "hot" ? "p.views_count DESC, p.published_at DESC, p.id DESC" : "p.published_at DESC, p.id DESC";
   params.push(limit, offset);
 
   return {
@@ -1425,24 +1425,30 @@ async function sendPublicPostContent(req, res, row, id) {
   );
   const [previousPost, nextPost] = await Promise.all([
     query(
-      `SELECT id, title
-       FROM posts
-       WHERE status = 'published'
-         AND visibility IN ('public', 'password')
-         AND (published_at, id) < ($1, $2)
-       ORDER BY published_at DESC, id DESC
+      `WITH current_post AS (
+         SELECT id, published_at FROM posts WHERE id = $1
+       )
+       SELECT p.id, p.title
+       FROM posts p, current_post cp
+       WHERE p.status = 'published'
+         AND p.visibility IN ('public', 'password')
+         AND (p.published_at, p.id) > (cp.published_at, cp.id)
+       ORDER BY p.published_at ASC, p.id ASC
        LIMIT 1`,
-      [row.published_at, id],
+      [id],
     ),
     query(
-      `SELECT id, title
-       FROM posts
-       WHERE status = 'published'
-         AND visibility IN ('public', 'password')
-         AND (published_at, id) > ($1, $2)
-       ORDER BY published_at ASC, id ASC
+      `WITH current_post AS (
+         SELECT id, published_at FROM posts WHERE id = $1
+       )
+       SELECT p.id, p.title
+       FROM posts p, current_post cp
+       WHERE p.status = 'published'
+         AND p.visibility IN ('public', 'password')
+         AND (p.published_at, p.id) < (cp.published_at, cp.id)
+       ORDER BY p.published_at DESC, p.id DESC
        LIMIT 1`,
-      [row.published_at, id],
+      [id],
     ),
   ]);
   row.views_count = await recordPostView(id, req);
