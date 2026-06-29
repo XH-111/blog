@@ -56,7 +56,7 @@ if [ -d .git ] && [ "${SKIP_GIT_PULL:-false}" != "true" ]; then
   echo "updating git working tree on branch ${DEPLOY_BRANCH}"
   git fetch origin "${DEPLOY_BRANCH}"
   git checkout "${DEPLOY_BRANCH}"
-  git pull --ff-only origin "${DEPLOY_BRANCH}"
+  git merge --ff-only "origin/${DEPLOY_BRANCH}"
 else
   echo "skip git pull because .git is missing or SKIP_GIT_PULL=true"
 fi
