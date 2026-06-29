@@ -188,6 +188,15 @@ This file is a handoff note for continuing the project in a new Codex thread or 
   - `deploy/remote-deploy.sh`
 - Docker Hub access from the server timed out, so production images use `docker.m.daocloud.io` mirror prefixes.
 - Old host nginx was stopped and disabled during deployment so Caddy can bind ports 80 and 443.
+- The production app directory should be a Git checkout of `https://github.com/XH-111/blog.git`.
+- `deploy/remote-deploy.sh` now handles:
+  - Optional `git pull --ff-only` on the configured branch.
+  - Generating or preserving `deploy/.env`, including `SETTINGS_SECRET`.
+  - Building frontend `dist/` on the server with local `npm` or a Dockerized Node builder.
+  - Rebuilding/restarting the app and Caddy containers.
+- When converting an old tar-extracted deployment into a Git checkout, preserve:
+  - `deploy/.env`
+  - `public/uploads`
 - Production deploy command on the server:
 
 ```bash
