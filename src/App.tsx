@@ -898,7 +898,21 @@ function ArticlePage({ articleId }: { articleId: number }) {
         </main>
       ) : (
       <main className="article-layout">
-        <nav className="mobile-toc card" aria-label="移动端文章目录">{toc.map((section) => <button className={`toc-level-${section.level} ${activeSection === section.id ? "active" : ""}`} key={section.id} onClick={() => jumpToSection(section.id)}>{section.title}</button>)}</nav>
+        {toc.length > 0 && (
+          <details className="mobile-toc card">
+            <summary>文章目录 <small>{toc.length} 个小节</small></summary>
+            <nav className="mobile-toc-list" aria-label="移动端文章目录">
+              {toc.map((section) => (
+                <button className={`toc-level-${section.level} ${activeSection === section.id ? "active" : ""}`} key={section.id} onClick={(event) => {
+                  event.currentTarget.closest("details")?.removeAttribute("open");
+                  jumpToSection(section.id);
+                }}>
+                  {section.title}
+                </button>
+              ))}
+            </nav>
+          </details>
+        )}
         <aside className="toc card">
           <h3>文章目录</h3>
           <div className="toc-list">
