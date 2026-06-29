@@ -7,6 +7,9 @@ import { config } from "./config.js";
 import { closePool, query, transaction } from "./db.js";
 
 const uploadRoot = path.resolve(process.cwd(), "public", "uploads");
+const JSON_BODY_MAX_BYTES = 2 * 1024 * 1024;
+const IMPORT_BODY_MAX_BYTES = 8 * 1024 * 1024;
+const UPLOAD_BODY_MAX_BYTES = 55 * 1024 * 1024;
 const COMMENT_CONTENT_MAX_LENGTH = 1000;
 const MESSAGE_CONTENT_MAX_LENGTH = 2000;
 const ABOUT_SETTING_KEY = "about_page";
@@ -198,6 +201,13 @@ function hashToken(token) {
   return crypto.createHash("sha256").update(token).digest("hex");
 }
 
+function httpError(status, code, message) {
+  const error = new Error(message);
+  error.status = status;
+  error.code = code;
+  return error;
+}
+
 function sendJson(res, status, data, headers = {}) {
   res.writeHead(status, {
     "content-type": "application/json; charset=utf-8",
@@ -293,13 +303,30 @@ async function normalizeFeaturedOrder(client = { query }) {
   `);
 }
 
-function getClientIp(req) {
-  const forwarded = String(req.headers["x-forwarded-for"] || "").split(",")[0].trim();
-  return forwarded || req.socket.remoteAddress || "";
+function headerValue(value) {
+  return Array.isArray(value) ? String(value[0] || "").trim() : String(value || "").trim();
 }
 
-function getVisitorId(req) {
-  return String(req.headers["x-visitor-id"] || getClientIp(req) || "anonymous").slice(0, 120);
+function getClientIp(req) {
+  if (config.trustProxy) {
+    const realIp = headerValue(req.headers["x-real-ip"]);
+    const forwarded = headerValue(req.headers["x-forwarded-for"]).split(",")[0]?.trim();
+    if (realIp) return realIp;
+    if (forwarded) return forwarded;
+  }
+  return req.socket.remoteAddress || "";
+}
+
+function getVisitorId(req, rawVisitorId = "") {
+  const clientVisitorId = String(rawVisitorId || req.headers["x-visitor-id"] || "").trim().slice(0, 120);
+  const ip = getClientIp(req) || "anonymous";
+  return hashToken(`${ip}:${clientVisitorId || "anonymous"}`).slice(0, 64);
+}
+
+function getLikeVisitorId(req) {
+  const ip = getClientIp(req) || "anonymous";
+  const userAgent = headerValue(req.headers["user-agent"]) || "browser";
+  return hashToken(`${ip}:${userAgent}`).slice(0, 64);
 }
 
 async function removeUploadedFile(storagePath) {
@@ -317,6 +344,24 @@ async function removeUploadedUrl(url) {
   if (!url || !String(url).startsWith("/uploads/")) return;
   const relative = decodeURIComponent(String(url).replace(/^\/uploads\//, ""));
   await removeUploadedFile(path.resolve(uploadRoot, relative));
+}
+
+function safeNavigationUrl(value = "") {
+  const text = String(value || "").trim();
+  if (!text) return "";
+  if (/^https?:\/\//i.test(text)) return text;
+  if (text.startsWith("/") && !text.startsWith("//")) return text;
+  if (text.startsWith("#")) return text;
+  return "";
+}
+
+function safeAssetUrl(value = "") {
+  const text = String(value || "").trim();
+  if (!text) return "";
+  if (/^https?:\/\//i.test(text)) return text;
+  if (text.startsWith("/uploads/") || text.startsWith("/assets/")) return text;
+  if (/^data:image\/(?:png|jpe?g|gif|webp);base64,/i.test(text)) return text;
+  return "";
 }
 
 function postListSql({ keyword, category, tag, year, sort, limit, offset, featured }) {
@@ -556,6 +601,7 @@ async function writePost(client, payload, id = null) {
     : payload.preserveSlug ? baseSlug : `${baseSlug}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
   const excerpt = makeExcerpt(contentMarkdown, payload.excerpt);
   const summary = payload.summary || excerpt;
+  const coverUrl = safeAssetUrl(payload.coverUrl) || "/assets/article-cover.png";
   const categoryId = await ensureCategory(client, payload.categoryName || payload.category || "技术笔记");
   const readingMinutes = payload.readingMinutes ?? estimateReadingMinutes(contentMarkdown);
   const publishedAt = status === "published" ? parseDateOrNull(payload.publishedAt) || new Date() : null;
@@ -576,7 +622,7 @@ async function writePost(client, payload, id = null) {
     excerpt,
     summary,
     contentMarkdown,
-    payload.coverUrl || "/assets/article-cover.png",
+    coverUrl,
     categoryId,
     status,
     isFeatured,
@@ -656,7 +702,7 @@ async function writePost(client, payload, id = null) {
       title,
       summary,
       contentMarkdown,
-      payload.coverUrl || "/assets/article-cover.png",
+      coverUrl,
       payload.categoryName || payload.category || "技术笔记",
       JSON.stringify(Array.isArray(payload.tags) ? payload.tags : []),
       payload.adminUserId ?? null,
@@ -886,6 +932,12 @@ function warnRuntimeConfig() {
   if (config.host === "127.0.0.1" || config.host === "localhost") {
     warnings.push("HOST is bound to localhost. Set HOST=0.0.0.0 when the server must accept external traffic.");
   }
+  if (!config.trustProxy) {
+    warnings.push("TRUST_PROXY is disabled. Login and public rate limits will use the reverse proxy container IP instead of the real client IP.");
+  }
+  if (String(config.settingsSecret || "").trim().length < 16) {
+    warnings.push("SETTINGS_SECRET is missing or too short. Configure at least 16 characters before storing API keys in database settings.");
+  }
   if (config.adminDefaultPassword === "password") {
     warnings.push("ADMIN_DEFAULT_PASSWORD is still the development default. Change it before production use.");
   }
@@ -988,17 +1040,32 @@ async function recordRootMessageStats(client) {
   );
 }
 
-async function readBody(req) {
+async function readLimitedBuffer(req, maxBytes) {
   const chunks = [];
-  for await (const chunk of req) chunks.push(chunk);
-  if (!chunks.length) return {};
-  return JSON.parse(Buffer.concat(chunks).toString("utf8"));
+  let total = 0;
+  for await (const chunk of req) {
+    total += chunk.length;
+    if (total > maxBytes) {
+      req.destroy();
+      throw httpError(413, "request_too_large", "Request body is too large");
+    }
+    chunks.push(chunk);
+  }
+  return Buffer.concat(chunks);
 }
 
-async function readBuffer(req) {
-  const chunks = [];
-  for await (const chunk of req) chunks.push(chunk);
-  return Buffer.concat(chunks);
+async function readBody(req, { maxBytes = JSON_BODY_MAX_BYTES } = {}) {
+  const buffer = await readLimitedBuffer(req, maxBytes);
+  if (!buffer.length) return {};
+  try {
+    return JSON.parse(buffer.toString("utf8"));
+  } catch {
+    throw httpError(400, "invalid_json", "Invalid JSON body");
+  }
+}
+
+async function readBuffer(req, { maxBytes = UPLOAD_BODY_MAX_BYTES } = {}) {
+  return readLimitedBuffer(req, maxBytes);
 }
 
 function decodeMultipartText(value) {
@@ -1257,8 +1324,7 @@ async function handleAdminChangePassword(req, res) {
 
 async function handlePublicPosts(req, res, url) {
   await publishDueScheduledPosts();
-  const limit = Math.min(Number(url.searchParams.get("pageSize") ?? 20), 100);
-  const page = Math.max(Number(url.searchParams.get("page") ?? 1), 1);
+  const { page, pageSize: limit, offset } = readPagination(url, { defaultPageSize: 20, maxPageSize: 100 });
   const options = {
     keyword: url.searchParams.get("keyword") || url.searchParams.get("q") || "",
     category: url.searchParams.get("category") || "",
@@ -1267,7 +1333,7 @@ async function handlePublicPosts(req, res, url) {
     sort: url.searchParams.get("sort") || "latest",
     featured: ["1", "true", "yes"].includes(String(url.searchParams.get("featured") || "").toLowerCase()),
     limit,
-    offset: (page - 1) * limit,
+    offset,
   };
 
   const sql = postListSql(options);
@@ -1484,6 +1550,7 @@ async function handlePublicStats(req, res) {
 
 async function handleUnlockPublicPost(req, res, id) {
   await publishDueScheduledPosts();
+  if (enforceRateLimit(req, res, { scope: `public-post-unlock:${id}`, max: 5, windowMs: 5 * 60 * 1000 })) return;
   const body = await readBody(req);
   const password = String(body.password || "").trim();
   if (!password) return sendJson(res, 400, { error: "post_password_required", message: "Password is required" }, corsHeaders(req));
@@ -1534,17 +1601,17 @@ function normalizeHomePage(value = {}) {
     subtitle: text(next.subtitle, DEFAULT_HOME_PAGE.subtitle),
     description: text(next.description, DEFAULT_HOME_PAGE.description),
     primaryButtonText: String(next.primaryButtonText || DEFAULT_HOME_PAGE.primaryButtonText).trim(),
-    primaryButtonUrl: String(next.primaryButtonUrl || DEFAULT_HOME_PAGE.primaryButtonUrl).trim(),
+    primaryButtonUrl: safeNavigationUrl(next.primaryButtonUrl) || DEFAULT_HOME_PAGE.primaryButtonUrl,
     secondaryButtonText: String(next.secondaryButtonText || DEFAULT_HOME_PAGE.secondaryButtonText).trim(),
-    secondaryButtonUrl: String(next.secondaryButtonUrl || DEFAULT_HOME_PAGE.secondaryButtonUrl).trim(),
+    secondaryButtonUrl: safeNavigationUrl(next.secondaryButtonUrl) || DEFAULT_HOME_PAGE.secondaryButtonUrl,
     primaryButtonColor: color(next.primaryButtonColor, DEFAULT_HOME_PAGE.primaryButtonColor),
     secondaryButtonColor: color(next.secondaryButtonColor, DEFAULT_HOME_PAGE.secondaryButtonColor),
     titleColor: color(next.titleColor, DEFAULT_HOME_PAGE.titleColor),
     subtitleColor: color(next.subtitleColor, DEFAULT_HOME_PAGE.subtitleColor),
     descriptionColor: color(next.descriptionColor, DEFAULT_HOME_PAGE.descriptionColor),
     coverType: next.coverType === "video" ? "video" : "image",
-    coverUrl: String(next.coverUrl || "").trim(),
-    coverVideoUrl: String(next.coverVideoUrl || "").trim(),
+    coverUrl: safeAssetUrl(next.coverUrl),
+    coverVideoUrl: safeAssetUrl(next.coverVideoUrl),
     coverPositionX: clampPercent(next.coverPositionX, DEFAULT_HOME_PAGE.coverPositionX),
     coverPositionY: clampPercent(next.coverPositionY, DEFAULT_HOME_PAGE.coverPositionY),
     coverZoom: clampZoom(next.coverZoom, DEFAULT_HOME_PAGE.coverZoom),
@@ -1554,7 +1621,7 @@ function normalizeHomePage(value = {}) {
       description: text(item?.description, DEFAULT_HOME_PAGE.entryCards[index]?.description || ""),
       actionText: text(item?.actionText, DEFAULT_HOME_PAGE.entryCards[index]?.actionText || "查看"),
       icon: ["doc", "cube", "user"].includes(item?.icon) ? item.icon : DEFAULT_HOME_PAGE.entryCards[index]?.icon || "doc",
-      href: text(item?.href, DEFAULT_HOME_PAGE.entryCards[index]?.href || "/"),
+      href: safeNavigationUrl(item?.href) || DEFAULT_HOME_PAGE.entryCards[index]?.href || "/",
       visible: item?.visible !== false,
     })).filter((item) => item.title || item.description || item.actionText),
   };
@@ -1595,15 +1662,15 @@ function normalizeSiteSettings(value = {}) {
   return {
     siteName: text(next.siteName, DEFAULT_SITE_SETTINGS.siteName) || DEFAULT_SITE_SETTINGS.siteName,
     siteSubtitle: text(next.siteSubtitle, DEFAULT_SITE_SETTINGS.siteSubtitle),
-    logoUrl: text(next.logoUrl, DEFAULT_SITE_SETTINGS.logoUrl),
-    faviconUrl: text(next.faviconUrl, DEFAULT_SITE_SETTINGS.faviconUrl),
+    logoUrl: safeAssetUrl(next.logoUrl),
+    faviconUrl: safeAssetUrl(next.faviconUrl),
     defaultSeoTitle: text(next.defaultSeoTitle, DEFAULT_SITE_SETTINGS.defaultSeoTitle) || text(next.siteName, DEFAULT_SITE_SETTINGS.siteName),
     defaultSeoDescription: text(next.defaultSeoDescription, DEFAULT_SITE_SETTINGS.defaultSeoDescription),
-    defaultOgImageUrl: text(next.defaultOgImageUrl, DEFAULT_SITE_SETTINGS.defaultOgImageUrl),
+    defaultOgImageUrl: safeAssetUrl(next.defaultOgImageUrl),
     icpText: text(next.icpText, DEFAULT_SITE_SETTINGS.icpText),
-    icpUrl: text(next.icpUrl, DEFAULT_SITE_SETTINGS.icpUrl),
+    icpUrl: safeNavigationUrl(next.icpUrl),
     policeText: text(next.policeText, DEFAULT_SITE_SETTINGS.policeText),
-    policeUrl: text(next.policeUrl, DEFAULT_SITE_SETTINGS.policeUrl),
+    policeUrl: safeNavigationUrl(next.policeUrl),
     footerText: text(next.footerText, DEFAULT_SITE_SETTINGS.footerText),
   };
 }
@@ -1648,7 +1715,12 @@ function encryptSettingSecret(value = "") {
   const text = String(value || "").trim();
   const secret = String(config.settingsSecret || "").trim();
   if (!text) return { encrypted: false, value: "" };
-  if (secret.length < 16) return { encrypted: false, value: text };
+  if (secret.length < 16) {
+    if (config.nodeEnv === "production") {
+      throw httpError(500, "settings_secret_required", "SETTINGS_SECRET must be at least 16 characters before storing API keys");
+    }
+    return { encrypted: false, value: text };
+  }
   const iv = crypto.randomBytes(12);
   const key = crypto.createHash("sha256").update(secret).digest();
   const cipher = crypto.createCipheriv("aes-256-gcm", key, iv);
@@ -1779,7 +1851,7 @@ async function handleAdminImportTemplate(req, res) {
 }
 
 async function handleAdminImportPreview(req, res) {
-  const body = await readBody(req);
+  const body = await readBody(req, { maxBytes: IMPORT_BODY_MAX_BYTES });
   const items = normalizeImportArticles(body);
   const strategy = body.strategy === "rename" ? "rename" : "skip";
   const preview = await buildImportPreview(items, { strategy });
@@ -1787,7 +1859,7 @@ async function handleAdminImportPreview(req, res) {
 }
 
 async function handleAdminImportCommit(req, res) {
-  const body = await readBody(req);
+  const body = await readBody(req, { maxBytes: IMPORT_BODY_MAX_BYTES });
   const items = normalizeImportArticles(body);
   const strategy = body.strategy === "rename" ? "rename" : "skip";
   const preview = await buildImportPreview(items, { strategy });
@@ -1820,23 +1892,25 @@ function normalizeAboutPage(value = {}) {
   return {
     ...next,
     phone: String(next.phone || DEFAULT_ABOUT_PAGE.phone || "").trim(),
-    githubUrl: String(next.githubUrl || next.socials?.find?.((item) => String(item?.label || "").toLowerCase() === "github")?.url || DEFAULT_ABOUT_PAGE.githubUrl || "").trim(),
-    wechatQrUrl: String(next.wechatQrUrl || "").trim(),
+    githubUrl: safeNavigationUrl(next.githubUrl || next.socials?.find?.((item) => String(item?.label || "").toLowerCase() === "github")?.url) || DEFAULT_ABOUT_PAGE.githubUrl,
+    wechatQrUrl: safeAssetUrl(next.wechatQrUrl),
+    portraitUrl: safeAssetUrl(next.portraitUrl) || DEFAULT_ABOUT_PAGE.portraitUrl,
     skills: list(next.skills, DEFAULT_ABOUT_PAGE.skills).map((item) => String(item).trim()).filter(Boolean),
     projects: list(next.projects, DEFAULT_ABOUT_PAGE.projects).map((item, index) => ({
-      title: String(item?.title || DEFAULT_ABOUT_PAGE.projects[index]?.title || "椤圭洰").trim(),
+      title: String(item?.title || DEFAULT_ABOUT_PAGE.projects[index]?.title || "项目").trim(),
       description: String(item?.description || "").trim(),
-      imageUrl: String(item?.imageUrl || "").trim(),
-      projectUrl: String(item?.projectUrl || "").trim(),
-      demoUrl: String(item?.demoUrl || "").trim(),
+      imageUrl: safeAssetUrl(item?.imageUrl),
+      projectUrl: safeNavigationUrl(item?.projectUrl),
+      demoUrl: safeNavigationUrl(item?.demoUrl),
       tags: list(item?.tags, []).map((tag) => String(tag).trim()).filter(Boolean),
       badge: String(item?.badge || "").trim(),
     })).filter((item) => item.title),
     socials: list(next.socials, DEFAULT_ABOUT_PAGE.socials).map((item) => ({
       label: String(item?.label || "").trim(),
-      url: String(item?.url || "").trim(),
+      url: safeNavigationUrl(item?.url),
     })).filter((item) => item.label),
-    writingTopics: list(next.writingTopics, DEFAULT_ABOUT_PAGE.writingTopics).map((item) => typeof item === "string" ? { label: item.trim(), url: `/archive?tag=${encodeURIComponent(item.trim())}` } : { label: String(item?.label || "").trim(), url: String(item?.url || "").trim() }).filter((item) => item.label),
+    writingTopics: list(next.writingTopics, DEFAULT_ABOUT_PAGE.writingTopics).map((item) => typeof item === "string" ? { label: item.trim(), url: `/archive?tag=${encodeURIComponent(item.trim())}` } : { label: String(item?.label || "").trim(), url: safeNavigationUrl(item?.url) }).filter((item) => item.label),
+    cooperateUrl: safeNavigationUrl(next.cooperateUrl) || DEFAULT_ABOUT_PAGE.cooperateUrl,
     timeline: list(next.timeline, DEFAULT_ABOUT_PAGE.timeline).map((item) => ({
       year: String(item?.year || "").trim(),
       title: String(item?.title || "").trim(),
@@ -1875,6 +1949,7 @@ async function handleAdminUpdateAboutSettings(req, res) {
 }
 
 async function handleCreateSubscription(req, res) {
+  if (enforceRateLimit(req, res, { scope: "public-subscription", max: 5, windowMs: 10 * 60 * 1000 })) return;
   const body = await readBody(req);
   const email = String(body.email || "").trim().toLowerCase();
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
@@ -1895,8 +1970,8 @@ async function handleCreateSubscription(req, res) {
 }
 
 async function handleLikePost(req, res, id) {
-  const body = await readBody(req);
-  const visitorId = String(body.visitorId || req.headers["x-visitor-id"] || req.socket.remoteAddress || "anonymous").slice(0, 120);
+  if (enforceRateLimit(req, res, { scope: `public-post-like:${id}`, max: 20, windowMs: 60 * 1000 })) return;
+  const visitorId = getLikeVisitorId(req);
   const result = await transaction(async (client) => {
     const post = await client.query("SELECT id, likes_count FROM posts WHERE id = $1 AND status = 'published'", [id]);
     if (!post.rowCount) return null;
@@ -1905,7 +1980,7 @@ async function handleLikePost(req, res, id) {
        VALUES ('post', $1, $2, $3)
        ON CONFLICT (target_type, target_id, visitor_id) DO NOTHING
        RETURNING id`,
-      [id, visitorId, req.socket.remoteAddress],
+      [id, visitorId, getClientIp(req)],
     );
     if (inserted.rowCount) {
       const updated = await client.query("UPDATE posts SET likes_count = likes_count + 1 WHERE id = $1 RETURNING likes_count", [id]);
@@ -1919,8 +1994,8 @@ async function handleLikePost(req, res, id) {
 }
 
 async function handleLikeMessage(req, res, id) {
-  const body = await readBody(req);
-  const visitorId = String(body.visitorId || req.headers["x-visitor-id"] || req.socket.remoteAddress || "anonymous").slice(0, 120);
+  if (enforceRateLimit(req, res, { scope: `public-message-like:${id}`, max: 20, windowMs: 60 * 1000 })) return;
+  const visitorId = getLikeVisitorId(req);
   const result = await transaction(async (client) => {
     const message = await client.query("SELECT id, likes_count FROM messages WHERE id = $1 AND status = 'approved'", [id]);
     if (!message.rowCount) return null;
@@ -1929,7 +2004,7 @@ async function handleLikeMessage(req, res, id) {
        VALUES ('message', $1, $2, $3)
        ON CONFLICT (target_type, target_id, visitor_id) DO NOTHING
        RETURNING id`,
-      [id, visitorId, req.socket.remoteAddress],
+      [id, visitorId, getClientIp(req)],
     );
     if (inserted.rowCount) {
       const updated = await client.query("UPDATE messages SET likes_count = likes_count + 1 WHERE id = $1 RETURNING likes_count", [id]);
@@ -1995,7 +2070,7 @@ async function handleCreateComment(req, res, id) {
       `INSERT INTO comments(post_id, parent_id, author_name, author_email, author_site, content, status, ip_address, user_agent)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
        RETURNING id, author_name, content, likes_count, status, created_at`,
-      [id, body.parentId ?? null, authorName, authorEmail, body.authorSite ?? body.site ?? null, content, commentStatus, req.socket.remoteAddress, req.headers["user-agent"] ?? ""],
+      [id, body.parentId ?? null, authorName, authorEmail, body.authorSite ?? body.site ?? null, content, commentStatus, getClientIp(req), req.headers["user-agent"] ?? ""],
     );
     await refreshPostCommentCount(client, id);
     if (commentStatus === "approved") await recordApprovedCommentStats(client, id);
@@ -2061,7 +2136,7 @@ async function handleCreateMessage(req, res) {
       `INSERT INTO messages(parent_id, author_name, author_email, author_site, role, content, status, ip_address, user_agent)
        VALUES ($1,$2,$3,$4,'visitor',$5,'pending',$6,$7)
        RETURNING id, parent_id, author_name, role, content, likes_count, status, created_at`,
-      [parentId, authorName, authorEmail, body.authorSite ?? body.site ?? null, content, req.socket.remoteAddress, req.headers["user-agent"] ?? ""],
+      [parentId, authorName, authorEmail, body.authorSite ?? body.site ?? null, content, getClientIp(req), req.headers["user-agent"] ?? ""],
     );
     return inserted;
   });
@@ -2503,7 +2578,7 @@ async function handleAdminMedia(req, res, url) {
 }
 
 async function handleAdminUploadMedia(req, res) {
-  const body = await readBuffer(req);
+  const body = await readBuffer(req, { maxBytes: UPLOAD_BODY_MAX_BYTES });
   const { fields, files } = parseMultipart(req, body);
   const file = files.find((item) => item.fieldName === "file") ?? files[0];
   if (!file) return sendJson(res, 400, { error: "file_required", message: "Please choose an image or video file" }, corsHeaders(req));
@@ -3337,13 +3412,17 @@ async function handleRequest(req, res) {
     sendJson(res, 404, { error: "not_found" }, headers);
   } catch (error) {
     console.error(error);
+    if (error?.status && error?.code) {
+      return sendJson(res, error.status, { error: error.code, message: error.message }, headers);
+    }
     if (error?.code === "23505") {
       return sendJson(res, 409, { error: "duplicate_key", message: "Name or slug already exists" }, headers);
     }
     if (error?.code === "23503") {
       return sendJson(res, 409, { error: "record_in_use", message: "该记录仍被其他数据引用，不能删除" }, headers);
     }
-    sendJson(res, 500, { error: "internal_error", message: error.message }, headers);
+    const message = config.nodeEnv === "production" ? "Internal server error" : error?.message || "Internal server error";
+    sendJson(res, 500, { error: "internal_error", message }, headers);
   }
 }
 

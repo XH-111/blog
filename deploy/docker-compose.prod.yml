@@ -27,6 +27,8 @@ services:
       NODE_ENV: production
       HOST: 0.0.0.0
       PORT: 8000
+      TRUST_PROXY: "true"
+      SETTINGS_SECRET: ${SETTINGS_SECRET}
       DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
       CORS_ORIGIN: https://${DOMAIN},http://${DOMAIN},https://www.${DOMAIN},http://www.${DOMAIN}
     volumes:

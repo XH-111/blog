@@ -13,6 +13,33 @@ const VISITOR_ID_KEY = "blog-visitor-id";
 const ADMIN_AUTH_CHANGED_EVENT = "admin-auth-changed";
 type DbId = number | string;
 
+export function sanitizeNavigationUrl(url?: string) {
+  const text = String(url || "").trim();
+  if (!text) return "";
+  if (/^https?:\/\//i.test(text)) return text;
+  if (text.startsWith("/") && !text.startsWith("//")) return text;
+  if (text.startsWith("#")) return text;
+  return "";
+}
+
+export function sanitizeMarkdownUrl(url?: string) {
+  const text = String(url || "").trim();
+  if (!text) return "";
+  if (/^(https?:|mailto:)/i.test(text)) return text;
+  if ((text.startsWith("/") && !text.startsWith("//")) || text.startsWith("#")) return text;
+  return "";
+}
+
+export function sanitizeAssetUrl(url?: string) {
+  const text = String(url || "").trim();
+  if (!text) return "";
+  if (/^https?:\/\//i.test(text)) return text;
+  if (text.startsWith("/uploads/") || text.startsWith("/assets/")) return text;
+  if (text.startsWith("blob:")) return text;
+  if (/^data:image\/(?:png|jpe?g|gif|webp);base64,/i.test(text)) return text;
+  return "";
+}
+
 function getAdminToken() {
   return window.localStorage.getItem(ADMIN_TOKEN_KEY);
 }
@@ -36,9 +63,10 @@ function getVisitorId() {
 }
 
 function resolveBackendAssetUrl(url?: string) {
-  if (!url) return url;
-  if (/^(https?:|data:|blob:)/i.test(url)) return url;
-  return url.startsWith("/uploads/") ? `${API_ORIGIN}${url}` : url;
+  const safeUrl = sanitizeAssetUrl(url);
+  if (!safeUrl) return "";
+  if (/^(https?:|data:|blob:)/i.test(safeUrl)) return safeUrl;
+  return safeUrl.startsWith("/uploads/") ? `${API_ORIGIN}${safeUrl}` : safeUrl;
 }
 
 function adminHeaders() {
@@ -114,6 +142,9 @@ const API_ERROR_MESSAGES: Record<string, string> = {
   ai_empty_result: "AI 没有返回内容，请稍后重试",
   ai_web_search_disabled: "后端未启用 AI 联网核查，请检查 AI_WEB_SEARCH_ENABLED 配置",
   rate_limited: "操作太频繁，请稍后再试",
+  request_too_large: "请求内容过大，请缩小后重试",
+  invalid_json: "请求 JSON 格式不正确",
+  settings_secret_required: "生产环境保存 API Key 前必须配置 SETTINGS_SECRET",
 };
 
 function isAbortError(error: unknown) {
@@ -1069,15 +1100,15 @@ function normalizeSiteSettings(input?: Partial<SiteSettings>): SiteSettings {
   return {
     siteName,
     siteSubtitle: text(source.siteSubtitle, defaultSiteSettings.siteSubtitle),
-    logoUrl: text(source.logoUrl, defaultSiteSettings.logoUrl),
-    faviconUrl: text(source.faviconUrl, defaultSiteSettings.faviconUrl),
+    logoUrl: sanitizeAssetUrl(text(source.logoUrl, defaultSiteSettings.logoUrl)),
+    faviconUrl: sanitizeAssetUrl(text(source.faviconUrl, defaultSiteSettings.faviconUrl)),
     defaultSeoTitle: text(source.defaultSeoTitle, defaultSiteSettings.defaultSeoTitle) || siteName,
     defaultSeoDescription: text(source.defaultSeoDescription, defaultSiteSettings.defaultSeoDescription),
-    defaultOgImageUrl: text(source.defaultOgImageUrl, defaultSiteSettings.defaultOgImageUrl),
+    defaultOgImageUrl: sanitizeAssetUrl(text(source.defaultOgImageUrl, defaultSiteSettings.defaultOgImageUrl)),
     icpText: text(source.icpText, defaultSiteSettings.icpText),
-    icpUrl: text(source.icpUrl, defaultSiteSettings.icpUrl),
+    icpUrl: sanitizeNavigationUrl(text(source.icpUrl, defaultSiteSettings.icpUrl)),
     policeText: text(source.policeText, defaultSiteSettings.policeText),
-    policeUrl: text(source.policeUrl, defaultSiteSettings.policeUrl),
+    policeUrl: sanitizeNavigationUrl(text(source.policeUrl, defaultSiteSettings.policeUrl)),
     footerText: text(source.footerText, defaultSiteSettings.footerText),
   };
 }
@@ -1109,17 +1140,17 @@ function normalizeHomePageSettings(input?: Partial<HomePageSettings>): HomePageS
     subtitle: source.subtitle ?? defaultHomePageSettings.subtitle,
     description: source.description ?? defaultHomePageSettings.description,
     primaryButtonText: source.primaryButtonText ?? defaultHomePageSettings.primaryButtonText,
-    primaryButtonUrl: source.primaryButtonUrl ?? defaultHomePageSettings.primaryButtonUrl,
+    primaryButtonUrl: sanitizeNavigationUrl(source.primaryButtonUrl) || defaultHomePageSettings.primaryButtonUrl,
     secondaryButtonText: source.secondaryButtonText ?? defaultHomePageSettings.secondaryButtonText,
-    secondaryButtonUrl: source.secondaryButtonUrl ?? defaultHomePageSettings.secondaryButtonUrl,
+    secondaryButtonUrl: sanitizeNavigationUrl(source.secondaryButtonUrl) || defaultHomePageSettings.secondaryButtonUrl,
     primaryButtonColor: color(source.primaryButtonColor, defaultHomePageSettings.primaryButtonColor),
     secondaryButtonColor: color(source.secondaryButtonColor, defaultHomePageSettings.secondaryButtonColor),
     titleColor: color(source.titleColor, defaultHomePageSettings.titleColor),
     subtitleColor: color(source.subtitleColor, defaultHomePageSettings.subtitleColor),
     descriptionColor: color(source.descriptionColor, defaultHomePageSettings.descriptionColor),
     coverType: source.coverType === "video" ? "video" : "image",
-    coverUrl: source.coverUrl ?? defaultHomePageSettings.coverUrl,
-    coverVideoUrl: source.coverVideoUrl ?? defaultHomePageSettings.coverVideoUrl,
+    coverUrl: sanitizeAssetUrl(source.coverUrl) || defaultHomePageSettings.coverUrl,
+    coverVideoUrl: sanitizeAssetUrl(source.coverVideoUrl) || defaultHomePageSettings.coverVideoUrl,
     coverPositionX: clampPercent(source.coverPositionX, defaultHomePageSettings.coverPositionX),
     coverPositionY: clampPercent(source.coverPositionY, defaultHomePageSettings.coverPositionY),
     coverZoom: clampZoom(source.coverZoom, defaultHomePageSettings.coverZoom),
@@ -1129,7 +1160,7 @@ function normalizeHomePageSettings(input?: Partial<HomePageSettings>): HomePageS
       description: item?.description ?? defaultHomePageSettings.entryCards[index]?.description ?? "",
       actionText: item?.actionText ?? defaultHomePageSettings.entryCards[index]?.actionText ?? "查看",
       icon: normalizeIcon(item?.icon, defaultHomePageSettings.entryCards[index]?.icon ?? "doc"),
-      href: item?.href ?? defaultHomePageSettings.entryCards[index]?.href ?? "/",
+      href: sanitizeNavigationUrl(item?.href) || defaultHomePageSettings.entryCards[index]?.href || "/",
       visible: item?.visible !== false,
     })).filter((item) => item.title || item.description || item.actionText),
   };
@@ -1142,12 +1173,22 @@ function normalizeAboutPageSettings(input?: Partial<AboutPageSettings>): AboutPa
     ...defaultAboutPageSettings,
     ...source,
     phone: source.phone ?? defaultAboutPageSettings.phone,
-    githubUrl: source.githubUrl ?? legacyGithubUrl ?? defaultAboutPageSettings.githubUrl,
-    wechatQrUrl: source.wechatQrUrl ?? defaultAboutPageSettings.wechatQrUrl,
+    githubUrl: sanitizeNavigationUrl(source.githubUrl ?? legacyGithubUrl) || defaultAboutPageSettings.githubUrl,
+    wechatQrUrl: sanitizeAssetUrl(source.wechatQrUrl) || defaultAboutPageSettings.wechatQrUrl,
+    portraitUrl: sanitizeAssetUrl(source.portraitUrl) || defaultAboutPageSettings.portraitUrl,
     skills: Array.isArray(source.skills) ? source.skills : defaultAboutPageSettings.skills,
-    projects: Array.isArray(source.projects) ? source.projects.map((item) => ({ ...item, projectUrl: item.projectUrl ?? "", demoUrl: item.demoUrl ?? "", tags: Array.isArray(item.tags) ? item.tags : [] })) : defaultAboutPageSettings.projects,
-    socials: Array.isArray(source.socials) ? source.socials : defaultAboutPageSettings.socials,
-    writingTopics: Array.isArray(source.writingTopics) ? source.writingTopics.map((item) => typeof item === "string" ? { label: item, url: `/posts?tag=${encodeURIComponent(item)}` } : { label: item.label, url: item.url ?? "" }).filter((item) => item.label) : defaultAboutPageSettings.writingTopics,
+    projects: Array.isArray(source.projects)
+      ? source.projects.map((item) => ({
+        ...item,
+        imageUrl: sanitizeAssetUrl(item.imageUrl),
+        projectUrl: sanitizeNavigationUrl(item.projectUrl),
+        demoUrl: sanitizeNavigationUrl(item.demoUrl),
+        tags: Array.isArray(item.tags) ? item.tags : [],
+      }))
+      : defaultAboutPageSettings.projects,
+    socials: Array.isArray(source.socials) ? source.socials.map((item) => ({ ...item, url: sanitizeNavigationUrl(item.url) })) : defaultAboutPageSettings.socials,
+    writingTopics: Array.isArray(source.writingTopics) ? source.writingTopics.map((item) => typeof item === "string" ? { label: item, url: `/posts?tag=${encodeURIComponent(item)}` } : { label: item.label, url: sanitizeNavigationUrl(item.url) }).filter((item) => item.label) : defaultAboutPageSettings.writingTopics,
+    cooperateUrl: sanitizeNavigationUrl(source.cooperateUrl) || defaultAboutPageSettings.cooperateUrl,
     timeline: Array.isArray(source.timeline) ? source.timeline : defaultAboutPageSettings.timeline,
   };
 }

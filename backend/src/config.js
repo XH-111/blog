@@ -23,6 +23,11 @@ function numberFromEnv(value, fallback) {
   return Number.isFinite(number) && number > 0 ? number : fallback;
 }
 
+function booleanFromEnv(value, fallback = false) {
+  if (value === undefined || value === null || value === "") return fallback;
+  return ["1", "true", "yes", "on"].includes(String(value).trim().toLowerCase());
+}
+
 export const config = {
   port: Number(process.env.PORT ?? 8000),
   host: process.env.HOST || "127.0.0.1",
@@ -30,6 +35,7 @@ export const config = {
   databaseUrl: process.env.DATABASE_URL ?? "postgres://blog:blog123456@127.0.0.1:5432/blog_dev",
   adminDefaultPassword: process.env.ADMIN_DEFAULT_PASSWORD ?? "password",
   adminSessionDays: Number(process.env.ADMIN_SESSION_DAYS ?? 7),
+  trustProxy: booleanFromEnv(process.env.TRUST_PROXY, false),
   settingsSecret: process.env.SETTINGS_SECRET ?? "",
   qwenApiKey: process.env.DASHSCOPE_API_KEY ?? process.env.QWEN_API_KEY ?? "",
   qwenBaseUrl: process.env.QWEN_BASE_URL ?? "https://dashscope.aliyuncs.com/compatible-mode/v1",

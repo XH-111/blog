@@ -1,5 +1,5 @@
 ﻿import { ChangeEvent, FormEvent, ReactNode, useEffect, useMemo, useRef, useState } from "react";
-import { api, getApiErrorMessage } from "./services/api";
+import { api, getApiErrorMessage, sanitizeAssetUrl, sanitizeMarkdownUrl, sanitizeNavigationUrl } from "./services/api";
 import type { ClipboardEvent, PointerEvent, WheelEvent } from "react";
 import type { AboutPageSettings, AdminAiReviewFocus, AdminAiSettings, AdminAiStatus, AdminAiTaskItem, AdminAiTool, AdminCategoryItem, AdminCommentItem, AdminDashboardData, AdminMediaItem, AdminMessageItem, AdminPostListItem, AdminPostVersionItem, AdminSearchItem, AdminTagItem, HomeEntryCardSetting, HomePageSettings, ImportPreview, PublicCommentItem, PublicSiteStats, SiteSettings } from "./services/api";
 import type { Article, Message } from "./types";
@@ -87,13 +87,17 @@ function replaceHash(path: string) {
 }
 
 function navigateConfiguredUrl(url = "/") {
-  const target = url.trim();
+  const target = sanitizeNavigationUrl(url);
   if (!target) return;
   if (/^https?:\/\//i.test(target)) {
     window.open(target, "_blank", "noopener,noreferrer");
     return;
   }
-  go(target.startsWith("/") ? target : `/${target}`);
+  if (target.startsWith("#")) {
+    location.hash = target;
+    return;
+  }
+  go(target);
 }
 
 function emitAdminDataChanged() {
@@ -119,8 +123,9 @@ function validHexColor(value: string, fallback: string) {
 }
 
 function homeCoverStyle(config: Pick<HomePageSettings, "coverUrl" | "coverPositionX" | "coverPositionY" | "coverZoom">) {
-  return config.coverUrl ? {
-    backgroundImage: `url(${config.coverUrl})`,
+  const coverUrl = sanitizeAssetUrl(config.coverUrl);
+  return coverUrl ? {
+    backgroundImage: `url(${coverUrl})`,
     backgroundPosition: `${config.coverPositionX}% ${config.coverPositionY}%`,
     backgroundSize: config.coverZoom === 100 ? "cover" : `${config.coverZoom}% auto`,
   } : undefined;
@@ -215,29 +220,32 @@ function setPropertyMeta(property: string, content: string) {
 
 function applySiteDocumentSettings(settings: SiteSettings) {
   let favicon = document.querySelector<HTMLLinkElement>('link[rel="icon"]');
-  if (settings.faviconUrl) {
+  const faviconUrl = sanitizeAssetUrl(settings.faviconUrl);
+  const defaultOgImageUrl = sanitizeAssetUrl(settings.defaultOgImageUrl);
+  if (faviconUrl) {
     if (!favicon) {
       favicon = document.createElement("link");
       favicon.rel = "icon";
       document.head.appendChild(favicon);
     }
-    favicon.href = settings.faviconUrl;
+    favicon.href = faviconUrl;
   } else {
     favicon?.remove();
   }
   setPropertyMeta("og:site_name", settings.siteName);
   setPropertyMeta("og:title", settings.defaultSeoTitle || settings.siteName);
   setPropertyMeta("og:description", settings.defaultSeoDescription);
-  setPropertyMeta("og:image", settings.defaultOgImageUrl);
-  setNamedMeta("twitter:card", settings.defaultOgImageUrl ? "summary_large_image" : "");
+  setPropertyMeta("og:image", defaultOgImageUrl);
+  setNamedMeta("twitter:card", defaultOgImageUrl ? "summary_large_image" : "");
 }
 
 function Logo({ admin = false, settings = defaultSiteSettings }: { admin?: boolean; settings?: SiteSettings }) {
   const title = admin ? settings.siteName.replace(/创作平台$/, "").trim() || settings.siteName : settings.siteName;
   const subtitle = admin ? "创作平台" : settings.siteSubtitle;
+  const logoUrl = sanitizeAssetUrl(settings.logoUrl);
   return (
     <button className="brand" onClick={() => go(admin ? "/admin" : "/")}>
-      <span className={`brand-mark ${settings.logoUrl ? "has-logo" : ""}`} style={settings.logoUrl ? { backgroundImage: `url(${settings.logoUrl})` } : undefined}>{settings.logoUrl ? "" : admin ? "✒" : "</>"}</span>
+      <span className={`brand-mark ${logoUrl ? "has-logo" : ""}`} style={logoUrl ? { backgroundImage: `url(${logoUrl})` } : undefined}>{logoUrl ? "" : admin ? "✒" : "</>"}</span>
       <span>
         <strong>{title}</strong>
         <small>{subtitle}</small>
@@ -298,12 +306,14 @@ function PublicHeader({ active }: { active: string }) {
 
 function PublicFooter() {
   const siteSettings = useSiteSettings(false);
+  const icpUrl = sanitizeNavigationUrl(siteSettings.icpUrl);
+  const policeUrl = sanitizeNavigationUrl(siteSettings.policeUrl);
   if (!siteSettings.footerText && !siteSettings.icpText && !siteSettings.policeText) return null;
   return (
     <footer className="public-footer">
       {siteSettings.footerText && <span>{siteSettings.footerText}</span>}
-      {siteSettings.icpText && (siteSettings.icpUrl ? <a href={siteSettings.icpUrl} target="_blank" rel="noreferrer">{siteSettings.icpText}</a> : <span>{siteSettings.icpText}</span>)}
-      {siteSettings.policeText && (siteSettings.policeUrl ? <a href={siteSettings.policeUrl} target="_blank" rel="noreferrer">{siteSettings.policeText}</a> : <span>{siteSettings.policeText}</span>)}
+      {siteSettings.icpText && (icpUrl ? <a href={icpUrl} target="_blank" rel="noreferrer">{siteSettings.icpText}</a> : <span>{siteSettings.icpText}</span>)}
+      {siteSettings.policeText && (policeUrl ? <a href={policeUrl} target="_blank" rel="noreferrer">{siteSettings.policeText}</a> : <span>{siteSettings.policeText}</span>)}
     </footer>
   );
 }
@@ -313,8 +323,9 @@ function Tag({ children, tone = "cyan" }: { children: ReactNode; tone?: string }
 }
 
 function Art({ type, wide = false, coverUrl }: { type: Article["image"]; wide?: boolean; coverUrl?: string }) {
+  const safeCoverUrl = sanitizeAssetUrl(coverUrl);
   return (
-    <div className={`art ${coverUrl ? "custom-cover" : type} ${wide ? "wide" : ""}`} style={coverUrl ? { backgroundImage: `url(${coverUrl})` } : undefined}>
+    <div className={`art ${safeCoverUrl ? "custom-cover" : type} ${wide ? "wide" : ""}`} style={safeCoverUrl ? { backgroundImage: `url(${safeCoverUrl})` } : undefined}>
       <div className="art-grid" />
       <b>{type === "next" ? "Next.js 14" : type === "docker" ? "docker" : type === "vue" ? "Vue 3" : type === "linux" ? "Linux" : "Code"}</b>
       <span>{type === "next" ? "App Router 实战指南" : type === "linux" ? "性能优化" : type === "mountain" ? "" : "全栈实践"}</span>
@@ -325,7 +336,9 @@ function Art({ type, wide = false, coverUrl }: { type: Article["image"]; wide?: 
 function HomePage() {
   const [homeConfig, setHomeConfig] = useState<HomePageSettings>(defaultHomeSettings);
   const heroStyle = homeCoverStyle(homeConfig);
-  const isVideoCover = homeConfig.coverType === "video" && Boolean(homeConfig.coverVideoUrl);
+  const homeCoverUrl = sanitizeAssetUrl(homeConfig.coverUrl);
+  const homeVideoUrl = sanitizeAssetUrl(homeConfig.coverVideoUrl);
+  const isVideoCover = homeConfig.coverType === "video" && Boolean(homeVideoUrl);
   const visibleEntryCards = homeConfig.entryCards.filter((item) => item.visible);
   const renderedEntryCards = visibleEntryCards.length ? visibleEntryCards : defaultHomeSettings.entryCards.filter((item) => item.visible);
 
@@ -346,13 +359,13 @@ function HomePage() {
       <PublicHeader active="/" />
       <main className="home-landing">
         <section className="home-hero-shell">
-          <div className={`home-hero-blank ${homeConfig.coverUrl && !isVideoCover ? "has-image" : ""} ${isVideoCover ? "has-video" : ""}`} style={isVideoCover ? undefined : heroStyle} aria-hidden="true">
-            {isVideoCover && <video className="home-hero-video" src={homeConfig.coverVideoUrl} style={homeVideoStyle(homeConfig)} autoPlay muted loop playsInline />}
+          <div className={`home-hero-blank ${homeCoverUrl && !isVideoCover ? "has-image" : ""} ${isVideoCover ? "has-video" : ""}`} style={isVideoCover ? undefined : heroStyle} aria-hidden="true">
+            {isVideoCover && <video className="home-hero-video" src={homeVideoUrl} style={homeVideoStyle(homeConfig)} autoPlay muted loop playsInline />}
             <div className="home-hero-orbit one" />
             <div className="home-hero-orbit two" />
             <div className="home-hero-horizon" />
           </div>
-          {(homeConfig.coverUrl || isVideoCover) && <div className="home-hero-overlay" style={homeOverlayStyle(homeConfig)} aria-hidden="true" />}
+          {(homeCoverUrl || isVideoCover) && <div className="home-hero-overlay" style={homeOverlayStyle(homeConfig)} aria-hidden="true" />}
           <div className="home-hero-content">
             {homeConfig.title && <h1 style={{ color: homeConfig.titleColor }}>{homeConfig.title}</h1>}
             {homeConfig.subtitle && <p className="home-hero-subtitle" style={{ color: homeConfig.subtitleColor }}>{homeConfig.subtitle}</p>}
@@ -566,7 +579,8 @@ async function copyText(text: string) {
 }
 
 function useSafeImageUrl(url?: string, fallback = "/assets/about-portrait.png") {
-  const normalized = url?.trim() || fallback;
+  const fallbackUrl = sanitizeAssetUrl(fallback) || "/assets/about-portrait.png";
+  const normalized = sanitizeAssetUrl(url) || fallbackUrl;
   const [safeUrl, setSafeUrl] = useState(normalized);
   useEffect(() => {
     setSafeUrl(normalized);
@@ -574,7 +588,7 @@ function useSafeImageUrl(url?: string, fallback = "/assets/about-portrait.png") 
   return {
     url: safeUrl,
     onError: () => {
-      if (safeUrl !== fallback) setSafeUrl(fallback);
+      if (safeUrl !== fallbackUrl) setSafeUrl(fallbackUrl);
     },
   };
 }
@@ -690,6 +704,8 @@ function ArticlePage({ articleId }: { articleId: number }) {
   const [articleSideUsingMock, setArticleSideUsingMock] = useState(false);
   const [previewImage, setPreviewImage] = useState<{ src: string; alt: string } | null>(null);
   const toc = article?.sections ?? [];
+  const articleCoverUrl = sanitizeAssetUrl(article?.coverUrl);
+  const previewImageUrl = sanitizeAssetUrl(previewImage?.src);
 
   useEffect(() => {
     let alive = true;
@@ -891,7 +907,7 @@ function ArticlePage({ articleId }: { articleId: number }) {
           <button className="toc-top" onClick={() => scrollTo({ top: 0, behavior: "smooth" })}>回到顶部 ↑</button>
         </aside>
         <article className="paper">
-          <div className="cover mountain" style={article.coverUrl ? { backgroundImage: `url(${article.coverUrl})` } : undefined} />
+          <div className="cover mountain" style={articleCoverUrl ? { backgroundImage: `url(${articleCoverUrl})` } : undefined} />
           <div className="paper-body">
             <h1>{article.title}</h1>
             <div className="chip-row" aria-busy={articleLoading}><Tag tone="orange">{article.category}</Tag>{article.tags.map((tag) => <Tag key={tag}>{tag}</Tag>)}<span className="meta">▣ {article.date}　◷ 阅读 {article.readingMinutes} 分钟　◎ {article.reads}　♡ {likeCount}</span></div>
@@ -940,7 +956,7 @@ function ArticlePage({ articleId }: { articleId: number }) {
           <div className="media-modal article-image-modal" role="dialog" aria-modal="true" aria-label="文章图片预览" onClick={() => setPreviewImage(null)}>
             <div className="media-modal-panel article-image-modal-panel" onClick={(event) => event.stopPropagation()}>
               <header><b>{previewImage.alt || "文章图片"}</b><button type="button" onClick={() => setPreviewImage(null)}>关闭</button></header>
-              <img src={previewImage.src} alt={previewImage.alt || "文章图片"} />
+              {previewImageUrl && <img src={previewImageUrl} alt={previewImage.alt || "文章图片"} />}
             </div>
           </div>
         )}
@@ -1361,13 +1377,17 @@ function AboutPage() {
     };
   }, []);
 
-  const navigateConfiguredUrl = (url?: string) => {
-    if (!url) return;
-    if (url.startsWith("/")) go(url);
-    else window.open(url, "_blank", "noreferrer");
-  };
   const aboutSkills = aboutConfig?.skills.filter((item) => item.trim() && item.trim() !== "…") ?? [];
   const portrait = useSafeImageUrl(aboutConfig?.portraitUrl, defaultAboutSettings.portraitUrl);
+  const wechatQrUrl = sanitizeAssetUrl(aboutConfig.wechatQrUrl);
+  const githubUrl = sanitizeNavigationUrl(aboutConfig.githubUrl);
+  const cooperateUrl = sanitizeNavigationUrl(aboutConfig.cooperateUrl) || "/messages";
+  const aboutProjects = aboutConfig.projects.map((project) => ({
+    ...project,
+    imageUrl: sanitizeAssetUrl(project.imageUrl),
+    projectUrl: sanitizeNavigationUrl(project.projectUrl),
+    demoUrl: sanitizeNavigationUrl(project.demoUrl),
+  }));
 
   return (
     <>
@@ -1381,15 +1401,15 @@ function AboutPage() {
           <hr />
           <h3>技术栈</h3><div className="skill-row">{aboutSkills.map((x) => <span className="skill-chip" key={x}><b>{x.slice(0, 2).toUpperCase()}</b>{x}</span>)}</div>
           <h3>项目作品集</h3>
-          <div className="project-grid">{aboutConfig.projects.map((project, i) => <article className={project.projectUrl || project.demoUrl ? "clickable" : ""} key={`${project.title}-${i}`} onClick={() => navigateConfiguredUrl(project.projectUrl || project.demoUrl)}><ProjectCover url={project.imageUrl} badge={project.badge} title={project.title} /><h4>{project.title}</h4><p>{project.description}</p><div>{project.tags.map((tag) => <Tag key={tag} tone="gray">{tag}</Tag>)}</div></article>)}</div>
-          <div className="cooperate"><span>💬✈</span><div><h3>{aboutConfig.cooperateTitle}</h3><p>{aboutConfig.cooperateText}</p></div><button onClick={() => navigateConfiguredUrl(aboutConfig.cooperateUrl || "/messages")}>{aboutConfig.cooperateButtonText} →</button></div>
+          <div className="project-grid">{aboutProjects.map((project, i) => <article className={project.projectUrl || project.demoUrl ? "clickable" : ""} key={`${project.title}-${i}`} onClick={() => navigateConfiguredUrl(project.projectUrl || project.demoUrl)}><ProjectCover url={project.imageUrl} badge={project.badge} title={project.title} /><h4>{project.title}</h4><p>{project.description}</p><div>{project.tags.map((tag) => <Tag key={tag} tone="gray">{tag}</Tag>)}</div></article>)}</div>
+          <div className="cooperate"><span>💬✈</span><div><h3>{aboutConfig.cooperateTitle}</h3><p>{aboutConfig.cooperateText}</p></div><button onClick={() => navigateConfiguredUrl(cooperateUrl)}>{aboutConfig.cooperateButtonText} →</button></div>
         </section>
-        <aside className="side-stack"><PublicDataNotice show={aboutUsingMock} surface="关于页公开数据" /><Card title="关注我"><div className="socials about-socials"><button type="button" onClick={() => navigateConfiguredUrl(aboutConfig.githubUrl)}><span className="social-icon github-icon" aria-hidden="true">GH</span><b>GitHub</b></button><button type="button" onClick={() => setWechatQrOpen(true)}><span className="social-icon wechat-icon" aria-hidden="true">微</span><b>微信</b></button></div></Card><Card title="自我介绍时间线"><div className="intro-line">{aboutConfig.timeline.map((x) => <p key={`${x.year}-${x.title}`}><b>{x.year}</b><span>{x.title}</span><small>{x.description}</small></p>)}</div></Card></aside>
+        <aside className="side-stack"><PublicDataNotice show={aboutUsingMock} surface="关于页公开数据" /><Card title="关注我"><div className="socials about-socials"><button type="button" onClick={() => navigateConfiguredUrl(githubUrl)}><span className="social-icon github-icon" aria-hidden="true">GH</span><b>GitHub</b></button><button type="button" onClick={() => setWechatQrOpen(true)}><span className="social-icon wechat-icon" aria-hidden="true">微</span><b>微信</b></button></div></Card><Card title="自我介绍时间线"><div className="intro-line">{aboutConfig.timeline.map((x) => <p key={`${x.year}-${x.title}`}><b>{x.year}</b><span>{x.title}</span><small>{x.description}</small></p>)}</div></Card></aside>
         {wechatQrOpen && (
           <div className="media-modal" role="dialog" aria-modal="true" aria-label="微信二维码" onClick={() => setWechatQrOpen(false)}>
             <div className="media-modal-panel qr-modal-panel" onClick={(event) => event.stopPropagation()}>
               <header><b>微信</b><button type="button" onClick={() => setWechatQrOpen(false)}>关闭</button></header>
-              {aboutConfig.wechatQrUrl ? <img src={aboutConfig.wechatQrUrl} alt="微信二维码" /> : <p className="soft-text">请在后台关于页配置中上传微信二维码。</p>}
+              {wechatQrUrl ? <img src={wechatQrUrl} alt="微信二维码" /> : <p className="soft-text">请在后台关于页配置中上传微信二维码。</p>}
             </div>
           </div>
         )}
@@ -1507,6 +1527,9 @@ function SiteSettingsPage() {
     }
   }
 
+  const previewFaviconUrl = sanitizeAssetUrl(config.faviconUrl);
+  const previewDefaultOgImageUrl = sanitizeAssetUrl(config.defaultOgImageUrl);
+
   return (
     <>
       <AdminTop />
@@ -1567,11 +1590,11 @@ function SiteSettingsPage() {
               <div className="site-preview-card">
                 <span>浏览器与分享</span>
                 <div className="site-browser-preview">
-                  <i style={config.faviconUrl ? { backgroundImage: `url(${config.faviconUrl})` } : undefined}>{config.faviconUrl ? "" : "✦"}</i>
+                  <i style={previewFaviconUrl ? { backgroundImage: `url(${previewFaviconUrl})` } : undefined}>{previewFaviconUrl ? "" : "✦"}</i>
                   <b>{config.defaultSeoTitle || config.siteName}</b>
                 </div>
                 <div className="site-share-preview">
-                  {config.defaultOgImageUrl ? <img src={config.defaultOgImageUrl} alt="默认分享图预览" /> : <div>分享图未配置</div>}
+                  {previewDefaultOgImageUrl ? <img src={previewDefaultOgImageUrl} alt="默认分享图预览" /> : <div>分享图未配置</div>}
                   <section>
                     <b>{config.defaultSeoTitle || config.siteName}</b>
                     <p>{config.defaultSeoDescription || "默认描述为空，搜索和分享时可能缺少摘要。"}</p>
@@ -1902,7 +1925,8 @@ function HomeSettingsPage() {
     updateField("coverZoom", clampZoom(config.coverZoom + step));
   }
 
-  const activeCoverUrl = config.coverType === "video" ? config.coverVideoUrl : config.coverUrl;
+  const activeCoverUrl = sanitizeAssetUrl(config.coverType === "video" ? config.coverVideoUrl : config.coverUrl);
+  const activeVideoCoverUrl = sanitizeAssetUrl(config.coverVideoUrl);
 
   return (
     <>
@@ -1944,7 +1968,7 @@ function HomeSettingsPage() {
               <button className={config.coverType === "video" ? "active" : ""} type="button" onClick={() => updateField("coverType", "video")}>视频</button>
             </div>
             <div
-              className={`home-cover-preview ${activeCoverUrl ? "has-image draggable" : ""} ${config.coverType === "video" && config.coverVideoUrl ? "has-video" : ""}`}
+              className={`home-cover-preview ${activeCoverUrl ? "has-image draggable" : ""} ${config.coverType === "video" && activeVideoCoverUrl ? "has-video" : ""}`}
               style={config.coverType === "image" ? homeCoverStyle(config) : undefined}
               onPointerDown={startCoverDrag}
               onPointerMove={moveCoverDrag}
@@ -1952,7 +1976,7 @@ function HomeSettingsPage() {
               onPointerCancel={endCoverDrag}
               onWheel={zoomCover}
             >
-              {config.coverType === "video" && config.coverVideoUrl && <video className="home-cover-preview-video" src={config.coverVideoUrl} style={homeVideoStyle(config)} autoPlay muted loop playsInline />}
+              {config.coverType === "video" && activeVideoCoverUrl && <video className="home-cover-preview-video" src={activeVideoCoverUrl} style={homeVideoStyle(config)} autoPlay muted loop playsInline />}
               {activeCoverUrl && <span className="home-cover-preview-overlay" style={homeOverlayStyle(config)} aria-hidden="true" />}
               <div>
                 {config.title ? <b style={{ color: config.titleColor }}>{config.title}</b> : <b className="muted-preview-text">标题已隐藏</b>}
@@ -2025,7 +2049,7 @@ function HomeSettingsPage() {
                   {homeMediaItems.map((item) => (
                     <button type="button" key={item.id} onClick={() => selectHomeMedia(item)}>
                       {item.mimeType.startsWith("video/")
-                        ? <video src={item.url} muted playsInline />
+                        ? <video src={mediaOriginalUrl(item)} muted playsInline />
                         : <img src={mediaPreviewUrl(item)} alt={item.altText || item.originalName} loading="lazy" />}
                       <span>{item.mimeType.startsWith("video/") ? "视频 · " : ""}{mediaDisplayName(item)}</span>
                     </button>
@@ -2258,7 +2282,7 @@ function AboutSettingsPage() {
               {projects.map((project, index) => (
                 <article key={`${project.title}-${index}`}>
                   <div className="project-media-column">
-                    <div className="project-thumb" style={{ backgroundImage: project.imageUrl ? `url(${project.imageUrl})` : undefined }} />
+                    <div className="project-thumb" style={{ backgroundImage: sanitizeAssetUrl(project.imageUrl) ? `url(${sanitizeAssetUrl(project.imageUrl)})` : undefined }} />
                     <button type="button" onClick={() => openAboutMediaPicker("project", index)}>选择封面</button>
                   </div>
                   <div className="project-form-grid">
@@ -2548,10 +2572,9 @@ function AdminLogin() {
         <span className="brand-mark">站</span>
         <h2>登录后台</h2>
         <p>请输入管理员账号密码</p>
-        <label>账号<input value={account} onChange={(event) => setAccount(event.target.value)} placeholder="管理员账号或邮箱" /></label>
-        <label>密码<span className="password-field"><input value={password} onChange={(event) => setPassword(event.target.value)} placeholder="请输入密码" type={showPassword ? "text" : "password"} /><button type="button" onClick={() => setShowPassword((value) => !value)}>{showPassword ? "隐藏" : "查看"}</button></span></label>
+        <label>账号<input value={account} onChange={(event) => setAccount(event.target.value)} placeholder="管理员账号或邮箱" autoComplete="username" /></label>
+        <label>密码<span className="password-field"><input value={password} onChange={(event) => setPassword(event.target.value)} placeholder="请输入密码" type={showPassword ? "text" : "password"} autoComplete="current-password" /><button type="button" onClick={() => setShowPassword((value) => !value)}>{showPassword ? "隐藏" : "查看"}</button></span></label>
         {error && <p className="form-notice">{error}</p>}
-        <div className="row-between"><label className="check"><input type="checkbox" />记住我</label><a>忘记密码</a></div>
         <button className="primary" disabled={loading}>{loading ? "登录中..." : "登录管理后台"}</button>
         <div className="warning"><b>安全提示</b><span>管理接口必须带 Bearer token，未登录时后端会返回 401。</span></div>
       </form>
@@ -2850,11 +2873,19 @@ function mediaDisplayName(item: AdminMediaItem) {
 }
 
 function mediaPreviewUrl(item: AdminMediaItem) {
-  return item.thumbnailUrl || item.displayUrl || item.url;
+  return sanitizeAssetUrl(item.thumbnailUrl) || sanitizeAssetUrl(item.displayUrl) || sanitizeAssetUrl(item.url);
 }
 
 function mediaDisplayUrl(item: AdminMediaItem) {
-  return item.displayUrl || item.thumbnailUrl || item.url;
+  return sanitizeAssetUrl(item.displayUrl) || sanitizeAssetUrl(item.thumbnailUrl) || sanitizeAssetUrl(item.url);
+}
+
+function mediaOriginalUrl(item: AdminMediaItem) {
+  return sanitizeAssetUrl(item.url);
+}
+
+function safeSourceLinks(sources: Array<{ title: string; url: string }>) {
+  return sources.map((source) => ({ ...source, url: sanitizeMarkdownUrl(source.url) })).filter((source) => source.url);
 }
 
 function siteMediaTargetLabel(target: "logoUrl" | "faviconUrl" | "defaultOgImageUrl") {
@@ -2929,10 +2960,38 @@ const defaultAboutSettings: AboutPageSettings = {
 
 function AdminShell({ editor = false, page = "dashboard" }: { editor?: boolean; page?: string }) {
   const active = editor ? "文章管理" : adminRoutes[page]?.label ?? "仪表盘";
-  return <main className={`admin-app ${editor ? "admin-editor-app" : ""}`}><AdminSidebar active={active} /><section className="admin-main">{editor ? <EditorPage /> : page === "dashboard" ? <DashboardPage /> : page === "settings" ? <SiteSettingsPage /> : page === "ai" ? <AiSettingsPage /> : page === "security" ? <AccountSecurityPage /> : page === "about" ? <AboutSettingsPage /> : page === "home" ? <HomeSettingsPage /> : page === "import" ? <ImportArticlesPage /> : <AdminPlaceholder page={page} />}</section></main>;
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const content = editor ? <EditorPage /> : page === "dashboard" ? <DashboardPage /> : page === "settings" ? <SiteSettingsPage /> : page === "ai" ? <AiSettingsPage /> : page === "security" ? <AccountSecurityPage /> : page === "about" ? <AboutSettingsPage /> : page === "home" ? <HomeSettingsPage /> : page === "import" ? <ImportArticlesPage /> : <AdminPlaceholder page={page} />;
+
+  useEffect(() => {
+    setMobileMenuOpen(false);
+  }, [active, editor, page]);
+
+  useEffect(() => {
+    if (!mobileMenuOpen) return undefined;
+    function closeOnEscape(event: KeyboardEvent) {
+      if (event.key === "Escape") setMobileMenuOpen(false);
+    }
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [mobileMenuOpen]);
+
+  return <div className={`admin-app ${editor ? "admin-editor-app" : ""} ${mobileMenuOpen ? "admin-mobile-menu-open" : ""}`}>
+    <header className="admin-mobile-bar">
+      <button type="button" className="admin-mobile-menu-button" aria-label="打开后台菜单" aria-expanded={mobileMenuOpen} onClick={() => setMobileMenuOpen(true)}>☰</button>
+      <div>
+        <strong>{active}</strong>
+        <small>{editor ? "文章编辑" : "后台管理"}</small>
+      </div>
+      <button type="button" className="admin-mobile-new-button" aria-label="新建文章" onClick={() => go("/admin/editor")}>＋</button>
+    </header>
+    <AdminSidebar active={active} onNavigate={() => setMobileMenuOpen(false)} />
+    {mobileMenuOpen && <button type="button" className="admin-mobile-backdrop" aria-label="关闭后台菜单" onClick={() => setMobileMenuOpen(false)} />}
+    <section className="admin-main">{content}</section>
+  </div>;
 }
 
-function AdminSidebar({ active }: { active: string }) {
+function AdminSidebar({ active, onNavigate }: { active: string; onNavigate?: () => void }) {
   const items = Object.values(adminRoutes);
   const [dashboard, setDashboard] = useState<AdminDashboardData>(emptyDashboard);
   const [siteSettings, setSiteSettings] = useState<SiteSettings>(defaultSiteSettings);
@@ -2988,11 +3047,12 @@ function AdminSidebar({ active }: { active: string }) {
   }
   function logoutAdmin() {
     api.logout();
+    onNavigate?.();
     go("/admin/login");
   }
   return <aside className="admin-side"><Logo admin settings={siteSettings} /><nav>{items.map((item) => {
     const itemBadge = badge(item.label);
-    return <button key={item.path} className={active === item.label ? "active" : ""} onClick={() => go(item.path)}>{item.label}{itemBadge && <small>{itemBadge}</small>}</button>;
+    return <button key={item.path} className={active === item.label ? "active" : ""} onClick={() => { onNavigate?.(); go(item.path); }}>{item.label}{itemBadge && <small>{itemBadge}</small>}</button>;
   })}</nav><div className="admin-user"><span className="avatar sm">管</span><span>管理员<small>超级管理员</small></span><button type="button" title="退出登录并使当前后端会话失效" onClick={logoutAdmin}>退出</button></div></aside>;
 }
 
@@ -3789,7 +3849,7 @@ function AdminPlaceholder({ page }: { page: string }) {
               </div>
             </div>
           )}
-          {loading ? <p className="soft-text">正在读取数据...</p> : rows.length ? rows.map((row) => <div className={`admin-row ${row.href ? "clickable" : ""} ${row.media ? "media-row" : ""} ${selectedKeys.includes(row.key) ? "selected" : ""}`} key={row.key} onClick={() => row.href && go(row.href)}>{batchMode && <label className="row-check" onClick={(event) => event.stopPropagation()}><input type="checkbox" checked={selectedKeys.includes(row.key)} onChange={(event) => setRowSelected(row.key, event.target.checked)} /><span className="visually-hidden">选择 {row.text}</span></label>}{row.media && <button className={`media-thumb ${isVideoMedia(row.media) ? "video-thumb" : ""}`} type="button" style={isVideoMedia(row.media) ? undefined : { backgroundImage: `url(${mediaPreviewUrl(row.media)})` }} onClick={(event) => { event.stopPropagation(); setPreviewMedia(row.media!); }} aria-label={`查看 ${row.text}`}>{isVideoMedia(row.media) && <><video src={row.media.url} muted preload="metadata" /><span>视频</span></>}</button>}{row.media ? <span className="media-text"><b>{row.text}</b><small>{mediaMetaText(row.media)}</small></span> : <span>{row.text}</span>}<div className="admin-row-actions"><small>{row.status}</small>{row.actions?.map((action) => <button key={action.label} title={action.title} onClick={(event) => { event.stopPropagation(); if (action.href) go(action.href); action.run?.(); }}>{action.label}</button>)}{row.review && row.review.status !== "approved" && <button onClick={(event) => { event.stopPropagation(); reviewRow(row.review!.kind, row.review!.id, "approved"); }}>通过</button>}{row.review && row.review.status !== "rejected" && <button onClick={(event) => { event.stopPropagation(); reviewRow(row.review!.kind, row.review!.id, "rejected"); }}>驳回</button>}</div></div>) : <p className="soft-text">{emptyText}</p>}
+          {loading ? <p className="soft-text">正在读取数据...</p> : rows.length ? rows.map((row) => <div className={`admin-row ${row.href ? "clickable" : ""} ${row.media ? "media-row" : ""} ${selectedKeys.includes(row.key) ? "selected" : ""}`} key={row.key} onClick={() => row.href && go(row.href)}>{batchMode && <label className="row-check" onClick={(event) => event.stopPropagation()}><input type="checkbox" checked={selectedKeys.includes(row.key)} onChange={(event) => setRowSelected(row.key, event.target.checked)} /><span className="visually-hidden">选择 {row.text}</span></label>}{row.media && <button className={`media-thumb ${isVideoMedia(row.media) ? "video-thumb" : ""}`} type="button" style={isVideoMedia(row.media) ? undefined : { backgroundImage: `url(${mediaPreviewUrl(row.media)})` }} onClick={(event) => { event.stopPropagation(); setPreviewMedia(row.media!); }} aria-label={`查看 ${row.text}`}>{isVideoMedia(row.media) && <><video src={mediaOriginalUrl(row.media)} muted preload="metadata" /><span>视频</span></>}</button>}{row.media ? <span className="media-text"><b>{row.text}</b><small>{mediaMetaText(row.media)}</small></span> : <span>{row.text}</span>}<div className="admin-row-actions"><small>{row.status}</small>{row.actions?.map((action) => <button key={action.label} title={action.title} onClick={(event) => { event.stopPropagation(); if (action.href) go(action.href); action.run?.(); }}>{action.label}</button>)}{row.review && row.review.status !== "approved" && <button onClick={(event) => { event.stopPropagation(); reviewRow(row.review!.kind, row.review!.id, "approved"); }}>通过</button>}{row.review && row.review.status !== "rejected" && <button onClick={(event) => { event.stopPropagation(); reviewRow(row.review!.kind, row.review!.id, "rejected"); }}>驳回</button>}</div></div>) : <p className="soft-text">{emptyText}</p>}
           {(page === "posts" || page === "drafts" || page === "trash") && !loading && (
             <div className="admin-pagination">
               <button disabled={postPage <= 1} onClick={() => { setPostPage((value) => Math.max(1, value - 1)); setSelectedKeys([]); }}>上一页</button>
@@ -3817,8 +3877,8 @@ function AdminPlaceholder({ page }: { page: string }) {
             <div className="media-modal-panel" onClick={(event) => event.stopPropagation()}>
               <header><b>{previewMedia.originalName}</b><button type="button" onClick={() => setPreviewMedia(null)}>关闭</button></header>
               {isVideoMedia(previewMedia)
-                ? <video className="media-preview-video" src={previewMedia.url} controls preload="metadata" />
-                : <img src={previewMedia.url} alt={previewMedia.altText || previewMedia.originalName} />}
+                ? <video className="media-preview-video" src={mediaOriginalUrl(previewMedia)} controls preload="metadata" />
+                : <img src={mediaDisplayUrl(previewMedia)} alt={previewMedia.altText || previewMedia.originalName} />}
               <p>{mediaMetaText(previewMedia)}</p>
               <p>{previewMedia.url}</p>
             </div>
@@ -3979,14 +4039,16 @@ function renderInlineMarkdown(text: string, keyPrefix: string, options: Markdown
 
     if (token.startsWith("![")) {
       const image = token.match(/^!\[([^\]]*)]\(([^)]+)\)$/);
-      nodes.push(image ? (
+      const safeImageUrl = image ? sanitizeAssetUrl(image[2]) : "";
+      nodes.push(image && safeImageUrl ? (
         options.onImageClick
-          ? <button className="markdown-image-button" key={key} type="button" onClick={() => options.onImageClick?.(image[2], image[1])}><img className="preview-inline-image" src={image[2]} alt={image[1]} /></button>
-          : <img className="preview-inline-image" key={key} src={image[2]} alt={image[1]} />
+          ? <button className="markdown-image-button" key={key} type="button" onClick={() => options.onImageClick?.(safeImageUrl, image[1])}><img className="preview-inline-image" src={safeImageUrl} alt={image[1]} /></button>
+          : <img className="preview-inline-image" key={key} src={safeImageUrl} alt={image[1]} />
       ) : token);
     } else if (token.startsWith("[")) {
       const link = token.match(/^\[([^\]]+)]\(([^)]+)\)$/);
-      nodes.push(link ? <a key={key} href={link[2]} target="_blank" rel="noreferrer">{link[1]}</a> : token);
+      const safeLinkUrl = link ? sanitizeMarkdownUrl(link[2]) : "";
+      nodes.push(link && safeLinkUrl ? <a key={key} href={safeLinkUrl} target="_blank" rel="noreferrer">{link[1]}</a> : link ? <span key={key}>{link[1]}</span> : token);
     } else if (token.startsWith("`")) {
       nodes.push(<code key={key}>{token.slice(1, -1)}</code>);
     } else if (token.startsWith("**")) {
@@ -4259,11 +4321,12 @@ function EditorPage() {
   const lineNumbers = markdown.split("\n").map((_, index) => index + 1);
 
   const normalizedScheduledAt = publishTiming === "scheduled" && scheduledAt.trim() ? scheduledAt.trim().replace(" ", "T") : undefined;
+  const editorCoverPreviewUrl = sanitizeAssetUrl(coverUrl);
   const postMeta = {
     categoryName,
     tags: selectedTags,
     isFeatured: featured,
-    coverUrl,
+    coverUrl: editorCoverPreviewUrl,
     visibility,
     accessPassword,
     passwordHint,
@@ -4474,7 +4537,12 @@ function EditorPage() {
       const snippets: string[] = [];
       for (const file of imageFiles) {
         const result = await api.uploadMedia(file, file.name || "pasted-image.png");
-        snippets.push(`![${result.item.altText || result.item.originalName}](${result.item.url})`);
+        const imageUrl = sanitizeAssetUrl(result.item.url);
+        if (imageUrl) snippets.push(`![${result.item.altText || result.item.originalName}](${imageUrl})`);
+      }
+      if (!snippets.length) {
+        setNotice("图片已上传，但返回的媒体地址不可用于正文插入。");
+        return;
       }
       insertMarkdownAtCursor(snippets.join("\n\n"), source === "paste" ? "图片已从剪切板上传到媒体库，并插入正文。" : "图片已上传到媒体库，并插入正文。");
       emitAdminDataChanged();
@@ -4509,7 +4577,12 @@ function EditorPage() {
   }
   function chooseEditorMedia(item: AdminMediaItem) {
     if (mediaPickerTarget === "body") {
-      insertMarkdownAtCursor(`![${item.altText || item.originalName}](${item.url})`, `已从媒体库插入图片：${item.originalName}`);
+      const imageUrl = sanitizeAssetUrl(item.url);
+      if (!imageUrl) {
+        setNotice("这个媒体地址不可用于正文插入。");
+        return;
+      }
+      insertMarkdownAtCursor(`![${item.altText || item.originalName}](${imageUrl})`, `已从媒体库插入图片：${item.originalName}`);
     } else {
       setCoverUrl(mediaDisplayUrl(item));
       setCoverName(item.originalName);
@@ -4793,7 +4866,7 @@ function EditorPage() {
         </section>
         <aside className="publish-panel card">
           <Card title="封面图">
-            <div className="cover-thumb" style={{ backgroundImage: `url(${coverUrl})` }} />
+            <div className="cover-thumb" style={editorCoverPreviewUrl ? { backgroundImage: `url(${editorCoverPreviewUrl})` } : undefined} />
             <div className="cover-actions">
               <button type="button" onClick={() => coverInputRef.current?.click()}>上传封面</button>
               <button type="button" onClick={() => openMediaPicker("cover")}>从媒体库选择</button>
@@ -4943,7 +5016,7 @@ function EditorPage() {
                 {aiCommentSources.length > 0 && (
                   <div className="ai-sources">
                     <b>参考来源</b>
-                    {aiCommentSources.map((source) => <a key={source.url} href={source.url} target="_blank" rel="noreferrer">{source.title || source.url}</a>)}
+                    {safeSourceLinks(aiCommentSources).map((source) => <a key={source.url} href={source.url} target="_blank" rel="noreferrer">{source.title || source.url}</a>)}
                   </div>
                 )}
               </>
@@ -4980,7 +5053,7 @@ function EditorPage() {
               {aiResultModal.sources?.length ? (
                 <div className="ai-result-modal-sources">
                   <b>参考来源</b>
-                  {aiResultModal.sources.map((source) => <a key={source.url} href={source.url} target="_blank" rel="noreferrer">{source.title || source.url}</a>)}
+                  {safeSourceLinks(aiResultModal.sources).map((source) => <a key={source.url} href={source.url} target="_blank" rel="noreferrer">{source.title || source.url}</a>)}
                 </div>
               ) : null}
             </div>
