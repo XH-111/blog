@@ -10,6 +10,8 @@ import type { ClipboardEvent, PointerEvent, WheelEvent } from "react";
 import type { AboutPageSettings, AdminAiReviewFocus, AdminAiSettings, AdminAiStatus, AdminAiTaskItem, AdminAiTool, AdminCategoryItem, AdminCommentItem, AdminDashboardData, AdminMediaItem, AdminMessageItem, AdminPostListItem, AdminPostVersionItem, AdminSearchItem, AdminTagItem, HomeEntryCardSetting, HomePageSettings, ImportPreview, MusicPageSettings, MusicTrackItem, PublicCommentItem, PublicSiteStats, SiteSettings } from "./services/api";
 import type { Article, Message } from "./types";
 
+THREE.Cache.enabled = true;
+
 const nav = [
   ["首页", "/"],
   ["文章", "/posts"],
@@ -82,6 +84,14 @@ const PUBLIC_COMMENT_PAGE_SIZE = 10;
 const PUBLIC_MESSAGE_PAGE_SIZE = 10;
 const QUICK_EMOJIS = ["😊", "👍", "👏", "❤️", "😂", "🙏"];
 const HERO_RETURN_QUERY_KEY = "return";
+
+type HeroLoadSnapshot = {
+  progress: number;
+  loaded: number;
+  total: number;
+  ready: boolean;
+  error?: string;
+};
 
 function useRoute() {
   const [path, setPath] = useState(location.hash.replace("#", "") || "/");
@@ -376,33 +386,51 @@ function Art({ type, wide = false, coverUrl }: { type: Article["image"]; wide?: 
 type NeonHeroSceneProps = {
   active: boolean;
   onNavigate: (url: string) => void;
+  startScene?: boolean;
+  onLoadProgress?: (snapshot: HeroLoadSnapshot) => void;
   musicReturnSignal?: number;
   musicSceneOpen?: boolean;
   onMusicSceneOpen?: () => void;
   onMusicSceneClose?: () => void;
 };
 
-function NeonHeroScene({ active, onNavigate, musicReturnSignal = 0, musicSceneOpen = false, onMusicSceneOpen, onMusicSceneClose }: NeonHeroSceneProps) {
+function NeonHeroScene({ active, onNavigate, startScene = true, onLoadProgress, musicReturnSignal = 0, musicSceneOpen = false, onMusicSceneOpen, onMusicSceneClose }: NeonHeroSceneProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const activeRef = useRef(active);
+  const activeRef = useRef(active && startScene);
+  const startSceneRef = useRef(startScene);
   const navigateRef = useRef(onNavigate);
+  const onLoadProgressRef = useRef(onLoadProgress);
   const musicReturnSignalRef = useRef(musicReturnSignal);
   const musicSceneOpenRef = useRef(musicSceneOpen);
   const onMusicSceneOpenRef = useRef(onMusicSceneOpen);
   const onMusicSceneCloseRef = useRef(onMusicSceneClose);
 
   useEffect(() => {
-    activeRef.current = active;
+    activeRef.current = active && startSceneRef.current;
     const canvas = canvasRef.current;
-    if (!active && canvas) {
+    if (!activeRef.current && canvas) {
       canvas.dataset.hoveredHref = "";
       canvas.style.cursor = "default";
     }
   }, [active]);
 
   useEffect(() => {
+    startSceneRef.current = startScene;
+    activeRef.current = active && startScene;
+    const canvas = canvasRef.current;
+    if (!activeRef.current && canvas) {
+      canvas.dataset.hoveredHref = "";
+      canvas.style.cursor = "default";
+    }
+  }, [active, startScene]);
+
+  useEffect(() => {
     navigateRef.current = onNavigate;
   }, [onNavigate]);
+
+  useEffect(() => {
+    onLoadProgressRef.current = onLoadProgress;
+  }, [onLoadProgress]);
 
   useEffect(() => {
     musicReturnSignalRef.current = musicReturnSignal;
@@ -424,6 +452,34 @@ function NeonHeroScene({ active, onNavigate, musicReturnSignal = 0, musicSceneOp
     const canvas = canvasRef.current;
     if (!canvas) return;
     const sceneCanvas = canvas;
+    let disposed = false;
+    let loadSnapshot: HeroLoadSnapshot = { progress: 0, loaded: 0, total: 0, ready: false };
+    const reportLoadSnapshot = (next: Partial<HeroLoadSnapshot>) => {
+      if (disposed) return;
+      loadSnapshot = {
+        ...loadSnapshot,
+        ...next,
+        progress: Math.max(0, Math.min(100, next.progress ?? loadSnapshot.progress)),
+      };
+      onLoadProgressRef.current?.(loadSnapshot);
+      canvas.dataset.heroLoadProgress = loadSnapshot.progress.toFixed(1);
+      canvas.dataset.heroLoadReady = loadSnapshot.ready ? "true" : "false";
+      if (loadSnapshot.error) canvas.dataset.heroLoadError = loadSnapshot.error;
+    };
+    const loadingManager = new THREE.LoadingManager();
+    loadingManager.onStart = (_url, loaded, total) => {
+      reportLoadSnapshot({ loaded, total, progress: total ? (loaded / total) * 100 : 0, ready: false });
+    };
+    loadingManager.onProgress = (_url, loaded, total) => {
+      reportLoadSnapshot({ loaded, total, progress: total ? (loaded / total) * 100 : loadSnapshot.progress, ready: false });
+    };
+    loadingManager.onLoad = () => {
+      reportLoadSnapshot({ progress: 100, ready: true });
+    };
+    loadingManager.onError = (url) => {
+      reportLoadSnapshot({ error: `Failed to load ${url}` });
+    };
+    reportLoadSnapshot(loadSnapshot);
 
     const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true, powerPreference: "high-performance" });
     renderer.setClearColor(0x000000, 0);
@@ -534,7 +590,7 @@ function NeonHeroScene({ active, onNavigate, musicReturnSignal = 0, musicSceneOp
     const articleCategoryPalette = [0x72f7ff, 0xff6bf5, 0xffc65a, 0x9dff55, 0x9b7cff, 0xff7a59, 0x5cf1c8, 0xf2fbff];
     const frontNormal = new THREE.Vector3(0, 0, 1);
     const articleOutward = new THREE.Vector3(0, 0, 1);
-    type SceneTransitionKind = "music" | "article" | "music-return";
+    type SceneTransitionKind = "music" | "article" | "article-category" | "music-return";
     type ArticleBottleCategory = Pick<AdminCategoryItem, "id" | "name" | "slug" | "icon" | "postsCount"> & { href: string; isAll?: boolean };
     let hasArticleFocusTarget = false;
     let hasMusicFocusTarget = false;
@@ -542,7 +598,6 @@ function NeonHeroScene({ active, onNavigate, musicReturnSignal = 0, musicSceneOp
     let hasHoveredPoint = false;
     let articleVendingOpen = false;
     let navigationTimeout = 0;
-    let disposed = false;
     let pendingMusicReturnPullback = routeQuery().get(HERO_RETURN_QUERY_KEY) === "music";
     let handledMusicReturnSignal = musicReturnSignalRef.current;
     let musicReturnView: { position: THREE.Vector3; target: THREE.Vector3 } | null = null;
@@ -1115,8 +1170,8 @@ function NeonHeroScene({ active, onNavigate, musicReturnSignal = 0, musicSceneOp
             map: texture,
             transparent: true,
             depthWrite: false,
-            depthTest: false,
-            side: THREE.DoubleSide,
+            depthTest: true,
+            side: THREE.FrontSide,
             toneMapped: false,
           })
         );
@@ -1287,7 +1342,7 @@ function NeonHeroScene({ active, onNavigate, musicReturnSignal = 0, musicSceneOp
     referencePortfolioRoot.rotation.y = referenceDefaultRotationY;
     city.add(referencePortfolioRoot);
 
-    const textureLoader = new THREE.TextureLoader();
+    const textureLoader = new THREE.TextureLoader(loadingManager);
     const referenceTexture = (fileName: string) => {
       const texture = textureLoader.load(`/assets/reference-portfolio/textures/${fileName}`);
       texture.colorSpace = THREE.SRGBColorSpace;
@@ -1692,6 +1747,41 @@ function NeonHeroScene({ active, onNavigate, musicReturnSignal = 0, musicSceneOp
       navigated: false,
     });
 
+    const createArticleCategoryTunnelTransition = (href: string, hitPoint: THREE.Vector3) => {
+      const startPosition = camera.position.clone();
+      const startTarget = controls.target.clone();
+      const directionToHit = hitPoint.clone().sub(startPosition);
+      if (directionToHit.lengthSq() < 0.001) directionToHit.copy(startTarget).sub(startPosition);
+      if (directionToHit.lengthSq() < 0.001) directionToHit.set(0, 0, -1);
+      directionToHit.normalize();
+      const endTarget = hitPoint.clone().addScaledVector(directionToHit, compactScene ? 0.2 : 0.26);
+      const endPosition = startPosition.clone().lerp(hitPoint, compactScene ? 0.78 : 0.82).addScaledVector(directionToHit, compactScene ? 0.34 : 0.46);
+      endPosition.y = THREE.MathUtils.lerp(startPosition.y, hitPoint.y + (compactScene ? 0.05 : 0.08), 0.72);
+      return {
+        mode: "return" as const,
+        kind: "article-category" as const,
+        href,
+        startedAt: window.performance.now(),
+        duration: 500,
+        startPosition,
+        startTarget,
+        midPosition: startPosition.clone().lerp(endPosition, 0.6),
+        midTarget: startTarget.clone().lerp(endTarget, 0.6),
+        endPosition,
+        endTarget,
+        orbitPivot: new THREE.Vector3(),
+        startAngle: 0,
+        endAngle: 0,
+        startRadius: 0,
+        midRadius: 0,
+        startY: startPosition.y,
+        midY: startPosition.y + (endPosition.y - startPosition.y) * 0.6,
+        startReferenceRotationY: referencePortfolioRoot.rotation.y,
+        endReferenceRotationY: referencePortfolioRoot.rotation.y,
+        navigated: false,
+      };
+    };
+
     const openArticleVendingScene = () => {
       articleVendingOpen = true;
       articleCategoryGroup.visible = true;
@@ -1777,6 +1867,16 @@ function NeonHeroScene({ active, onNavigate, musicReturnSignal = 0, musicSceneOp
       canvas.dataset.cameraTransitionProgress = "0";
     };
 
+    const startArticleCategoryTunnelTransition = (href: string) => {
+      if (cameraTransition) return;
+      const tunnelTarget = hasHoveredPoint ? hoveredPoint.clone() : controls.target.clone();
+      cameraTransition = createArticleCategoryTunnelTransition(href, tunnelTarget);
+      controls.enabled = false;
+      canvas.dataset.cameraTransition = "article-category-tunnel";
+      canvas.dataset.cameraTransitionProgress = "0";
+      canvas.dataset.articleCategoryTunnelHref = href;
+    };
+
     const handleSceneNavigation = (href: string) => {
       if (href === "/music") {
         startMusicCameraTransition();
@@ -1786,13 +1886,17 @@ function NeonHeroScene({ active, onNavigate, musicReturnSignal = 0, musicSceneOp
         startArticleCameraTransition();
         return;
       }
+      if (href.startsWith("/posts?")) {
+        startArticleCategoryTunnelTransition(href);
+        return;
+      }
       closeArticleVendingScene();
       navigateRef.current(href);
     };
 
-    const dracoLoader = new DRACOLoader();
+    const dracoLoader = new DRACOLoader(loadingManager);
     dracoLoader.setDecoderPath("/assets/reference-portfolio/draco/");
-    const gltfLoader = new GLTFLoader();
+    const gltfLoader = new GLTFLoader(loadingManager);
     gltfLoader.setDRACOLoader(dracoLoader);
     const loadReferenceModel = (url: string, applyBakedTextures: boolean) => {
       gltfLoader.load(
@@ -1816,6 +1920,7 @@ function NeonHeroScene({ active, onNavigate, musicReturnSignal = 0, musicSceneOp
         undefined,
         (error) => {
           console.error("Failed to load reference portfolio model", url, error);
+          reportLoadSnapshot({ error: `Failed to load ${url}` });
         }
       );
     };
@@ -2113,6 +2218,15 @@ function NeonHeroScene({ active, onNavigate, musicReturnSignal = 0, musicSceneOp
           cameraTransition = null;
           return true;
         }
+        if (cameraTransition.kind === "article-category") {
+          const targetHref = cameraTransition.href;
+          closeArticleVendingScene();
+          resetOrbitDistanceLimits();
+          canvas.dataset.cameraTransition = "article-category-complete";
+          cameraTransition = null;
+          navigateRef.current(targetHref);
+          return true;
+        }
         if (cameraTransition.kind === "music-return") {
           resetOrbitDistanceLimits();
           canvas.dataset.cameraTransition = "music-return-complete";
@@ -2348,28 +2462,67 @@ function MusicMachinePlayer({ onClose, sceneEmbedded = false }: { onClose: () =>
   );
 }
 
-function HomePage() {
+function HomePage({ visible, routePath }: { visible: boolean; routePath: string }) {
   const [musicSceneOpen, setMusicSceneOpen] = useState(false);
   const [musicReturnSignal, setMusicReturnSignal] = useState(0);
+  const [heroStarted, setHeroStarted] = useState(false);
+  const [heroLoad, setHeroLoad] = useState<HeroLoadSnapshot>({ progress: 0, loaded: 0, total: 0, ready: false });
 
   const closeMusicScene = () => {
     setMusicSceneOpen(false);
     setMusicReturnSignal((value) => value + 1);
   };
 
+  useEffect(() => {
+    const [pathOnly, query = ""] = routePath.split("?");
+    if (pathOnly !== "/") return;
+    if (new URLSearchParams(query).get(HERO_RETURN_QUERY_KEY) !== "music") return;
+    setMusicSceneOpen(false);
+    setMusicReturnSignal((value) => value + 1);
+  }, [routePath]);
+
+  const progress = Math.max(0, Math.min(100, heroLoad.progress));
+  const shouldShowGate = visible && !musicSceneOpen && (!heroLoad.ready || !heroStarted || Boolean(heroLoad.error));
+
   return (
-    <main className="home-landing home-landing-model-only">
+    <main className={`home-landing home-landing-model-only persistent-home-layer ${visible ? "is-visible" : "is-hidden"} ${heroStarted ? "is-started" : "is-awaiting-start"}`} aria-hidden={!visible}>
       <section className="home-hero-shell home-hero-model-only" aria-label="3D 首页模型">
         <div className="home-hero-layout">
-          <div className={`home-hero-stage ${musicSceneOpen ? "music-scene-open" : ""}`}>
+          <div className={`home-hero-stage ${musicSceneOpen ? "music-scene-open" : ""} ${heroLoad.ready ? "hero-model-ready" : "hero-model-loading"}`}>
             <NeonHeroScene
-              active={!musicSceneOpen}
+              active={visible && heroStarted && heroLoad.ready && !heroLoad.error && !musicSceneOpen}
               onNavigate={navigateConfiguredUrl}
+              startScene={heroStarted && heroLoad.ready && !heroLoad.error}
+              onLoadProgress={setHeroLoad}
               musicReturnSignal={musicReturnSignal}
               musicSceneOpen={musicSceneOpen}
               onMusicSceneOpen={() => setMusicSceneOpen(true)}
               onMusicSceneClose={closeMusicScene}
             />
+            {shouldShowGate && (
+              <div className="home-hero-start-overlay" role="status" aria-live="polite">
+                <div className="home-hero-start-copy">
+                  <h1>Hi, I'm XHblog!</h1>
+                  <p>Welcome to my blog</p>
+                </div>
+                {heroLoad.error ? (
+                  <div className="home-hero-load-error">
+                    <b>3D model failed to load</b>
+                    <span>{heroLoad.error}</span>
+                  </div>
+                ) : heroLoad.ready ? (
+                  <button type="button" className="home-hero-start-button" onClick={() => setHeroStarted(true)}>
+                    Start
+                  </button>
+                ) : (
+                  <div className="home-hero-loader">
+                    <span className="home-hero-loader-ring" aria-hidden="true" />
+                    <b>{progress.toFixed(1)} %</b>
+                    <small>Hang on, loading 3D model...</small>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         </div>
       </section>
@@ -2382,6 +2535,23 @@ function MusicPage() {
     <main className="music-vending-page">
       <MusicMachinePlayer onClose={() => requestHeroReturnAnimation("music")} />
     </main>
+  );
+}
+
+function PublicAppShell({ path, children }: { path: string; children: ReactNode }) {
+  const routePath = path.split("?")[0] || "/";
+  const homeVisible = routePath === "/";
+  const siteSettings = useSiteSettings(false);
+  useEffect(() => {
+    if (!homeVisible) return;
+    document.title = siteSettings.defaultSeoTitle || siteSettings.siteName;
+    setMetaDescription(siteSettings.defaultSeoDescription);
+  }, [homeVisible, siteSettings]);
+  return (
+    <>
+      <HomePage visible={homeVisible} routePath={path} />
+      {children && <div className={`public-route-content ${homeVisible ? "is-home" : ""}`}>{children}</div>}
+    </>
   );
 }
 
@@ -7306,17 +7476,17 @@ function EditorPage() {
 export default function App() {
   const path = useRoute();
   const [authVersion, setAuthVersion] = useState(0);
+  const routePath = path.split("?")[0];
+  const isAdminRoute = routePath === "/admin/login" || routePath === "/admin" || routePath.startsWith("/admin/");
   useEffect(() => {
-    const routePath = path.split("?")[0];
-    document.documentElement.dataset.surface = routePath === "/admin/login" || routePath === "/admin" || routePath.startsWith("/admin/") ? "admin" : "public";
-  }, [path]);
+    document.documentElement.dataset.surface = isAdminRoute ? "admin" : "public";
+  }, [isAdminRoute]);
   useEffect(() => {
     const syncAuth = () => setAuthVersion((value) => value + 1);
     window.addEventListener(api.authChangedEvent, syncAuth);
     return () => window.removeEventListener(api.authChangedEvent, syncAuth);
   }, []);
   const page = useMemo(() => {
-    const routePath = path.split("?")[0];
     if (routePath === "/admin/login") return api.isLoggedIn() ? <AdminShell /> : <AdminLogin />;
     if (routePath === "/admin" || routePath.startsWith("/admin/")) {
       if (!api.isLoggedIn()) return <AdminLogin />;
@@ -7332,7 +7502,8 @@ export default function App() {
     if (routePath === "/music") return <MusicPage />;
     if (routePath === "/about") return <AboutPage />;
     if (routePath === "/messages") return <MessagesPage />;
-    return <HomePage />;
-  }, [path, authVersion]);
-  return page;
+    return null;
+  }, [routePath, authVersion]);
+  if (isAdminRoute) return page;
+  return <PublicAppShell path={path}>{page}</PublicAppShell>;
 }
