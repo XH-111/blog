@@ -513,6 +513,24 @@ export type HomeEntryCardSetting = {
   visible: boolean;
 };
 
+export type MusicTrackItem = {
+  title: string;
+  artist: string;
+  album: string;
+  coverUrl: string;
+  audioUrl: string;
+  duration: string;
+  note: string;
+  enabled: boolean;
+};
+
+export type MusicPageSettings = {
+  title: string;
+  subtitle: string;
+  description: string;
+  tracks: MusicTrackItem[];
+};
+
 export type SiteSettings = {
   siteName: string;
   siteSubtitle: string;
@@ -1078,6 +1096,20 @@ const defaultHomePageSettings: HomePageSettings = {
   ],
 };
 
+const defaultMusicPageSettings: MusicPageSettings = {
+  title: "Music Room",
+  subtitle: "在代码之外，也保留一点循环播放的夜色。",
+  description: "这里收集我写作、开发和发呆时常听的歌。后台可以维护歌名、作者、封面和音频地址。",
+  tracks: [
+    { title: "Intro", artist: "Welcome", album: "XHblog", coverUrl: "", audioUrl: "", duration: "", note: "欢迎来到我的音乐角落。", enabled: true },
+    { title: "After Dark", artist: "Mr. Kitty", album: "", coverUrl: "", audioUrl: "", duration: "", note: "", enabled: true },
+    { title: "Bandito", artist: "Twenty One Pilots", album: "", coverUrl: "", audioUrl: "", duration: "", note: "", enabled: true },
+    { title: "The Perfect Girl", artist: "Mareux", album: "", coverUrl: "", audioUrl: "", duration: "", note: "", enabled: true },
+    { title: "Can't Help Falling In Love", artist: "Twenty One Pilots", album: "", coverUrl: "", audioUrl: "", duration: "", note: "", enabled: true },
+    { title: "Endless Song", artist: "Aaron", album: "", coverUrl: "", audioUrl: "", duration: "", note: "", enabled: true },
+  ],
+};
+
 const defaultSiteSettings: SiteSettings = {
   siteName: "全栈博客创作平台",
   siteSubtitle: "记录 · 分享 · 成长",
@@ -1163,6 +1195,27 @@ function normalizeHomePageSettings(input?: Partial<HomePageSettings>): HomePageS
       href: sanitizeNavigationUrl(item?.href) || defaultHomePageSettings.entryCards[index]?.href || "/",
       visible: item?.visible !== false,
     })).filter((item) => item.title || item.description || item.actionText),
+  };
+}
+
+function normalizeMusicPageSettings(input?: Partial<MusicPageSettings>): MusicPageSettings {
+  const source = input ?? {};
+  const text = (value: unknown, fallback = "") => value === undefined || value === null ? fallback : String(value).trim();
+  const tracks = Array.isArray(source.tracks) ? source.tracks : defaultMusicPageSettings.tracks;
+  return {
+    title: text(source.title, defaultMusicPageSettings.title) || defaultMusicPageSettings.title,
+    subtitle: text(source.subtitle, defaultMusicPageSettings.subtitle),
+    description: text(source.description, defaultMusicPageSettings.description),
+    tracks: tracks.slice(0, 50).map((item, index) => ({
+      title: text(item?.title, defaultMusicPageSettings.tracks[index]?.title ?? "Untitled"),
+      artist: text(item?.artist, defaultMusicPageSettings.tracks[index]?.artist ?? ""),
+      album: text(item?.album),
+      coverUrl: sanitizeAssetUrl(item?.coverUrl),
+      audioUrl: sanitizeAssetUrl(item?.audioUrl),
+      duration: text(item?.duration),
+      note: text(item?.note),
+      enabled: item?.enabled !== false,
+    })).filter((item) => item.title || item.artist || item.audioUrl),
   };
 }
 
@@ -1265,6 +1318,10 @@ export const api = {
   getPublicHome: async () => {
     const data = await requestJson<{ item?: Partial<HomePageSettings>; source?: "mock" }>("/public/home", { item: defaultHomePageSettings, source: "mock" }, { timeoutMs: 10000 });
     return { item: normalizeHomePageSettings(data.item), source: data.source === "mock" ? "mock" as const : "api" as const };
+  },
+  getPublicMusic: async () => {
+    const data = await requestJson<{ item?: Partial<MusicPageSettings>; source?: "mock" }>("/public/music", { item: defaultMusicPageSettings, source: "mock" }, { timeoutMs: 10000 });
+    return { item: normalizeMusicPageSettings(data.item), source: data.source === "mock" ? "mock" as const : "api" as const };
   },
   getPublicAbout: async () => {
     const data = await requestJson<{ item?: Partial<AboutPageSettings>; source?: "mock" }>("/public/about", { item: defaultAboutPageSettings, source: "mock" }, { timeoutMs: 10000 });
@@ -1379,7 +1436,7 @@ export const api = {
     const data = await requestStrictJson<{ ok?: boolean; id?: DbId; deleted?: boolean; status?: "archived" }>(`/admin/posts/${id}`, { method: "DELETE" });
     return { ok: data.ok ?? true, id: toNumberId(data.id ?? id), deleted: data.deleted ?? false, status: data.status ?? "archived", source: "api" as const };
   },
-  getAdminMedia: async (options: { page?: number; pageSize?: number; type?: "all" | "image" | "video"; keyword?: string } = {}) => {
+  getAdminMedia: async (options: { page?: number; pageSize?: number; type?: "all" | "image" | "video" | "audio"; keyword?: string } = {}) => {
     const params = new URLSearchParams();
     if (options.page) params.set("page", String(options.page));
     if (options.pageSize) params.set("pageSize", String(options.pageSize));
@@ -1623,6 +1680,17 @@ export const api = {
       body: JSON.stringify({ item }),
     });
     return { ok: data.ok ?? true, item: normalizeHomePageSettings(data.item), source: "api" as const };
+  },
+  getAdminMusicSettings: async () => {
+    const data = await requestStrictJson<{ item?: Partial<MusicPageSettings> }>("/admin/music-settings");
+    return { item: normalizeMusicPageSettings(data.item), source: "api" as const };
+  },
+  updateAdminMusicSettings: async (item: MusicPageSettings) => {
+    const data = await requestStrictJson<{ ok?: boolean; item?: Partial<MusicPageSettings> }>("/admin/music-settings", {
+      method: "PUT",
+      body: JSON.stringify({ item }),
+    });
+    return { ok: data.ok ?? true, item: normalizeMusicPageSettings(data.item), source: "api" as const };
   },
   getDashboard: async () => {
     const data = await requestStrictJson<BackendDashboard>("/admin/dashboard");

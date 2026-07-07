@@ -14,6 +14,7 @@ const COMMENT_CONTENT_MAX_LENGTH = 1000;
 const MESSAGE_CONTENT_MAX_LENGTH = 2000;
 const ABOUT_SETTING_KEY = "about_page";
 const HOME_SETTING_KEY = "home_page";
+const MUSIC_SETTING_KEY = "music_page";
 const SITE_SETTING_KEY = "site_basic";
 const AI_SETTING_KEY = "ai_settings";
 const AI_INPUT_MAX_CHARS = 12000;
@@ -101,6 +102,20 @@ const DEFAULT_HOME_PAGE = {
     { title: "精选文章", description: "保留少量高质量技术文章，适合从这里开始阅读。", actionText: "立即阅读", icon: "doc", href: "/posts", visible: true },
     { title: "项目作品", description: "沉淀全栈项目实践、开发复盘和可复用经验。", actionText: "查看项目", icon: "cube", href: "/about", visible: true },
     { title: "关于我", description: "了解我的技术栈与经历，也欢迎交流与合作。", actionText: "了解更多", icon: "user", href: "/about", visible: true },
+  ],
+};
+
+const DEFAULT_MUSIC_PAGE = {
+  title: "Music Room",
+  subtitle: "在代码之外，也保留一点循环播放的夜色。",
+  description: "这里收集我写作、开发和发呆时常听的歌。后台可以维护歌名、作者、封面和音频地址。",
+  tracks: [
+    { title: "Intro", artist: "Welcome", album: "XHblog", coverUrl: "", audioUrl: "", duration: "", note: "欢迎来到我的音乐角落。", enabled: true },
+    { title: "After Dark", artist: "Mr. Kitty", album: "", coverUrl: "", audioUrl: "", duration: "", note: "", enabled: true },
+    { title: "Bandito", artist: "Twenty One Pilots", album: "", coverUrl: "", audioUrl: "", duration: "", note: "", enabled: true },
+    { title: "The Perfect Girl", artist: "Mareux", album: "", coverUrl: "", audioUrl: "", duration: "", note: "", enabled: true },
+    { title: "Can't Help Falling In Love", artist: "Twenty One Pilots", album: "", coverUrl: "", audioUrl: "", duration: "", note: "", enabled: true },
+    { title: "Endless Song", artist: "Aaron", album: "", coverUrl: "", audioUrl: "", duration: "", note: "", enabled: true },
   ],
 };
 
@@ -1115,6 +1130,12 @@ function extensionForMime(mimeType) {
   if (mimeType === "video/mp4") return ".mp4";
   if (mimeType === "video/webm") return ".webm";
   if (mimeType === "video/ogg") return ".ogv";
+  if (mimeType === "audio/mpeg") return ".mp3";
+  if (mimeType === "audio/mp4") return ".m4a";
+  if (mimeType === "audio/aac") return ".aac";
+  if (mimeType === "audio/wav" || mimeType === "audio/x-wav") return ".wav";
+  if (mimeType === "audio/ogg") return ".ogg";
+  if (mimeType === "audio/webm") return ".webm";
   return "";
 }
 
@@ -1139,7 +1160,7 @@ function safeUploadBaseName(originalName) {
 
 function safeUploadExtension(file) {
   const originalExt = path.extname(file.originalName).toLowerCase();
-  const allowed = new Set([".jpg", ".jpeg", ".png", ".webp", ".gif", ".mp4", ".webm", ".ogv"]);
+  const allowed = new Set([".jpg", ".jpeg", ".png", ".webp", ".gif", ".mp4", ".webm", ".ogv", ".mp3", ".m4a", ".aac", ".wav", ".ogg"]);
   if (allowed.has(originalExt)) return originalExt === ".jpeg" ? ".jpg" : originalExt;
   return extensionForMime(file.mimeType) || ".bin";
 }
@@ -1161,7 +1182,12 @@ function contentTypeForFile(filePath) {
   if (ext === ".gif") return "image/gif";
   if (ext === ".mp4") return "video/mp4";
   if (ext === ".webm") return "video/webm";
-  if (ext === ".ogv" || ext === ".ogg") return "video/ogg";
+  if (ext === ".ogv") return "video/ogg";
+  if (ext === ".mp3") return "audio/mpeg";
+  if (ext === ".m4a") return "audio/mp4";
+  if (ext === ".aac") return "audio/aac";
+  if (ext === ".wav") return "audio/wav";
+  if (ext === ".ogg") return "audio/ogg";
   return "application/octet-stream";
 }
 
@@ -1660,6 +1686,56 @@ async function handleAdminUpdateHomeSettings(req, res) {
     [HOME_SETTING_KEY, JSON.stringify(item)],
   );
   sendJson(res, 200, { item: normalizeHomePage(result.rows[0]?.value_json), ok: true, source: "api" }, corsHeaders(req));
+}
+
+function normalizeMusicPage(value = {}) {
+  const next = { ...DEFAULT_MUSIC_PAGE, ...(value && typeof value === "object" ? value : {}) };
+  const text = (input, fallback = "") => input === undefined || input === null ? fallback : String(input).trim();
+  const list = (items, fallback) => Array.isArray(items) ? items : fallback;
+  return {
+    title: text(next.title, DEFAULT_MUSIC_PAGE.title) || DEFAULT_MUSIC_PAGE.title,
+    subtitle: text(next.subtitle, DEFAULT_MUSIC_PAGE.subtitle),
+    description: text(next.description, DEFAULT_MUSIC_PAGE.description),
+    tracks: list(next.tracks, DEFAULT_MUSIC_PAGE.tracks).slice(0, 50).map((item, index) => ({
+      title: text(item?.title, DEFAULT_MUSIC_PAGE.tracks[index]?.title || "Untitled"),
+      artist: text(item?.artist, DEFAULT_MUSIC_PAGE.tracks[index]?.artist || ""),
+      album: text(item?.album, ""),
+      coverUrl: safeAssetUrl(item?.coverUrl),
+      audioUrl: safeAssetUrl(item?.audioUrl),
+      duration: text(item?.duration, ""),
+      note: text(item?.note, ""),
+      enabled: item?.enabled !== false,
+    })).filter((item) => item.title || item.artist || item.audioUrl),
+  };
+}
+
+async function getMusicPageSettings() {
+  const result = await query("SELECT value_json FROM site_settings WHERE key = $1", [MUSIC_SETTING_KEY]);
+  return normalizeMusicPage(result.rows[0]?.value_json);
+}
+
+async function handlePublicMusic(req, res) {
+  const item = await getMusicPageSettings();
+  sendJson(res, 200, { item, source: "api" }, corsHeaders(req));
+}
+
+async function handleAdminMusicSettings(req, res) {
+  const item = await getMusicPageSettings();
+  sendJson(res, 200, { item, source: "api" }, corsHeaders(req));
+}
+
+async function handleAdminUpdateMusicSettings(req, res) {
+  const body = await readBody(req);
+  const item = normalizeMusicPage(body.item ?? body);
+  const result = await query(
+    `INSERT INTO site_settings(key, value_json, updated_at)
+     VALUES ($1, $2::jsonb, now())
+     ON CONFLICT (key)
+     DO UPDATE SET value_json = EXCLUDED.value_json, updated_at = now()
+     RETURNING value_json`,
+    [MUSIC_SETTING_KEY, JSON.stringify(item)],
+  );
+  sendJson(res, 200, { item: normalizeMusicPage(result.rows[0]?.value_json), ok: true, source: "api" }, corsHeaders(req));
 }
 
 function normalizeSiteSettings(value = {}) {
@@ -2561,7 +2637,7 @@ async function handleAdminMedia(req, res, url) {
   const keyword = String(url.searchParams.get("q") || "").trim().toLowerCase();
   const params = [];
   const where = [];
-  if (type === "image" || type === "video") {
+  if (type === "image" || type === "video" || type === "audio") {
     params.push(`${type}/%`);
     where.push(`mime_type LIKE $${params.length}`);
   }
@@ -2587,15 +2663,16 @@ async function handleAdminUploadMedia(req, res) {
   const body = await readBuffer(req, { maxBytes: UPLOAD_BODY_MAX_BYTES });
   const { fields, files } = parseMultipart(req, body);
   const file = files.find((item) => item.fieldName === "file") ?? files[0];
-  if (!file) return sendJson(res, 400, { error: "file_required", message: "Please choose an image or video file" }, corsHeaders(req));
+  if (!file) return sendJson(res, 400, { error: "file_required", message: "Please choose an image, video, or audio file" }, corsHeaders(req));
   const isImage = file.mimeType.startsWith("image/");
   const isVideo = file.mimeType.startsWith("video/");
-  if (!isImage && !isVideo) {
-    return sendJson(res, 400, { error: "invalid_file_type", message: "Only image or video files are supported" }, corsHeaders(req));
+  const isAudio = file.mimeType.startsWith("audio/");
+  if (!isImage && !isVideo && !isAudio) {
+    return sendJson(res, 400, { error: "invalid_file_type", message: "Only image, video, or audio files are supported" }, corsHeaders(req));
   }
-  const maxSize = isVideo ? 50 * 1024 * 1024 : 5 * 1024 * 1024;
+  const maxSize = isVideo ? 50 * 1024 * 1024 : isAudio ? 30 * 1024 * 1024 : 5 * 1024 * 1024;
   if (file.buffer.length > maxSize) {
-    return sendJson(res, 413, { error: "file_too_large", message: isVideo ? "Video files cannot exceed 50MB" : "Image files cannot exceed 5MB" }, corsHeaders(req));
+    return sendJson(res, 413, { error: "file_too_large", message: isVideo ? "Video files cannot exceed 50MB" : isAudio ? "Audio files cannot exceed 30MB" : "Image files cannot exceed 5MB" }, corsHeaders(req));
   }
 
   const [year, month, day] = uploadDateParts();
@@ -2675,6 +2752,20 @@ async function handleAdminDeleteMedia(req, res, id) {
       error: "media_in_use",
       message: "Media is currently used by existing posts. Remove it from post content or cover before deleting.",
       posts: usage.rows.map((item) => ({ id: Number(item.id), title: item.title, status: item.status })),
+    }, corsHeaders(req));
+  }
+  const musicUsage = await query(
+    `SELECT key
+     FROM site_settings
+     WHERE key = $1 AND value_json::text LIKE $2
+     LIMIT 1`,
+    [MUSIC_SETTING_KEY, `%${escapeLikePattern(mediaUrl)}%`],
+  );
+  if (musicUsage.rowCount) {
+    return sendJson(res, 409, {
+      error: "media_in_use",
+      message: "Media is currently used by music settings. Remove it from the music playlist before deleting.",
+      settings: ["music_page"],
     }, corsHeaders(req));
   }
 
@@ -3308,6 +3399,7 @@ async function handleRequest(req, res) {
     if (req.method === "GET" && url.pathname === "/api/public/stats") return handlePublicStats(req, res);
     if (req.method === "GET" && url.pathname === "/api/public/site-settings") return handlePublicSiteSettings(req, res);
     if (req.method === "GET" && url.pathname === "/api/public/home") return handlePublicHome(req, res);
+    if (req.method === "GET" && url.pathname === "/api/public/music") return handlePublicMusic(req, res);
     if (req.method === "GET" && url.pathname === "/api/public/about") return handlePublicAbout(req, res);
     if (req.method === "GET" && url.pathname === "/api/public/archive") return handleArchive(req, res);
     if (req.method === "GET" && url.pathname === "/api/public/messages") return handlePublicMessages(req, res, url);
@@ -3378,6 +3470,8 @@ async function handleRequest(req, res) {
     if (req.method === "POST" && url.pathname === "/api/admin/import/articles/commit") return handleAdminImportCommit(req, res);
     if (req.method === "GET" && url.pathname === "/api/admin/home-settings") return handleAdminHomeSettings(req, res);
     if (req.method === "PUT" && url.pathname === "/api/admin/home-settings") return handleAdminUpdateHomeSettings(req, res);
+    if (req.method === "GET" && url.pathname === "/api/admin/music-settings") return handleAdminMusicSettings(req, res);
+    if (req.method === "PUT" && url.pathname === "/api/admin/music-settings") return handleAdminUpdateMusicSettings(req, res);
     if (req.method === "GET" && url.pathname === "/api/admin/about-settings") return handleAdminAboutSettings(req, res);
     if (req.method === "PUT" && url.pathname === "/api/admin/about-settings") return handleAdminUpdateAboutSettings(req, res);
     if (req.method === "GET" && url.pathname === "/api/admin/media") return handleAdminMedia(req, res, url);

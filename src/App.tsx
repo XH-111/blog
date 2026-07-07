@@ -1,7 +1,11 @@
 ﻿import { ChangeEvent, FormEvent, ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { api, getApiErrorMessage, sanitizeAssetUrl, sanitizeMarkdownUrl, sanitizeNavigationUrl } from "./services/api";
+import * as THREE from "three";
+import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
+import { DRACOLoader } from "three/examples/jsm/loaders/DRACOLoader.js";
+import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import type { ClipboardEvent, PointerEvent, WheelEvent } from "react";
-import type { AboutPageSettings, AdminAiReviewFocus, AdminAiSettings, AdminAiStatus, AdminAiTaskItem, AdminAiTool, AdminCategoryItem, AdminCommentItem, AdminDashboardData, AdminMediaItem, AdminMessageItem, AdminPostListItem, AdminPostVersionItem, AdminSearchItem, AdminTagItem, HomeEntryCardSetting, HomePageSettings, ImportPreview, PublicCommentItem, PublicSiteStats, SiteSettings } from "./services/api";
+import type { AboutPageSettings, AdminAiReviewFocus, AdminAiSettings, AdminAiStatus, AdminAiTaskItem, AdminAiTool, AdminCategoryItem, AdminCommentItem, AdminDashboardData, AdminMediaItem, AdminMessageItem, AdminPostListItem, AdminPostVersionItem, AdminSearchItem, AdminTagItem, HomeEntryCardSetting, HomePageSettings, ImportPreview, MusicPageSettings, MusicTrackItem, PublicCommentItem, PublicSiteStats, SiteSettings } from "./services/api";
 import type { Article, Message } from "./types";
 
 const nav = [
@@ -19,11 +23,11 @@ const defaultHomeSettings: HomePageSettings = {
   primaryButtonUrl: "/posts",
   secondaryButtonText: "了解我",
   secondaryButtonUrl: "/about",
-  primaryButtonColor: "#079b95",
-  secondaryButtonColor: "#ffffff",
-  titleColor: "#081827",
-  subtitleColor: "#173047",
-  descriptionColor: "#405669",
+  primaryButtonColor: "#00e5ff",
+  secondaryButtonColor: "#11182c",
+  titleColor: "#f2fbff",
+  subtitleColor: "#8fefff",
+  descriptionColor: "#b7c7d8",
   coverType: "image",
   coverUrl: "",
   coverVideoUrl: "",
@@ -51,6 +55,20 @@ const defaultSiteSettings: SiteSettings = {
   policeText: "",
   policeUrl: "",
   footerText: "© 2026 全栈博客创作平台",
+};
+
+const defaultMusicSettings: MusicPageSettings = {
+  title: "Music Room",
+  subtitle: "在代码之外，也保留一点循环播放的夜色。",
+  description: "这里收集我写作、开发和发呆时常听的歌。后台可以维护歌名、作者、封面和音频地址。",
+  tracks: [
+    { title: "Intro", artist: "Welcome", album: "XHblog", coverUrl: "", audioUrl: "", duration: "", note: "欢迎来到我的音乐角落。", enabled: true },
+    { title: "After Dark", artist: "Mr. Kitty", album: "", coverUrl: "", audioUrl: "", duration: "", note: "", enabled: true },
+    { title: "Bandito", artist: "Twenty One Pilots", album: "", coverUrl: "", audioUrl: "", duration: "", note: "", enabled: true },
+    { title: "The Perfect Girl", artist: "Mareux", album: "", coverUrl: "", audioUrl: "", duration: "", note: "", enabled: true },
+    { title: "Can't Help Falling In Love", artist: "Twenty One Pilots", album: "", coverUrl: "", audioUrl: "", duration: "", note: "", enabled: true },
+    { title: "Endless Song", artist: "Aaron", album: "", coverUrl: "", audioUrl: "", duration: "", note: "", enabled: true },
+  ],
 };
 
 const COMMENT_CONTENT_MAX_LENGTH = 1000;
@@ -264,9 +282,10 @@ function PublicHeader({ active }: { active: string }) {
       ? siteSettings.defaultSeoTitle || siteSettings.siteName
       : active === "/posts" ? `文章 - ${siteSettings.siteName}`
         : active === "/about" ? `关于 - ${siteSettings.siteName}`
-          : active === "/messages" ? `留言板 - ${siteSettings.siteName}`
-            : active.startsWith("/article") ? `文章详情 - ${siteSettings.siteName}`
-              : siteSettings.defaultSeoTitle || siteSettings.siteName;
+          : active === "/music" ? `音乐 - ${siteSettings.siteName}`
+            : active === "/messages" ? `留言板 - ${siteSettings.siteName}`
+              : active.startsWith("/article") ? `文章详情 - ${siteSettings.siteName}`
+                : siteSettings.defaultSeoTitle || siteSettings.siteName;
     document.title = pageTitle;
     setMetaDescription(siteSettings.defaultSeoDescription);
   }, [active, siteSettings]);
@@ -347,65 +366,1224 @@ function Art({ type, wide = false, coverUrl }: { type: Article["image"]; wide?: 
   );
 }
 
+type NeonHeroSceneProps = {
+  active: boolean;
+  onNavigate: (url: string) => void;
+};
+
+function NeonHeroScene({ active, onNavigate }: NeonHeroSceneProps) {
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const activeRef = useRef(active);
+  const navigateRef = useRef(onNavigate);
+
+  useEffect(() => {
+    activeRef.current = active;
+  }, [active]);
+
+  useEffect(() => {
+    navigateRef.current = onNavigate;
+  }, [onNavigate]);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true, powerPreference: "high-performance" });
+    renderer.setClearColor(0x000000, 0);
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.8));
+    renderer.outputColorSpace = THREE.SRGBColorSpace;
+
+    const scene = new THREE.Scene();
+    const camera = new THREE.PerspectiveCamera(38, 1, 0.1, 120);
+    camera.position.set(0, 6.2, 12.5);
+    camera.lookAt(0, 0.1, 0);
+    const controls = new OrbitControls(camera, canvas);
+    controls.enableDamping = true;
+    controls.dampingFactor = 0.08;
+    controls.enablePan = false;
+    controls.enableZoom = true;
+    controls.minDistance = 2.35;
+    controls.maxDistance = 15;
+    controls.minPolarAngle = 0.05;
+    controls.maxPolarAngle = Math.PI - 0.05;
+    controls.rotateSpeed = 0.56;
+    controls.zoomSpeed = 0.82;
+    controls.target.set(0, 0.52, 0);
+    controls.update();
+
+    const group = new THREE.Group();
+    const city = new THREE.Group();
+    city.rotation.y = -0.12;
+    group.add(city);
+    scene.add(group);
+    scene.add(new THREE.AmbientLight(0xffffff, 0.96));
+
+    const referenceKeyLight = new THREE.PointLight(0xffffff, 18, 28);
+    referenceKeyLight.position.set(-2.3, 2.7, 2.4);
+    scene.add(referenceKeyLight);
+    const referenceFillLight = new THREE.PointLight(0xffffff, 24, 24);
+    referenceFillLight.position.set(0, 1.2, 0.2);
+    scene.add(referenceFillLight);
+
+    const cyanLight = new THREE.PointLight(0x00e5ff, 10, 20);
+    cyanLight.position.set(-3.9, 4.2, 3.1);
+    scene.add(cyanLight);
+    const magentaLight = new THREE.PointLight(0xff3df2, 7, 18);
+    magentaLight.position.set(3.9, 2.8, 2.7);
+    scene.add(magentaLight);
+    const amberLight = new THREE.PointLight(0xffc65a, 3.6, 12);
+    amberLight.position.set(0.2, 1.3, 4.4);
+    scene.add(amberLight);
+
+    const grid = new THREE.GridHelper(24, 48, 0x00e5ff, 0x173150);
+    grid.position.y = -1.48;
+    const gridMaterial = grid.material as THREE.Material;
+    gridMaterial.transparent = true;
+    gridMaterial.opacity = 0.36;
+    group.add(grid);
+
+    const baseMaterial = new THREE.MeshStandardMaterial({
+      color: 0x071426,
+      emissive: 0x08253a,
+      emissiveIntensity: 0.85,
+      metalness: 0.62,
+      roughness: 0.34,
+    });
+    const trimMaterial = new THREE.MeshStandardMaterial({
+      color: 0x0d2740,
+      emissive: 0x00a8d4,
+      emissiveIntensity: 0.38,
+      metalness: 0.48,
+      roughness: 0.28,
+    });
+    const glassMaterial = new THREE.MeshStandardMaterial({
+      color: 0x102a46,
+      emissive: 0x062a40,
+      emissiveIntensity: 0.92,
+      metalness: 0.3,
+      roughness: 0.2,
+      transparent: true,
+      opacity: 0.78,
+    });
+    const cyanMaterial = new THREE.MeshBasicMaterial({ color: 0x00e5ff, transparent: true, opacity: 0.82 });
+    const pinkMaterial = new THREE.MeshBasicMaterial({ color: 0xff3df2, transparent: true, opacity: 0.78 });
+    const amberMaterial = new THREE.MeshBasicMaterial({ color: 0xffc65a, transparent: true, opacity: 0.72 });
+    const wireMaterial = new THREE.MeshBasicMaterial({ color: 0x73f5ff, wireframe: true, transparent: true, opacity: 0.48 });
+    const labelTextures: THREE.Texture[] = [];
+    const interactiveSigns: THREE.Object3D[] = [];
+    const mixers: THREE.AnimationMixer[] = [];
+    const referencePortfolioRoot = new THREE.Group();
+    referencePortfolioRoot.name = "reference_portfolio_preview_scene";
+    const referenceDefaultRotationY = -0.72;
+    const referenceMusicRotationY = referenceDefaultRotationY + 2.36;
+    const musicFocusTarget = new THREE.Vector3(0, 0.8, 0);
+    const hoveredPoint = new THREE.Vector3();
+    const transitionPosition = new THREE.Vector3();
+    const transitionTarget = new THREE.Vector3();
+    let hasMusicFocusTarget = false;
+    let hasHoveredPoint = false;
+    let navigationTimeout = 0;
+    let cameraTransition: {
+      href: string;
+      startedAt: number;
+      duration: number;
+      startPosition: THREE.Vector3;
+      startTarget: THREE.Vector3;
+      midPosition: THREE.Vector3;
+      midTarget: THREE.Vector3;
+      endPosition: THREE.Vector3;
+      endTarget: THREE.Vector3;
+      startReferenceRotationY: number;
+      endReferenceRotationY: number;
+      navigated: boolean;
+    } | null = null;
+
+    function createLabelTexture(label: string, color: string, subtitle = "") {
+      const labelCanvas = document.createElement("canvas");
+      labelCanvas.width = 1024;
+      labelCanvas.height = 256;
+      const context = labelCanvas.getContext("2d");
+      if (context) {
+        context.clearRect(0, 0, labelCanvas.width, labelCanvas.height);
+        context.fillStyle = "rgba(4, 9, 22, .78)";
+        context.fillRect(0, 0, labelCanvas.width, labelCanvas.height);
+        context.strokeStyle = color;
+        context.lineWidth = 8;
+        context.shadowColor = color;
+        context.shadowBlur = 34;
+        context.strokeRect(18, 18, labelCanvas.width - 36, labelCanvas.height - 36);
+        context.textAlign = "center";
+        context.textBaseline = "middle";
+        context.font = "700 104px Microsoft YaHei, PingFang SC, sans-serif";
+        context.fillStyle = color;
+        context.shadowBlur = 42;
+        context.fillText(label, labelCanvas.width / 2, subtitle ? 104 : 132);
+        if (subtitle) {
+          context.font = "500 34px Consolas, Microsoft YaHei, monospace";
+          context.fillStyle = "rgba(222, 246, 255, .84)";
+          context.shadowBlur = 18;
+          context.fillText(subtitle, labelCanvas.width / 2, 194);
+        }
+      }
+      const texture = new THREE.CanvasTexture(labelCanvas);
+      texture.colorSpace = THREE.SRGBColorSpace;
+      texture.anisotropy = 4;
+      labelTextures.push(texture);
+      return texture;
+    }
+
+    function createBrandSignTexture() {
+      const labelCanvas = document.createElement("canvas");
+      labelCanvas.width = 2048;
+      labelCanvas.height = 512;
+      const context = labelCanvas.getContext("2d");
+      if (context) {
+        const gradient = context.createLinearGradient(380, 0, 1680, 0);
+        gradient.addColorStop(0, "#72f7ff");
+        gradient.addColorStop(0.56, "#f2fbff");
+        gradient.addColorStop(1, "#ff6bf5");
+        context.clearRect(0, 0, labelCanvas.width, labelCanvas.height);
+        context.fillStyle = "rgba(3, 7, 16, .9)";
+        context.fillRect(0, 0, labelCanvas.width, labelCanvas.height);
+        context.strokeStyle = "rgba(114, 247, 255, .24)";
+        context.lineWidth = 12;
+        context.strokeRect(42, 42, labelCanvas.width - 84, labelCanvas.height - 84);
+        context.fillStyle = "rgba(0, 229, 255, .08)";
+        context.fillRect(80, labelCanvas.height - 112, labelCanvas.width - 160, 42);
+        context.textAlign = "center";
+        context.textBaseline = "middle";
+        context.font = "900 226px Arial Black, Microsoft YaHei, sans-serif";
+        context.lineWidth = 16;
+        context.shadowColor = "rgba(0, 0, 0, .92)";
+        context.shadowBlur = 14;
+        context.strokeStyle = "rgba(0, 0, 0, .88)";
+        context.strokeText("XHblog", labelCanvas.width / 2, 270);
+        context.shadowColor = "rgba(0, 229, 255, .92)";
+        context.shadowBlur = 48;
+        context.fillStyle = gradient;
+        context.fillText("XHblog", labelCanvas.width / 2, 270);
+        context.shadowColor = "rgba(255, 61, 242, .72)";
+        context.shadowBlur = 34;
+        context.strokeStyle = "rgba(255, 255, 255, .4)";
+        context.lineWidth = 4;
+        context.strokeText("XHblog", labelCanvas.width / 2, 270);
+      }
+      const texture = new THREE.CanvasTexture(labelCanvas);
+      texture.colorSpace = THREE.SRGBColorSpace;
+      texture.anisotropy = 4;
+      labelTextures.push(texture);
+      return texture;
+    }
+
+    function addBrandSignOverlay(root: THREE.Object3D) {
+      const brandTexture = createBrandSignTexture();
+      const brandSign = new THREE.Mesh(
+        new THREE.PlaneGeometry(11.7, 2.55),
+        new THREE.MeshBasicMaterial({ map: brandTexture, transparent: true, depthWrite: false, side: THREE.DoubleSide })
+      );
+      brandSign.name = "xhblog_brand_sign_overlay";
+      brandSign.position.set(7.39, 14.24, -0.58);
+      brandSign.rotation.y = Math.PI / 2;
+      brandSign.renderOrder = 12;
+      root.add(brandSign);
+    }
+
+    function createFloorBrandTexture() {
+      const labelCanvas = document.createElement("canvas");
+      labelCanvas.width = 2048;
+      labelCanvas.height = 768;
+      const context = labelCanvas.getContext("2d");
+      if (context) {
+        const gradient = context.createLinearGradient(260, 0, 1788, 0);
+        gradient.addColorStop(0, "#f2fbff");
+        gradient.addColorStop(0.45, "#72f7ff");
+        gradient.addColorStop(1, "#ff6bf5");
+        context.clearRect(0, 0, labelCanvas.width, labelCanvas.height);
+        context.textAlign = "center";
+        context.textBaseline = "middle";
+        context.font = "900 250px Arial Black, Microsoft YaHei, sans-serif";
+        context.lineWidth = 18;
+        context.shadowColor = "rgba(0, 0, 0, .9)";
+        context.shadowBlur = 18;
+        context.strokeStyle = "rgba(0, 0, 0, .82)";
+        context.strokeText("XHblog", labelCanvas.width / 2, 400);
+        context.shadowColor = "rgba(0, 229, 255, .72)";
+        context.shadowBlur = 34;
+        context.fillStyle = gradient;
+        context.fillText("XHblog", labelCanvas.width / 2, 400);
+        context.shadowColor = "rgba(255, 61, 242, .48)";
+        context.shadowBlur = 22;
+        context.strokeStyle = "rgba(255, 255, 255, .34)";
+        context.lineWidth = 4;
+        context.strokeText("XHblog", labelCanvas.width / 2, 400);
+      }
+      const texture = new THREE.CanvasTexture(labelCanvas);
+      texture.colorSpace = THREE.SRGBColorSpace;
+      texture.anisotropy = 4;
+      labelTextures.push(texture);
+      return texture;
+    }
+
+    function addFloorBrandOverlay(root: THREE.Object3D) {
+      const floorTexture = createFloorBrandTexture();
+      const floorBrand = new THREE.Mesh(
+        new THREE.PlaneGeometry(7.8, 2.6),
+        new THREE.MeshBasicMaterial({ map: floorTexture, transparent: true, depthWrite: false, side: THREE.DoubleSide })
+      );
+      floorBrand.name = "xhblog_floor_brand_overlay";
+      floorBrand.position.set(17.2, 0.74, 8.28);
+      floorBrand.rotation.x = -Math.PI / 2;
+      floorBrand.rotation.z = -0.12;
+      floorBrand.renderOrder = 13;
+      root.add(floorBrand);
+    }
+
+    function createDirectionalSignLabelTexture(label: string) {
+      const labelCanvas = document.createElement("canvas");
+      labelCanvas.width = 2048;
+      labelCanvas.height = 512;
+      const context = labelCanvas.getContext("2d");
+      if (context) {
+        context.clearRect(0, 0, labelCanvas.width, labelCanvas.height);
+        context.textAlign = "center";
+        context.textBaseline = "middle";
+        let fontSize = 330;
+        do {
+          context.font = `900 ${fontSize}px Arial Black, Microsoft YaHei, sans-serif`;
+          fontSize -= 8;
+        } while (context.measureText(label).width > labelCanvas.width * 0.86 && fontSize > 180);
+        const strokeWidth = Math.max(14, fontSize * 0.09);
+        context.lineWidth = strokeWidth;
+        context.strokeStyle = "rgba(0, 0, 0, .82)";
+        context.shadowColor = "rgba(0, 0, 0, .76)";
+        context.shadowBlur = 14;
+        context.strokeText(label, labelCanvas.width / 2, labelCanvas.height / 2 + 8);
+        context.fillStyle = "#bdfaff";
+        context.shadowColor = "rgba(189, 250, 255, .95)";
+        context.shadowBlur = 52;
+        context.fillText(label, labelCanvas.width / 2, labelCanvas.height / 2);
+        context.strokeStyle = "rgba(255, 255, 255, .36)";
+        context.lineWidth = Math.max(5, strokeWidth * 0.28);
+        context.shadowBlur = 24;
+        context.strokeText(label, labelCanvas.width / 2, labelCanvas.height / 2);
+      }
+      const texture = new THREE.CanvasTexture(labelCanvas);
+      texture.colorSpace = THREE.SRGBColorSpace;
+      texture.anisotropy = 4;
+      labelTextures.push(texture);
+      return texture;
+    }
+
+    function findFirstMesh(object: THREE.Object3D | undefined) {
+      let found: THREE.Mesh | null = null;
+      object?.traverse((child) => {
+        const mesh = child as THREE.Mesh;
+        if (!found && mesh.isMesh && mesh.geometry) {
+          found = mesh;
+        }
+      });
+      return found;
+    }
+
+    function hideDirectionalSignEmbeddedText(signMesh: THREE.Mesh) {
+      if (!Array.isArray(signMesh.material)) return;
+      signMesh.material = signMesh.material.map((material, index) => {
+        if (index !== 1) return material;
+        const hiddenMaterial = new THREE.MeshBasicMaterial({
+          color: 0xffffff,
+          transparent: true,
+          opacity: 0,
+          depthWrite: false,
+          depthTest: false,
+        });
+        hiddenMaterial.name = `${material.name || "directional_text"}_hidden`;
+        return hiddenMaterial;
+      });
+    }
+
+    function createDirectionalSignSurfaceGeometry(signMesh: THREE.Mesh, root: THREE.Object3D) {
+      const geometry = signMesh.geometry;
+      const position = geometry.getAttribute("position");
+      if (!position) return null;
+
+      const index = geometry.index;
+      const groups = geometry.groups.length ? geometry.groups.filter((group) => group.materialIndex === 0) : [{ start: 0, count: index?.count ?? position.count }];
+      const vertices: THREE.Vector3[] = [];
+      const seen = new Set<string>();
+      const addVertex = (vertexIndex: number) => {
+        const point = new THREE.Vector3().fromBufferAttribute(position, vertexIndex);
+        signMesh.localToWorld(point);
+        root.worldToLocal(point);
+        const key = point.toArray().map((value) => value.toFixed(4)).join(",");
+        if (!seen.has(key)) {
+          seen.add(key);
+          vertices.push(point);
+        }
+      };
+
+      groups.forEach((group) => {
+        const end = group.start + group.count;
+        for (let cursor = group.start; cursor < end; cursor += 1) {
+          addVertex(index ? index.getX(cursor) : cursor);
+        }
+      });
+
+      if (vertices.length < 3) return null;
+
+      const centroid = vertices.reduce((sum, point) => sum.add(point), new THREE.Vector3()).multiplyScalar(1 / vertices.length);
+      let xx = 0;
+      let xz = 0;
+      let zz = 0;
+      vertices.forEach((point) => {
+        const dx = point.x - centroid.x;
+        const dz = point.z - centroid.z;
+        xx += dx * dx;
+        xz += dx * dz;
+        zz += dz * dz;
+      });
+      const angle = 0.5 * Math.atan2(2 * xz, xx - zz);
+      const horizontal = new THREE.Vector3(Math.cos(angle), 0, Math.sin(angle)).normalize();
+      if (horizontal.x < 0) horizontal.multiplyScalar(-1);
+      const up = new THREE.Vector3(0, 1, 0);
+      const normal = new THREE.Vector3().crossVectors(horizontal, up).normalize();
+      if (normal.lengthSq() < 0.001) normal.set(0, 0, 1);
+
+      const hValues = vertices.map((point) => point.dot(horizontal));
+      const yValues = vertices.map((point) => point.y);
+      const hMin = Math.min(...hValues);
+      const hMax = Math.max(...hValues);
+      const yMin = Math.min(...yValues);
+      const yMax = Math.max(...yValues);
+      const hPadding = Math.max((hMax - hMin) * 0.08, 0.03);
+      const yPadding = Math.max((yMax - yMin) * 0.14, 0.02);
+      const normalDistance = centroid.dot(normal) + 0.035;
+
+      const pointOnSurface = (h: number, y: number) =>
+        new THREE.Vector3()
+          .addScaledVector(horizontal, h)
+          .addScaledVector(up, y)
+          .addScaledVector(normal, normalDistance);
+
+      const left = hMin + hPadding;
+      const right = hMax - hPadding;
+      const bottom = yMin + yPadding;
+      const top = yMax - yPadding;
+      const corners = [
+        pointOnSurface(left, bottom),
+        pointOnSurface(right, bottom),
+        pointOnSurface(right, top),
+        pointOnSurface(left, top),
+      ];
+
+      const surfaceGeometry = new THREE.BufferGeometry();
+      surfaceGeometry.setAttribute("position", new THREE.Float32BufferAttribute(corners.flatMap((point) => point.toArray()), 3));
+      surfaceGeometry.setAttribute("uv", new THREE.Float32BufferAttribute([0, 0, 1, 0, 1, 1, 0, 1], 2));
+      surfaceGeometry.setIndex([0, 1, 2, 0, 2, 3]);
+      surfaceGeometry.computeVertexNormals();
+      return surfaceGeometry;
+    }
+
+    function addDirectionalSignOverlays(root: THREE.Object3D) {
+      root.updateMatrixWorld(true);
+      [
+        { group: "frame21", label: "<Article />", href: "/posts" },
+        { group: "frame31", label: "<About />", href: "/about" },
+        { group: "frame41", label: "<Music />", href: "/music" },
+        { group: "frame51", label: "<Messages />", href: "/messages" },
+      ].forEach((item) => {
+        const signGroup = root.getObjectByName(item.group);
+        const signMesh = findFirstMesh(signGroup);
+        if (!signGroup || !signMesh) return;
+
+        hideDirectionalSignEmbeddedText(signMesh);
+        const labelGeometry = createDirectionalSignSurfaceGeometry(signMesh, root);
+        if (!labelGeometry) return;
+
+        const texture = createDirectionalSignLabelTexture(item.label);
+        const labelPlane = new THREE.Mesh(
+          labelGeometry,
+          new THREE.MeshBasicMaterial({
+            map: texture,
+            transparent: true,
+            depthWrite: false,
+            depthTest: false,
+            side: THREE.DoubleSide,
+            toneMapped: false,
+          })
+        );
+        labelPlane.name = `xhblog_directional_sign_${item.group}`;
+        labelPlane.renderOrder = 28;
+        labelPlane.userData.href = item.href;
+        interactiveSigns.push(labelPlane);
+        signGroup.traverse((object) => {
+          if (object.type === "Mesh") {
+            object.userData.href = item.href;
+            interactiveSigns.push(object);
+          }
+        });
+        root.add(labelPlane);
+      });
+    }
+
+    const base = new THREE.Mesh(new THREE.BoxGeometry(6.4, 0.22, 3.35), baseMaterial);
+    base.position.set(-0.2, -0.82, 0);
+    city.add(base);
+
+    const floorGlow = new THREE.Mesh(new THREE.PlaneGeometry(6.7, 3.55), new THREE.MeshBasicMaterial({ color: 0x00e5ff, transparent: true, opacity: 0.08, side: THREE.DoubleSide }));
+    floorGlow.position.set(-0.2, -0.7, 0);
+    floorGlow.rotation.x = -Math.PI / 2;
+    city.add(floorGlow);
+
+    const wall = new THREE.Mesh(new THREE.BoxGeometry(4.9, 2.7, 0.22), glassMaterial);
+    wall.position.set(-0.8, 0.55, -1.07);
+    wall.rotation.y = -0.04;
+    city.add(wall);
+
+    const awning = new THREE.Mesh(new THREE.BoxGeometry(5.35, 0.24, 0.88), trimMaterial);
+    awning.position.set(-0.7, 1.92, -0.7);
+    awning.rotation.x = -0.08;
+    city.add(awning);
+
+    const counter = new THREE.Mesh(new THREE.BoxGeometry(3.85, 0.72, 0.85), baseMaterial);
+    counter.position.set(-0.55, -0.15, 0.08);
+    counter.rotation.y = 0.03;
+    city.add(counter);
+
+    const terminal = new THREE.Mesh(new THREE.BoxGeometry(2.25, 1.1, 0.18), trimMaterial);
+    terminal.position.set(-0.64, 0.42, 0.55);
+    terminal.rotation.y = 0.02;
+    city.add(terminal);
+
+    const screen = new THREE.Mesh(new THREE.BoxGeometry(1.88, 0.66, 0.045), cyanMaterial);
+    screen.position.set(-0.64, 0.48, 0.66);
+    city.add(screen);
+
+    const signal = new THREE.Mesh(new THREE.BoxGeometry(2.04, 0.08, 0.08), pinkMaterial);
+    signal.position.set(-0.64, 0.02, 0.72);
+    city.add(signal);
+
+    const mainSignTexture = createLabelTexture("XH BLOG", "#72f7ff", "TECH NOTES / LIFE LOG");
+    const mainSign = new THREE.Mesh(
+      new THREE.PlaneGeometry(2.95, 0.74),
+      new THREE.MeshBasicMaterial({ map: mainSignTexture, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false })
+    );
+    mainSign.position.set(-0.76, 1.24, -0.91);
+    mainSign.rotation.y = -0.04;
+    mainSign.userData.href = "/posts";
+    interactiveSigns.push(mainSign);
+    city.add(mainSign);
+
+    const tower = new THREE.Mesh(new THREE.BoxGeometry(0.5, 2.7, 0.5), glassMaterial);
+    tower.position.set(-2.98, 0.55, -0.25);
+    city.add(tower);
+
+    const antenna = new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.025, 1.05, 12), cyanMaterial);
+    antenna.position.set(-2.98, 2.36, -0.25);
+    city.add(antenna);
+
+    const torus = new THREE.Mesh(new THREE.TorusGeometry(1.36, 0.018, 12, 90), wireMaterial);
+    torus.position.set(1.45, 0.82, -0.55);
+    torus.rotation.set(1.1, 0.18, 0.28);
+    city.add(torus);
+
+    const halo = new THREE.Mesh(new THREE.TorusGeometry(3.5, 0.012, 8, 144), cyanMaterial);
+    halo.position.set(-0.15, -0.48, 0.05);
+    halo.rotation.x = Math.PI / 2;
+    city.add(halo);
+
+    const signPost = new THREE.Group();
+    signPost.position.set(2.62, 0.1, 0.08);
+    signPost.rotation.y = -0.38;
+    city.add(signPost);
+
+    const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.035, 2.6, 12), trimMaterial);
+    pole.position.y = 0.35;
+    signPost.add(pole);
+
+    [
+      { label: "article", href: "/posts", color: "#72f7ff", y: 1.46 },
+      { label: "about", href: "/about", color: "#ff6bf5", y: 0.88 },
+      { label: "留言", href: "/messages", color: "#ffc65a", y: 0.3 },
+    ].forEach((item, index) => {
+      const boardMaterial = new THREE.MeshStandardMaterial({
+        color: 0x081426,
+        emissive: index === 1 ? 0x481150 : index === 2 ? 0x4d2f08 : 0x07344c,
+        emissiveIntensity: 0.72,
+        metalness: 0.42,
+        roughness: 0.3,
+      });
+      const board = new THREE.Mesh(new THREE.BoxGeometry(1.38, 0.42, 0.08), boardMaterial);
+      board.position.set(index % 2 ? -0.38 : 0.38, item.y, 0);
+      board.rotation.z = index % 2 ? 0.08 : -0.08;
+      board.userData.href = item.href;
+      interactiveSigns.push(board);
+      signPost.add(board);
+
+      const texture = createLabelTexture(item.label, item.color);
+      const label = new THREE.Mesh(
+        new THREE.PlaneGeometry(1.24, 0.32),
+        new THREE.MeshBasicMaterial({ map: texture, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false })
+      );
+      label.position.set(board.position.x, board.position.y, 0.052);
+      label.rotation.z = board.rotation.z;
+      label.userData.href = item.href;
+      interactiveSigns.push(label);
+      signPost.add(label);
+    });
+
+    const railGeometry = new THREE.BoxGeometry(0.04, 0.04, 1.35);
+    [-2.1, -1.2, -0.3, 0.6, 1.5].forEach((x, index) => {
+      const rail = new THREE.Mesh(railGeometry, index % 2 ? pinkMaterial : amberMaterial);
+      rail.position.set(x, -0.56, 1.1);
+      rail.rotation.y = Math.PI / 2;
+      city.add(rail);
+    });
+
+    const floaters: THREE.Mesh[] = [];
+    const floaterGeometry = new THREE.BoxGeometry(0.28, 0.28, 0.28);
+    const floaterPositions = [
+      [-3.45, 0.92, 0.6],
+      [-2.34, 1.72, -0.72],
+      [3.28, 1.24, 0.34],
+      [2.22, -0.06, -0.92],
+      [0.06, 2.18, -1.34],
+      [1.34, 1.84, 1.18],
+    ];
+    floaterPositions.forEach((position, index) => {
+      const floater = new THREE.Mesh(floaterGeometry, index % 3 === 0 ? amberMaterial : index % 2 ? pinkMaterial : cyanMaterial);
+      floater.position.set(position[0], position[1], position[2]);
+      floater.rotation.set(index * 0.32, index * 0.18, index * 0.24);
+      city.add(floater);
+      floaters.push(floater);
+    });
+
+    const starPositions = new Float32Array(150 * 3);
+    for (let index = 0; index < 150; index += 1) {
+      starPositions[index * 3] = (Math.random() - 0.5) * 18;
+      starPositions[index * 3 + 1] = Math.random() * 5 + 0.5;
+      starPositions[index * 3 + 2] = (Math.random() - 0.5) * 10 - 2.2;
+    }
+    const stars = new THREE.Points(
+      new THREE.BufferGeometry().setAttribute("position", new THREE.BufferAttribute(starPositions, 3)),
+      new THREE.PointsMaterial({ color: 0x7df8ff, size: 0.025, transparent: true, opacity: 0.62 })
+    );
+    scene.add(stars);
+
+    city.children.forEach((child) => {
+      child.visible = false;
+    });
+    referencePortfolioRoot.visible = false;
+    referencePortfolioRoot.position.set(0, -0.76, 0);
+    referencePortfolioRoot.scale.setScalar(0.2);
+    referencePortfolioRoot.rotation.y = referenceDefaultRotationY;
+    city.add(referencePortfolioRoot);
+
+    const textureLoader = new THREE.TextureLoader();
+    const referenceTexture = (fileName: string) => {
+      const texture = textureLoader.load(`/assets/reference-portfolio/textures/${fileName}`);
+      texture.colorSpace = THREE.SRGBColorSpace;
+      texture.flipY = false;
+      texture.anisotropy = 8;
+      return texture;
+    };
+    const createReferenceMaterial = (fileName: string) =>
+      new THREE.MeshStandardMaterial({
+        map: referenceTexture(fileName),
+        metalness: 0,
+        roughness: 1,
+      });
+    const referenceMaterials = {
+      baked: createReferenceMaterial("baked.jpg"),
+      baked2: createReferenceMaterial("baked2.jpg"),
+      baked3: createReferenceMaterial("baked3.jpg"),
+      baked4: createReferenceMaterial("baked4.jpg"),
+      baked5: createReferenceMaterial("baked5.jpg"),
+      baked6: createReferenceMaterial("baked6.jpg"),
+      baked7: createReferenceMaterial("baked7.jpg"),
+      baked8: createReferenceMaterial("baked8.jpg"),
+      floor: createReferenceMaterial("floort.jpg"),
+      wall: createReferenceMaterial("wallt.jpg"),
+    };
+    const referenceTextureMaterials = Object.values(referenceMaterials);
+    type ReferenceMaterialKey = keyof typeof referenceMaterials;
+
+    const routeForReferenceObject = (name: string) => {
+      const lowerName = name.toLowerCase();
+      if (/frame4|frame41|arcade|gamemachine|vending|music/.test(lowerName)) return "/music";
+      if (/frame3|frame31|neon_shows/.test(lowerName)) return "/posts";
+      if (/frame2|frame21|neon_tv|\btv\b/.test(lowerName)) return "/about";
+      if (/frame5|frame51/.test(lowerName)) return "/messages";
+      return "";
+    };
+
+    const compactReferenceName = (name: string) => name.toLowerCase().replace(/[^a-z0-9]/g, "");
+    const materialKeyForReferenceObject = (name: string): ReferenceMaterialKey => {
+      const compactName = compactReferenceName(name);
+
+      if (compactName === "floor" || compactName === "cube027") return "floor";
+      if (compactName === "wall" || compactName === "cube022") return "wall";
+      if (compactName === "billboard" || compactName === "cylinder021") return "baked8";
+
+      if (
+        compactName === "namesignframe" ||
+        compactName === "cube013" ||
+        compactName === "power" ||
+        compactName === "cube014" ||
+        compactName.startsWith("fanframe") ||
+        compactName === "cube017" ||
+        compactName === "cube023" ||
+        compactName.startsWith("picsign") ||
+        ["cube009", "cube015", "cube018", "cube021"].includes(compactName) ||
+        compactName === "neonguitar" ||
+        compactName.startsWith("electricguitarcube035") ||
+        compactName === "cubessignframe" ||
+        compactName === "cube029" ||
+        compactName === "dragsign" ||
+        compactName.startsWith("nodemesh004")
+      ) {
+        return "baked2";
+      }
+
+      if (
+        compactName === "planks" ||
+        compactName === "cube036" ||
+        compactName === "bone" ||
+        compactName === "cube001" ||
+        compactName.startsWith("frame") ||
+        ["cube006", "cube016", "cube010", "cube012"].includes(compactName) ||
+        compactName.startsWith("circle001") ||
+        compactName.startsWith("circle002") ||
+        compactName.startsWith("fries") ||
+        compactName === "bottleketchup" ||
+        compactName === "bottleketchup1"
+      ) {
+        return "baked3";
+      }
+
+      if (compactName === "flowerstand" || compactName.startsWith("mesh329520873")) return "baked4";
+
+      if (
+        compactName.startsWith("flowerpot2") ||
+        compactName === "node001" ||
+        compactName === "node002" ||
+        compactName === "node003" ||
+        compactName === "nodemesh001" ||
+        compactName === "nodemesh002" ||
+        compactName === "nodemesh003" ||
+        compactName.startsWith("circle003circle004") ||
+        compactName.startsWith("circle003circle001") ||
+        compactName.startsWith("circle003circle002") ||
+        compactName.startsWith("stoolbar")
+      ) {
+        return "baked5";
+      }
+
+      if (
+        compactName === "shade" ||
+        compactName.startsWith("cylinder001") ||
+        compactName.startsWith("environmentcanfridge") ||
+        compactName === "node" ||
+        compactName === "nodemesh" ||
+        /^nodemesh[1-5]$/.test(compactName) ||
+        compactName.startsWith("flagcylindermesh") ||
+        compactName === "germany" ||
+        compactName === "eng" ||
+        compactName === "iran"
+      ) {
+        return "baked6";
+      }
+
+      if (
+        compactName.startsWith("kr") ||
+        ["cylinder002", "cylinder007", "cylinder008", "cylinder009", "cylinder010"].includes(compactName) ||
+        compactName.startsWith("kitchenstove") ||
+        compactName === "arcademiddle" ||
+        compactName === "gamemachine01" ||
+        compactName === "vending" ||
+        compactName.startsWith("mesh1848869498")
+      ) {
+        return "baked7";
+      }
+
+      return "baked";
+    };
+
+    const materialForReferenceObject = (name: string) => {
+      return referenceMaterials[materialKeyForReferenceObject(name)];
+    };
+
+    const prepareEmbeddedReferenceTexture = (texture?: THREE.Texture | null) => {
+      if (!texture) return;
+      texture.colorSpace = THREE.SRGBColorSpace;
+      texture.anisotropy = 8;
+      texture.needsUpdate = true;
+    };
+
+    const glowColorForReferenceMaterial = (name: string) => {
+      if (/pink|purple|holo|name/.test(name)) return new THREE.Color(0xff58f4);
+      if (/orange|bread|burger|ktchen|bulb/.test(name)) return new THREE.Color(0xffb34a);
+      if (/green/.test(name)) return new THREE.Color(0x9dff55);
+      return new THREE.Color(0x72f7ff);
+    };
+
+    const prepareEmbeddedReferenceMaterial = (meshName: string, item: THREE.Material) => {
+      const material = item as THREE.MeshStandardMaterial;
+      const materialName = `${meshName} ${material.name ?? ""}`.toLowerCase();
+
+      prepareEmbeddedReferenceTexture(material.map);
+      prepareEmbeddedReferenceTexture(material.emissiveMap);
+
+      const isGlowMaterial = /light|neon|screen|holo|pic|mrrobot|mindhunter|severance|blackmirror|theoffice|truedet|burger|bread|bulb|ktchen|welcome/.test(materialName);
+      if ("emissive" in material && isGlowMaterial) {
+        const currentGlow = material.emissive.r + material.emissive.g + material.emissive.b;
+        if (currentGlow < 0.02) {
+          material.emissive.copy(glowColorForReferenceMaterial(materialName));
+        }
+        material.emissiveIntensity = Math.max(material.emissiveIntensity ?? 0, material.emissiveMap ? 2.1 : 1.7);
+        material.toneMapped = false;
+      }
+
+      material.needsUpdate = true;
+    };
+
+    const prepareReferenceModel = (root: THREE.Object3D, applyBakedTextures: boolean) => {
+      root.traverse((object) => {
+        const mesh = object as THREE.Mesh;
+        if (!mesh.isMesh) return;
+
+        if (!applyBakedTextures && /^(name_sign|burger_sign|neon_burger|titles|Cube003_1|Cube004_1|Cube020_1|Cube034_1)$/i.test(mesh.name)) {
+          mesh.visible = false;
+        }
+
+        if (applyBakedTextures) {
+          mesh.material = materialForReferenceObject(mesh.name);
+        } else {
+          const material = mesh.material;
+          const materials = Array.isArray(material) ? material : [material];
+          materials.forEach((item) => prepareEmbeddedReferenceMaterial(mesh.name, item));
+        }
+
+        const href = routeForReferenceObject(mesh.name);
+        if (href) {
+          mesh.userData.href = href;
+          interactiveSigns.push(mesh);
+        }
+      });
+    };
+
+    const refreshMusicFocusTarget = () => {
+      referencePortfolioRoot.updateMatrixWorld(true);
+      const focusBox = new THREE.Box3();
+      let found = false;
+      referencePortfolioRoot.traverse((object) => {
+        const lowerName = object.name.toLowerCase();
+        if (!/arcade|gamemachine|vending|music/.test(lowerName)) return;
+        const objectBox = new THREE.Box3().setFromObject(object);
+        if (objectBox.isEmpty()) return;
+        if (found) focusBox.union(objectBox);
+        else focusBox.copy(objectBox);
+        found = true;
+      });
+      if (!found) return;
+      focusBox.getCenter(musicFocusTarget);
+      musicFocusTarget.y += 0.12;
+      hasMusicFocusTarget = true;
+      canvas.dataset.musicFocusTarget = `${musicFocusTarget.x.toFixed(2)},${musicFocusTarget.y.toFixed(2)},${musicFocusTarget.z.toFixed(2)}`;
+    };
+
+    const smoothStep = (value: number) => {
+      const nextValue = Math.min(1, Math.max(0, value));
+      return nextValue * nextValue * (3 - 2 * nextValue);
+    };
+
+    const smoothRange = (value: number, start: number, end: number) => smoothStep((value - start) / (end - start));
+
+    const startMusicCameraTransition = () => {
+      if (cameraTransition) return;
+      const midTarget = compactScene
+        ? new THREE.Vector3(0.08, 0.42, 0.02)
+        : new THREE.Vector3(0, 0.46, 0.02);
+      const midPosition = compactScene
+        ? new THREE.Vector3(0.08, 3.1, 6.42)
+        : new THREE.Vector3(0, 3.04, 5.92);
+      const endTarget = compactScene
+        ? new THREE.Vector3(0.04, -0.08, 0.02)
+        : new THREE.Vector3(0, -0.18, 0.02);
+      const endPosition = compactScene
+        ? new THREE.Vector3(0.04, 1.58, 4.72)
+        : new THREE.Vector3(0, 1.34, 4.48);
+
+      if (reducedMotion) {
+        navigateRef.current("/music");
+        return;
+      }
+
+      cameraTransition = {
+        href: "/music",
+        startedAt: window.performance.now(),
+        duration: 2600,
+        startPosition: camera.position.clone(),
+        startTarget: controls.target.clone(),
+        midPosition,
+        midTarget,
+        endPosition,
+        endTarget,
+        startReferenceRotationY: referencePortfolioRoot.rotation.y,
+        endReferenceRotationY: referenceMusicRotationY,
+        navigated: false,
+      };
+      canvas.dataset.cameraTransition = "music-house-rotate";
+      canvas.dataset.cameraTransitionProgress = "0";
+    };
+
+    const handleSceneNavigation = (href: string) => {
+      if (href === "/music") {
+        startMusicCameraTransition();
+        return;
+      }
+      navigateRef.current(href);
+    };
+
+    const dracoLoader = new DRACOLoader();
+    dracoLoader.setDecoderPath("/assets/reference-portfolio/draco/");
+    const gltfLoader = new GLTFLoader();
+    gltfLoader.setDRACOLoader(dracoLoader);
+    const loadReferenceModel = (url: string, applyBakedTextures: boolean) => {
+      gltfLoader.load(
+        url,
+        (gltf) => {
+          prepareReferenceModel(gltf.scene, applyBakedTextures);
+          if (!applyBakedTextures) {
+            addBrandSignOverlay(gltf.scene);
+            addFloorBrandOverlay(gltf.scene);
+            addDirectionalSignOverlays(gltf.scene);
+          }
+          referencePortfolioRoot.add(gltf.scene);
+          refreshMusicFocusTarget();
+          gltf.animations.forEach((clip) => {
+            const mixer = new THREE.AnimationMixer(gltf.scene);
+            mixer.clipAction(clip).play();
+            mixers.push(mixer);
+          });
+          referencePortfolioRoot.visible = true;
+        },
+        undefined,
+        (error) => {
+          console.error("Failed to load reference portfolio model", url, error);
+        }
+      );
+    };
+    loadReferenceModel("/assets/reference-portfolio/3d/build.glb", true);
+    loadReferenceModel("/assets/reference-portfolio/3d/build2.glb", false);
+
+    const pointer = new THREE.Vector2();
+    const raycaster = new THREE.Raycaster();
+    let hoveredHref = "";
+    let pointerDownX = 0;
+    let pointerDownY = 0;
+    let movedDistance = 0;
+    let compactScene = false;
+    let hasSetInitialView = false;
+    let lastControlTelemetry = "";
+
+    const updateHover = (event: globalThis.PointerEvent) => {
+      const rect = canvas.getBoundingClientRect();
+      pointer.x = ((event.clientX - rect.left) / Math.max(1, rect.width)) * 2 - 1;
+      pointer.y = -((event.clientY - rect.top) / Math.max(1, rect.height)) * 2 + 1;
+      raycaster.setFromCamera(pointer, camera);
+      const hit = raycaster.intersectObjects(interactiveSigns, false)[0];
+      hoveredHref = typeof hit?.object.userData.href === "string" ? hit.object.userData.href : "";
+      if (hit?.point) {
+        hoveredPoint.copy(hit.point);
+        hasHoveredPoint = true;
+      } else {
+        hasHoveredPoint = false;
+      }
+      canvas.style.cursor = hoveredHref ? "pointer" : "grab";
+      canvas.dataset.hoveredHref = hoveredHref;
+      return hoveredHref;
+    };
+
+    const handlePointerDown = (event: globalThis.PointerEvent) => {
+      if (cameraTransition) return;
+      pointerDownX = event.clientX;
+      pointerDownY = event.clientY;
+      movedDistance = 0;
+      canvas.style.cursor = "grabbing";
+    };
+
+    const handlePointerMove = (event: globalThis.PointerEvent) => {
+      if (cameraTransition) return;
+      movedDistance = Math.max(movedDistance, Math.hypot(event.clientX - pointerDownX, event.clientY - pointerDownY));
+      updateHover(event);
+    };
+
+    const handlePointerUp = (event: globalThis.PointerEvent) => {
+      if (cameraTransition) return;
+      const href = updateHover(event);
+      if (movedDistance < 5 && href) handleSceneNavigation(href);
+      canvas.style.cursor = href ? "pointer" : "grab";
+    };
+
+    const setDefaultCameraTarget = () => {
+      controls.target.set(compactScene ? 0.16 : 0, compactScene ? 0.72 : 0.88, 0);
+    };
+
+    const applyInitialCameraView = () => {
+      setDefaultCameraTarget();
+      camera.position.set(
+        compactScene ? 0.18 : 0,
+        compactScene ? 3.88 : 4.18,
+        compactScene ? 8.22 : 7.82
+      );
+      controls.update();
+    };
+
+    const syncControlTelemetry = () => {
+      const distance = controls.getDistance().toFixed(2);
+      const azimuth = controls.getAzimuthalAngle().toFixed(3);
+      const telemetry = `${distance}:${azimuth}`;
+      if (telemetry === lastControlTelemetry) return;
+      lastControlTelemetry = telemetry;
+      canvas.dataset.controls = "orbit";
+      canvas.dataset.cameraDistance = distance;
+      canvas.dataset.cameraAzimuth = azimuth;
+    };
+
+    const updateCameraTransition = (now: number) => {
+      if (!cameraTransition) return false;
+      const progress = Math.min(1, (now - cameraTransition.startedAt) / cameraTransition.duration);
+      const turnProgress = smoothRange(progress, 0, 0.68);
+      const approachProgress = smoothRange(progress, 0.08, 0.68);
+      const zoomProgress = smoothRange(progress, 0.36, 1);
+      transitionPosition
+        .copy(cameraTransition.startPosition)
+        .lerp(cameraTransition.midPosition, approachProgress)
+        .lerp(cameraTransition.endPosition, zoomProgress);
+      transitionTarget
+        .copy(cameraTransition.startTarget)
+        .lerp(cameraTransition.midTarget, approachProgress)
+        .lerp(cameraTransition.endTarget, zoomProgress);
+      camera.position.copy(transitionPosition);
+      controls.target.copy(transitionTarget);
+      referencePortfolioRoot.rotation.y = THREE.MathUtils.lerp(
+        cameraTransition.startReferenceRotationY,
+        cameraTransition.endReferenceRotationY,
+        turnProgress
+      );
+      controls.update();
+      canvas.dataset.cameraTransitionProgress = progress.toFixed(2);
+      canvas.dataset.cameraTransitionTurn = turnProgress.toFixed(2);
+      canvas.dataset.cameraTransitionZoom = zoomProgress.toFixed(2);
+      canvas.dataset.referenceRotationY = referencePortfolioRoot.rotation.y.toFixed(3);
+      if (progress >= 1 && !cameraTransition.navigated) {
+        cameraTransition.navigated = true;
+        canvas.dataset.cameraTransition = "music-complete";
+        navigationTimeout = window.setTimeout(() => {
+          navigateRef.current(cameraTransition?.href ?? "/music");
+        }, 620);
+      }
+      return true;
+    };
+
+    canvas.addEventListener("pointerdown", handlePointerDown);
+    canvas.addEventListener("pointermove", handlePointerMove);
+    canvas.addEventListener("pointerup", handlePointerUp);
+    canvas.addEventListener("pointerleave", handlePointerUp);
+
+    let animationFrame = 0;
+    const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const startedAt = window.performance.now();
+    let lastRenderAt = startedAt;
+
+    function render() {
+      const now = window.performance.now();
+      const elapsed = (now - startedAt) / 1000;
+      const delta = (now - lastRenderAt) / 1000;
+      lastRenderAt = now;
+      controls.enabled = activeRef.current && !cameraTransition;
+      if (!updateCameraTransition(now)) controls.update();
+      syncControlTelemetry();
+      torus.rotation.z = elapsed * 0.36;
+      halo.rotation.z = -elapsed * 0.18;
+      cyanLight.intensity = 8.4 + Math.sin(elapsed * 2.1) * 1.2;
+      magentaLight.intensity = 6.2 + Math.sin(elapsed * 1.7 + 1.2) * 0.9;
+      mixers.forEach((mixer) => mixer.update(delta));
+      if (!reducedMotion) {
+        floaters.forEach((floater, index) => {
+          floater.position.y += Math.sin(elapsed * 0.9 + index) * 0.0018;
+          floater.rotation.x += 0.006 + index * 0.0009;
+          floater.rotation.y += 0.005;
+        });
+      }
+      renderer.render(scene, camera);
+      animationFrame = window.requestAnimationFrame(render);
+    }
+
+    const resize = () => {
+      const { width, height } = canvas.getBoundingClientRect();
+      const nextWidth = Math.max(1, Math.floor(width));
+      const nextHeight = Math.max(1, Math.floor(height));
+      renderer.setSize(nextWidth, nextHeight, false);
+      camera.aspect = nextWidth / nextHeight;
+      camera.updateProjectionMatrix();
+      compactScene = nextWidth < 720;
+      city.scale.setScalar(compactScene ? 0.74 : 1);
+      city.position.x = compactScene ? 0.28 : 0;
+      refreshMusicFocusTarget();
+      if (!hasSetInitialView) {
+        applyInitialCameraView();
+        hasSetInitialView = true;
+      } else if (!cameraTransition) {
+        setDefaultCameraTarget();
+        controls.update();
+      }
+      syncControlTelemetry();
+      renderer.render(scene, camera);
+    };
+    const observer = new ResizeObserver(resize);
+    observer.observe(canvas);
+    resize();
+    render();
+
+    return () => {
+      if (navigationTimeout) window.clearTimeout(navigationTimeout);
+      window.cancelAnimationFrame(animationFrame);
+      canvas.removeEventListener("pointerdown", handlePointerDown);
+      canvas.removeEventListener("pointermove", handlePointerMove);
+      canvas.removeEventListener("pointerup", handlePointerUp);
+      canvas.removeEventListener("pointerleave", handlePointerUp);
+      observer.disconnect();
+      labelTextures.forEach((texture) => texture.dispose());
+      referenceTextureMaterials.forEach((material) => {
+        material.map?.dispose();
+        material.dispose();
+      });
+      dracoLoader.dispose();
+      controls.dispose();
+      scene.traverse((object) => {
+        const mesh = object as THREE.Mesh;
+        mesh.geometry?.dispose();
+        const material = mesh.material;
+        if (Array.isArray(material)) material.forEach((item) => item.dispose());
+        else material?.dispose();
+      });
+      renderer.dispose();
+    };
+  }, []);
+
+  return <canvas ref={canvasRef} className="neon-scene-canvas" role="img" aria-label="霓虹博客 3D 场景" />;
+}
+
 function HomePage() {
-  const [homeConfig, setHomeConfig] = useState<HomePageSettings>(defaultHomeSettings);
-  const heroStyle = homeCoverStyle(homeConfig);
-  const homeCoverUrl = sanitizeAssetUrl(homeConfig.coverUrl);
-  const homeVideoUrl = sanitizeAssetUrl(homeConfig.coverVideoUrl);
-  const isVideoCover = homeConfig.coverType === "video" && Boolean(homeVideoUrl);
-  const visibleEntryCards = homeConfig.entryCards.filter((item) => item.visible);
-  const renderedEntryCards = visibleEntryCards.length ? visibleEntryCards : defaultHomeSettings.entryCards.filter((item) => item.visible);
+  return (
+    <main className="home-landing home-landing-model-only">
+      <section className="home-hero-shell home-hero-model-only" aria-label="3D 首页模型">
+        <div className="home-hero-layout">
+          <div className="home-hero-stage">
+            <NeonHeroScene active={true} onNavigate={navigateConfiguredUrl} />
+          </div>
+        </div>
+      </section>
+    </main>
+  );
+}
+
+function MusicPage() {
+  const [musicConfig, setMusicConfig] = useState<MusicPageSettings>(defaultMusicSettings);
+  const [musicUsingMock, setMusicUsingMock] = useState(false);
+  const [activeTrackIndex, setActiveTrackIndex] = useState(0);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
 
   useEffect(() => {
     let alive = true;
-    api.getPublicHome()
+    api.getPublicMusic()
       .then((result) => {
-        if (alive) setHomeConfig(result.item);
+        if (!alive) return;
+        setMusicConfig(result.item);
+        setMusicUsingMock(result.source === "mock");
       })
-      .catch(() => undefined);
+      .catch(() => {
+        if (alive) setMusicUsingMock(true);
+      });
     return () => {
       alive = false;
     };
   }, []);
 
+  const enabledTracks = musicConfig.tracks.filter((track) => track.enabled !== false);
+  const activeTrack = enabledTracks[activeTrackIndex] ?? enabledTracks[0];
+  const activeCover = sanitizeAssetUrl(activeTrack?.coverUrl);
+  const activeAudio = sanitizeAssetUrl(activeTrack?.audioUrl);
+
+  useEffect(() => {
+    if (activeTrackIndex >= enabledTracks.length) setActiveTrackIndex(0);
+  }, [activeTrackIndex, enabledTracks.length]);
+
+  useEffect(() => {
+    setIsPlaying(false);
+  }, [activeAudio]);
+
+  const moveTrack = (direction: -1 | 1) => {
+    if (!enabledTracks.length) return;
+    setActiveTrackIndex((current) => (current + direction + enabledTracks.length) % enabledTracks.length);
+  };
+
+  const togglePlayback = () => {
+    const audio = audioRef.current;
+    if (!audio || !activeAudio) return;
+    if (isPlaying) {
+      audio.pause();
+      setIsPlaying(false);
+      return;
+    }
+    audio.play().then(() => setIsPlaying(true)).catch(() => setIsPlaying(false));
+  };
+
   return (
-    <>
-      <PublicHeader active="/" />
-      <main className="home-landing">
-        <section className="home-hero-shell">
-          <div className={`home-hero-blank ${homeCoverUrl && !isVideoCover ? "has-image" : ""} ${isVideoCover ? "has-video" : ""}`} style={isVideoCover ? undefined : heroStyle} aria-hidden="true">
-            {isVideoCover && <video className="home-hero-video" src={homeVideoUrl} style={homeVideoStyle(homeConfig)} autoPlay muted loop playsInline />}
-            <div className="home-hero-orbit one" />
-            <div className="home-hero-orbit two" />
-            <div className="home-hero-horizon" />
-          </div>
-          {(homeCoverUrl || isVideoCover) && <div className="home-hero-overlay" style={homeOverlayStyle(homeConfig)} aria-hidden="true" />}
-          <div className="home-hero-content">
-            {homeConfig.title && <h1 style={{ color: homeConfig.titleColor }}>{homeConfig.title}</h1>}
-            {homeConfig.subtitle && <p className="home-hero-subtitle" style={{ color: homeConfig.subtitleColor }}>{homeConfig.subtitle}</p>}
-            {homeConfig.description && <p className="home-hero-copy" style={{ color: homeConfig.descriptionColor }}>{homeConfig.description}</p>}
-            <div className="home-hero-actions">
-              <button className="home-primary-action" style={{ background: homeConfig.primaryButtonColor, color: contrastTextColor(homeConfig.primaryButtonColor) }} onClick={() => navigateConfiguredUrl(homeConfig.primaryButtonUrl)}>{homeConfig.primaryButtonText}</button>
-              <button className="home-secondary-action" style={{ background: homeConfig.secondaryButtonColor, color: contrastTextColor(homeConfig.secondaryButtonColor), borderColor: homeConfig.secondaryButtonColor }} onClick={() => navigateConfiguredUrl(homeConfig.secondaryButtonUrl)}>{homeConfig.secondaryButtonText}</button>
+    <main className="music-vending-page">
+      {musicUsingMock && <span className="visually-hidden">Preview playlist</span>}
+      <section className="music-machine-stage" aria-label="饮料机音乐播放器">
+        <div className="music-wall-photo" aria-hidden="true" />
+        <div className="music-guitar" aria-hidden="true" />
+        <div className="music-machine" aria-label={musicConfig.title || "Music"}>
+          <div className="music-machine-neck" aria-hidden="true" />
+          <div className="music-machine-cavity">
+            <div className="music-machine-screen">
+              <header className="music-machine-screen-head">
+                <span className="music-note-icon" aria-hidden="true">♪</span>
+                <h1>Playing</h1>
+                <button type="button" aria-label="返回首页" onClick={() => go("/")}>×</button>
+              </header>
+              <div className="music-machine-list">
+                {enabledTracks.length ? enabledTracks.map((track, index) => {
+                  const cover = sanitizeAssetUrl(track.coverUrl);
+                  const audio = sanitizeAssetUrl(track.audioUrl);
+                  const isActive = activeTrack === track;
+                  return (
+                    <button key={`${track.title}-${track.artist}-${track.audioUrl}-${index}`} className={isActive ? "active" : ""} type="button" onClick={() => setActiveTrackIndex(index)}>
+                      <span className={`music-track-cover ${cover ? "has-cover" : ""}`} style={cover ? { backgroundImage: `url(${cover})` } : undefined}>
+                        {!cover && (track.title || "M").slice(0, 1)}
+                      </span>
+                      <b><span>{track.title || "Untitled"}</span><small>{track.artist || (audio ? musicConfig.subtitle : "No audio configured")}</small></b>
+                      <em>{track.duration || (audio ? "" : "OFF")}</em>
+                    </button>
+                  );
+                }) : <p className="music-machine-empty">No tracks</p>}
+              </div>
+            </div>
+            <div className="music-machine-controls" aria-label="音乐控制">
+              <button className="music-control previous" type="button" aria-label="上一首" onClick={() => moveTrack(-1)} disabled={!enabledTracks.length}><span /></button>
+              <button className={`music-control play ${isPlaying ? "playing" : ""}`} type="button" aria-label={isPlaying ? "暂停" : "播放"} onClick={togglePlayback} disabled={!activeAudio}><span /></button>
+              <button className="music-control next" type="button" aria-label="下一首" onClick={() => moveTrack(1)} disabled={!enabledTracks.length}><span /></button>
             </div>
           </div>
-        </section>
-
-        <section className="home-entry-grid" aria-label="首页入口">
-          {renderedEntryCards.map((item) => (
-            <button className="home-entry-card" key={`${item.title}-${item.href}`} onClick={() => navigateConfiguredUrl(item.href)}>
-              <span className={`home-entry-icon ${item.icon}`} aria-hidden="true" />
-              <span>
-                <b>{item.title}</b>
-                <small>{item.description}</small>
-                <em>{item.actionText} →</em>
-              </span>
-            </button>
-          ))}
-        </section>
-      </main>
-      <PublicFooter />
-    </>
+          <div className="music-machine-base" aria-hidden="true" />
+        </div>
+      </section>
+      {activeAudio && <audio ref={audioRef} key={activeAudio} src={activeAudio} preload="metadata" onPlay={() => setIsPlaying(true)} onPause={() => setIsPlaying(false)} onEnded={() => setIsPlaying(false)} />}
+    </main>
   );
 }
 
@@ -934,24 +2112,43 @@ function ArticlePage({ articleId }: { articleId: number }) {
           </div>
           <button className="toc-top" onClick={() => scrollTo({ top: 0, behavior: "smooth" })}>回到顶部 ↑</button>
         </aside>
-        <article className="paper">
-          <div className="cover mountain" style={articleCoverUrl ? { backgroundImage: `url(${articleCoverUrl})` } : undefined} />
+        <article className="paper article-paper">
+          <div className="article-detail-cover cover mountain" style={articleCoverUrl ? { backgroundImage: `url(${articleCoverUrl})` } : undefined} aria-label="文章封面" />
           <div className="paper-body">
-            <h1>{article.title}</h1>
-            <div className="chip-row" aria-busy={articleLoading}><Tag tone="orange">{article.category}</Tag>{article.tags.map((tag) => <Tag key={tag}>{tag}</Tag>)}<span className="meta">▣ {article.date}　◷ 阅读 {article.readingMinutes} 分钟　◎ {article.reads}　♡ {likeCount}</span></div>
-            <div className="article-actions" aria-label="文章操作">
-              <button className={liked ? "liked" : ""} onClick={likeArticle} disabled={liking || articleSource !== "api"} title={articleSource !== "api" ? "离线预览文章暂不支持点赞" : liked ? "已点赞" : "点赞文章"}>
-                <span>{liked ? "♥" : "♡"}</span>{liking ? "点赞中..." : liked ? `已点赞 ${likeCount}` : `点赞 ${likeCount}`}
-              </button>
-              <button onClick={() => document.querySelector(".comments")?.scrollIntoView({ behavior: "smooth", block: "start" })}>
-                <span>评</span>评论 {article.comments}
-              </button>
-              <button onClick={copyArticleLink}>
-                <span>链</span>复制链接
-              </button>
-            </div>
+            <header className="article-detail-hero">
+              <h1>{article.title}</h1>
+              <p>{article.summary || article.excerpt}</p>
+              <div className="article-detail-footer">
+                <div className="article-detail-meta" aria-busy={articleLoading}>
+                  <span><Icon name="calendar" />{article.date}</span>
+                  <span><Icon name="clock" />阅读 {article.readingMinutes} 分钟</span>
+                  <span><Icon name="eye" />{article.reads} 浏览</span>
+                </div>
+                <div className="article-actions article-detail-actions" aria-label="文章操作">
+                  <button className={liked ? "liked" : ""} onClick={likeArticle} disabled={liking || articleSource !== "api"} title={articleSource !== "api" ? "离线预览文章暂不支持点赞" : liked ? "已点赞" : "点赞文章"}>
+                    <span className="article-action-like">{liked ? "♥" : "♡"}</span><b>{likeCount}</b>
+                  </button>
+                  <button onClick={() => document.querySelector(".comments")?.scrollIntoView({ behavior: "smooth", block: "start" })} title="跳到评论区">
+                    <span className="article-action-comment" aria-hidden="true">
+                      <svg viewBox="0 0 24 24" focusable="false">
+                        <path d="M5.8 6.6h12.4c1.38 0 2.3.92 2.3 2.22v5.56c0 1.3-.92 2.22-2.3 2.22H10.4L5.2 20v-3.4h-.1c-1.32 0-2.1-.92-2.1-2.22V8.82c0-1.3.92-2.22 2.8-2.22Z" />
+                      </svg>
+                    </span><b>{article.comments}</b>
+                  </button>
+                  <button onClick={copyArticleLink} title="复制文章链接" aria-label="复制文章链接">
+                    <span className="article-action-link" aria-hidden="true" />
+                  </button>
+                </div>
+              </div>
+            </header>
             {likeNotice && <p className="form-notice">{likeNotice}</p>}
-            <blockquote>{article.summary}</blockquote>
+            <section className="article-summary-card" aria-label="文章摘要">
+              <div className="article-summary-heading">
+                <img src="/assets/article-summary-icon.svg" alt="" aria-hidden="true" />
+                <span>文章摘要</span>
+              </div>
+              <p>{article.summary || article.excerpt || "暂无摘要。"}</p>
+            </section>
             {article.sections.map((section) => {
               const Heading = section.level === 3 ? "h3" : "h2";
               return (
@@ -975,7 +2172,6 @@ function ArticlePage({ articleId }: { articleId: number }) {
         <aside className="side-stack article-side">
           <PublicDataNotice show={articleSideUsingMock} surface="文章页侧栏" />
           <AuthorCard />
-          <Card title="文章摘要"><p className="soft-text">{article.summary}</p></Card>
           <Card title="相关文章">{relatedArticles.length ? <MiniList items={relatedArticles} /> : <p className="soft-text">暂无相关文章</p>}</Card>
           <Card title="最新文章">{latestArticles.length ? <ol className="rank-list">{latestArticles.map((item) => <li key={item.id}>{item.title}<time>{item.date.slice(5)}</time></li>)}</ol> : <p className="soft-text">暂无最新文章</p>}</Card>
         </aside>
@@ -1475,6 +2671,10 @@ function textToTopics(text: string): AboutPageSettings["writingTopics"] {
     const [label = "", url = ""] = line.split("|");
     return { label: label.trim(), url: url.trim() };
   }).filter((item) => item.label);
+}
+
+function createEmptyMusicTrack(): MusicTrackItem {
+  return { title: "新歌曲", artist: "", album: "", coverUrl: "", audioUrl: "", duration: "", note: "", enabled: true };
 }
 
 function SiteSettingsPage() {
@@ -2095,6 +3295,184 @@ function HomeSettingsPage() {
                   ))}
                 </div>
               ) : <p className="soft-text">媒体库暂无图片或视频</p>}
+            </div>
+          </div>
+        )}
+      </div>
+    </>
+  );
+}
+
+function MusicSettingsPage() {
+  const [config, setConfig] = useState<MusicPageSettings>(defaultMusicSettings);
+  const [notice, setNotice] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [mediaPickerTarget, setMediaPickerTarget] = useState<{ index: number; field: "coverUrl" | "audioUrl" } | null>(null);
+  const [musicMediaItems, setMusicMediaItems] = useState<AdminMediaItem[]>([]);
+  const [mediaLoading, setMediaLoading] = useState(false);
+
+  useEffect(() => {
+    let alive = true;
+    api.getAdminMusicSettings()
+      .then((result) => {
+        if (alive) setConfig(result.item);
+      })
+      .catch((error) => {
+        const message = getApiErrorMessage(error);
+        setNotice(message);
+        if (message.includes("登录")) api.logout();
+      });
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  function updateField<K extends keyof MusicPageSettings>(key: K, value: MusicPageSettings[K]) {
+    setConfig((current) => ({ ...current, [key]: value }));
+  }
+
+  function updateTrack<K extends keyof MusicTrackItem>(index: number, key: K, value: MusicTrackItem[K]) {
+    setConfig((current) => ({
+      ...current,
+      tracks: current.tracks.map((track, trackIndex) => trackIndex === index ? { ...track, [key]: value } : track),
+    }));
+  }
+
+  function addTrack() {
+    setConfig((current) => ({ ...current, tracks: [...current.tracks, createEmptyMusicTrack()] }));
+  }
+
+  function removeTrack(index: number) {
+    setConfig((current) => ({ ...current, tracks: current.tracks.filter((_, trackIndex) => trackIndex !== index) }));
+  }
+
+  function moveTrack(index: number, direction: -1 | 1) {
+    setConfig((current) => {
+      const nextIndex = index + direction;
+      if (nextIndex < 0 || nextIndex >= current.tracks.length) return current;
+      const nextTracks = [...current.tracks];
+      [nextTracks[index], nextTracks[nextIndex]] = [nextTracks[nextIndex], nextTracks[index]];
+      return { ...current, tracks: nextTracks };
+    });
+  }
+
+  async function openMusicMediaPicker(index: number, field: "coverUrl" | "audioUrl") {
+    setMediaPickerTarget({ index, field });
+    setMediaLoading(true);
+    setNotice("");
+    try {
+      const result = await api.getAdminMedia({ pageSize: 100, type: field === "audioUrl" ? "audio" : "image" });
+      setMusicMediaItems(result.items.filter((item) => field === "audioUrl" ? isAudioMedia(item) : item.mimeType.startsWith("image/")));
+    } catch (error) {
+      setNotice(getApiErrorMessage(error));
+    } finally {
+      setMediaLoading(false);
+    }
+  }
+
+  function selectMusicMedia(item: AdminMediaItem) {
+    if (!mediaPickerTarget) return;
+    const value = mediaPickerTarget.field === "audioUrl" ? mediaOriginalUrl(item) : mediaDisplayUrl(item);
+    updateTrack(mediaPickerTarget.index, mediaPickerTarget.field, value);
+    setMediaPickerTarget(null);
+    setNotice(`已选择${mediaPickerTarget.field === "audioUrl" ? "音频" : "封面"}：${mediaDisplayName(item)}`);
+  }
+
+  async function saveMusicSettings() {
+    setSaving(true);
+    setNotice("");
+    try {
+      const result = await api.updateAdminMusicSettings(config);
+      setConfig(result.item);
+      setNotice("音乐配置已保存，前台音乐页会读取最新歌单。");
+      emitAdminDataChanged();
+    } catch (error) {
+      setNotice(getApiErrorMessage(error));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <>
+      <AdminTop />
+      <div className="admin-content admin-placeholder">
+        <div className="title-row">
+          <h1>音乐配置</h1>
+          <div className="title-actions"><button onClick={saveMusicSettings} disabled={saving}>{saving ? "保存中..." : "保存配置"}</button><button onClick={() => go("/music")}>预览音乐页</button></div>
+        </div>
+        {notice && <p className="admin-hint">{notice}</p>}
+        <section className="card music-config">
+          <div className="settings-panel">
+            <header>
+              <b>页面文案</b>
+              <span>控制前台音乐页的标题、介绍和说明。</span>
+            </header>
+            <div className="settings-grid">
+              <label>标题<input value={config.title} onChange={(event) => updateField("title", event.target.value)} /></label>
+              <label>副标题<input value={config.subtitle} onChange={(event) => updateField("subtitle", event.target.value)} /></label>
+              <label className="wide">介绍<textarea value={config.description} onChange={(event) => updateField("description", event.target.value)} /></label>
+            </div>
+          </div>
+          <div className="settings-panel wide">
+            <div className="music-track-editor">
+              <header>
+                <div>
+                  <b>歌单</b>
+                  <span>音频 URL 可手填，也可以先在媒体库上传音频后选择。未配置音频的歌曲会展示但不能播放。</span>
+                </div>
+                <button type="button" onClick={addTrack}>新增歌曲</button>
+              </header>
+              {config.tracks.map((track, index) => {
+                const coverUrl = sanitizeAssetUrl(track.coverUrl);
+                const audioUrl = sanitizeAssetUrl(track.audioUrl);
+                return (
+                  <article key={`${index}-${track.title}-${track.artist}`}>
+                    <div className={`music-admin-cover ${coverUrl ? "has-cover" : ""}`} style={coverUrl ? { backgroundImage: `url(${coverUrl})` } : undefined}>
+                      <span>{coverUrl ? "" : "Cover"}</span>
+                    </div>
+                    <div className="music-track-form">
+                      <div className="project-card-head">
+                        <b>歌曲 {index + 1}</b>
+                        <div className="entry-card-actions">
+                          <button type="button" disabled={index === 0} onClick={() => moveTrack(index, -1)}>上移</button>
+                          <button type="button" disabled={index === config.tracks.length - 1} onClick={() => moveTrack(index, 1)}>下移</button>
+                          <button className="project-remove" type="button" onClick={() => removeTrack(index)}>删除</button>
+                        </div>
+                      </div>
+                      <label className="switch">前台显示<input type="checkbox" checked={track.enabled !== false} onChange={(event) => updateTrack(index, "enabled", event.target.checked)} /></label>
+                      <div className="settings-grid">
+                        <label>歌名<input value={track.title} onChange={(event) => updateTrack(index, "title", event.target.value)} /></label>
+                        <label>作者<input value={track.artist} onChange={(event) => updateTrack(index, "artist", event.target.value)} /></label>
+                        <label>专辑<input value={track.album} onChange={(event) => updateTrack(index, "album", event.target.value)} /></label>
+                        <label>时长<input value={track.duration} onChange={(event) => updateTrack(index, "duration", event.target.value)} placeholder="03:42" /></label>
+                        <label className="wide">封面 URL<div className="inline-picker"><input value={track.coverUrl} onChange={(event) => updateTrack(index, "coverUrl", event.target.value)} placeholder="/uploads/... 或 https://..." /><button type="button" onClick={() => openMusicMediaPicker(index, "coverUrl")}>媒体库</button><button type="button" onClick={() => updateTrack(index, "coverUrl", "")}>清空</button></div></label>
+                        <label className="wide">音频 URL<div className="inline-picker"><input value={track.audioUrl} onChange={(event) => updateTrack(index, "audioUrl", event.target.value)} placeholder="/uploads/.../song.mp3 或 https://..." /><button type="button" onClick={() => openMusicMediaPicker(index, "audioUrl")}>媒体库</button><button type="button" onClick={() => updateTrack(index, "audioUrl", "")}>清空</button></div></label>
+                        <label className="wide">备注<textarea value={track.note} onChange={(event) => updateTrack(index, "note", event.target.value)} /></label>
+                      </div>
+                      {audioUrl && <audio src={audioUrl} controls preload="metadata" />}
+                    </div>
+                  </article>
+                );
+              })}
+              {!config.tracks.length && <p className="soft-text">暂无歌曲，点击“新增歌曲”添加第一首。</p>}
+            </div>
+          </div>
+        </section>
+        {mediaPickerTarget && (
+          <div className="media-modal" role="dialog" aria-modal="true" aria-label="选择音乐媒体" onClick={() => setMediaPickerTarget(null)}>
+            <div className="media-modal-panel media-picker-panel" onClick={(event) => event.stopPropagation()}>
+              <header><b>{mediaPickerTarget.field === "audioUrl" ? "选择音频" : "选择封面"}</b><button type="button" onClick={() => setMediaPickerTarget(null)}>关闭</button></header>
+              {mediaLoading ? <p className="soft-text">正在读取媒体库...</p> : musicMediaItems.length ? (
+                <div className="media-picker-grid">
+                  {musicMediaItems.map((item) => (
+                    <button type="button" key={item.id} onClick={() => selectMusicMedia(item)}>
+                      {isAudioMedia(item) ? <span className="media-picker-audio">音频</span> : <img src={mediaPreviewUrl(item)} alt={item.altText || item.originalName} loading="lazy" />}
+                      <span>{mediaDisplayName(item)}</span>
+                    </button>
+                  ))}
+                </div>
+              ) : <p className="soft-text">{mediaPickerTarget.field === "audioUrl" ? "媒体库暂无音频，请先去媒体库上传 mp3/wav/ogg。" : "媒体库暂无图片。"}</p>}
             </div>
           </div>
         )}
@@ -2841,6 +4219,7 @@ const adminRoutes: Record<string, { label: string; path: string }> = {
   import: { label: "批量导入", path: "/admin/import" },
   about: { label: "关于页配置", path: "/admin/about-config" },
   home: { label: "首页配置", path: "/admin/home-config" },
+  music: { label: "音乐配置", path: "/admin/music-config" },
   settings: { label: "站点设置", path: "/admin/settings" },
   ai: { label: "AI 设置", path: "/admin/ai-settings" },
   security: { label: "账号安全", path: "/admin/security" },
@@ -2849,6 +4228,7 @@ const adminRoutes: Record<string, { label: string; path: string }> = {
 const adminRouteAliases: Record<string, string> = {
   "/admin/about": "about",
   "/admin/home": "home",
+  "/admin/music": "music",
 };
 
 type AdminRow = {
@@ -2948,6 +4328,10 @@ function isVideoMedia(item: AdminMediaItem) {
   return item.mimeType.startsWith("video/");
 }
 
+function isAudioMedia(item: AdminMediaItem) {
+  return item.mimeType.startsWith("audio/");
+}
+
 function formatMediaFileSize(value?: number) {
   if (!value) return "";
   if (value >= 1024 * 1024) return `${(value / 1024 / 1024).toFixed(1).replace(".0", "")} MB`;
@@ -2964,7 +4348,7 @@ function mediaMetaText(item: AdminMediaItem) {
   const displayName = mediaDisplayName(item);
   const originalName = cleanMediaText(item.originalName);
   return [
-    item.mimeType.replace(/^(image|video)\//, "").toUpperCase(),
+    item.mimeType.replace(/^(image|video|audio)\//, "").toUpperCase(),
     item.width && item.height ? `${item.width}x${item.height}` : "",
     formatMediaFileSize(item.fileSize),
     formatMediaCreatedAt(item.createdAt),
@@ -3011,7 +4395,7 @@ const defaultAboutSettings: AboutPageSettings = {
 function AdminShell({ editor = false, page = "dashboard" }: { editor?: boolean; page?: string }) {
   const active = editor ? "文章管理" : adminRoutes[page]?.label ?? "仪表盘";
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
-  const content = editor ? <EditorPage /> : page === "dashboard" ? <DashboardPage /> : page === "settings" ? <SiteSettingsPage /> : page === "ai" ? <AiSettingsPage /> : page === "security" ? <AccountSecurityPage /> : page === "about" ? <AboutSettingsPage /> : page === "home" ? <HomeSettingsPage /> : page === "import" ? <ImportArticlesPage /> : <AdminPlaceholder page={page} />;
+  const content = editor ? <EditorPage /> : page === "dashboard" ? <DashboardPage /> : page === "settings" ? <SiteSettingsPage /> : page === "ai" ? <AiSettingsPage /> : page === "security" ? <AccountSecurityPage /> : page === "about" ? <AboutSettingsPage /> : page === "home" ? <HomeSettingsPage /> : page === "music" ? <MusicSettingsPage /> : page === "import" ? <ImportArticlesPage /> : <AdminPlaceholder page={page} />;
 
   useEffect(() => {
     setMobileMenuOpen(false);
@@ -3100,10 +4484,14 @@ function AdminSidebar({ active, onNavigate }: { active: string; onNavigate?: () 
     onNavigate?.();
     go("/admin/login");
   }
+  function openPublicHome() {
+    onNavigate?.();
+    go("/");
+  }
   return <aside className="admin-side"><Logo admin settings={siteSettings} /><nav>{items.map((item) => {
     const itemBadge = badge(item.label);
     return <button key={item.path} className={active === item.label ? "active" : ""} onClick={() => { onNavigate?.(); go(item.path); }}>{item.label}{itemBadge && <small>{itemBadge}</small>}</button>;
-  })}</nav><div className="admin-user"><span className="avatar sm">管</span><span>管理员<small>超级管理员</small></span><button type="button" title="退出登录并使当前后端会话失效" onClick={logoutAdmin}>退出</button></div></aside>;
+  })}</nav><div className="admin-user"><button type="button" className="avatar sm admin-home-avatar" title="返回前台首页" aria-label="返回前台首页" onClick={openPublicHome}>管</button><span>管理员<small>超级管理员</small></span><button type="button" title="退出登录并使当前后端会话失效" onClick={logoutAdmin}>退出</button></div></aside>;
 }
 
 function AdminTop({ editor = false, editorTitle = "新建文章" }: { editor?: boolean; editorTitle?: string }) {
@@ -3165,7 +4553,7 @@ function AdminTop({ editor = false, editorTitle = "新建文章" }: { editor?: b
     setAdminSearch("");
     go(item.href);
   }
-  return <header className="admin-top"><div>{editor ? `‹ 文章管理 / ${editorTitle}` : "欢迎回来，站长 👋"}</div><form className="search-mini admin-search" onSubmit={submitAdminSearch}><input value={adminSearch} onFocus={() => setAdminSearchOpen(true)} onChange={(event) => { setAdminSearch(event.target.value); setAdminSearchOpen(true); }} placeholder="搜索文章、分类、标签、媒体..." /><button aria-label="后台搜索">⌕</button>{adminSearchOpen && adminSearch.trim() && <div className="admin-search-panel">{adminSearchLoading ? <p>正在搜索...</p> : adminSearchResults.length ? adminSearchResults.map((item) => <button type="button" key={`${item.kind}-${item.href}-${item.title}`} onMouseDown={(event) => event.preventDefault()} onClick={() => openAdminSearchItem(item)}><b>{item.title}</b><small>{item.subtitle}</small></button>) : <p>没有找到相关结果</p>}</div>}</form><button className="bell">♧{pendingCount > 0 && <b>{formatCompactNumber(pendingCount)}</b>}</button><span className="avatar sm">站</span></header>;
+  return <header className="admin-top"><div>{editor ? `‹ 文章管理 / ${editorTitle}` : "欢迎回来，站长 👋"}</div><form className="search-mini admin-search" onSubmit={submitAdminSearch}><input value={adminSearch} onFocus={() => setAdminSearchOpen(true)} onChange={(event) => { setAdminSearch(event.target.value); setAdminSearchOpen(true); }} placeholder="搜索文章、分类、标签、媒体..." /><button aria-label="后台搜索">⌕</button>{adminSearchOpen && adminSearch.trim() && <div className="admin-search-panel">{adminSearchLoading ? <p>正在搜索...</p> : adminSearchResults.length ? adminSearchResults.map((item) => <button type="button" key={`${item.kind}-${item.href}-${item.title}`} onMouseDown={(event) => event.preventDefault()} onClick={() => openAdminSearchItem(item)}><b>{item.title}</b><small>{item.subtitle}</small></button>) : <p>没有找到相关结果</p>}</div>}</form><button className="bell">♧{pendingCount > 0 && <b>{formatCompactNumber(pendingCount)}</b>}</button><button type="button" className="avatar sm admin-home-avatar" title="返回前台首页" aria-label="返回前台首页" onClick={() => go("/")}>站</button></header>;
 }
 
 function AdminPlaceholder({ page }: { page: string }) {
@@ -3185,7 +4573,7 @@ function AdminPlaceholder({ page }: { page: string }) {
   const [selectedKeys, setSelectedKeys] = useState<string[]>([]);
   const [postPage, setPostPage] = useState(1);
   const [postPagination, setPostPagination] = useState({ page: 1, pageSize: ADMIN_LIST_PAGE_SIZE, total: 0, hasMore: false });
-  const [mediaTypeFilter, setMediaTypeFilter] = useState<"all" | "image" | "video">("all");
+  const [mediaTypeFilter, setMediaTypeFilter] = useState<"all" | "image" | "video" | "audio">("all");
   const [mediaSearch, setMediaSearch] = useState("");
   const [mediaPage, setMediaPage] = useState(1);
   const [mediaPagination, setMediaPagination] = useState({ page: 1, pageSize: ADMIN_MEDIA_PAGE_SIZE, total: 0, hasMore: false });
@@ -3371,9 +4759,9 @@ function AdminPlaceholder({ page }: { page: string }) {
     const files = Array.from(event.target.files ?? []);
     event.target.value = "";
     if (!files.length || mediaUploading) return;
-    const mediaFiles = files.filter((file) => file.type.startsWith("image/") || file.type.startsWith("video/"));
+    const mediaFiles = files.filter((file) => file.type.startsWith("image/") || file.type.startsWith("video/") || file.type.startsWith("audio/"));
     if (!mediaFiles.length) {
-      setActionNotice("请选择图片或视频文件。");
+      setActionNotice("请选择图片、视频或音频文件。");
       return;
     }
 
@@ -3404,7 +4792,7 @@ function AdminPlaceholder({ page }: { page: string }) {
     const parts = [
       uploaded.length ? `已上传 ${uploaded.length} 个媒体文件` : "",
       failed.length ? `失败 ${failed.length} 个：${failed[0]}` : "",
-      skipped ? `已跳过 ${skipped} 个非图片/视频文件` : "",
+      skipped ? `已跳过 ${skipped} 个非图片/视频/音频文件` : "",
     ].filter(Boolean);
     setActionNotice(parts.join("；") || "没有上传媒体文件。");
   }
@@ -3577,7 +4965,7 @@ function AdminPlaceholder({ page }: { page: string }) {
   }
 
   const filteredAdminMedia = adminMedia.filter((item) => {
-    const matchType = mediaTypeFilter === "all" || (mediaTypeFilter === "image" ? item.mimeType.startsWith("image/") : item.mimeType.startsWith("video/"));
+    const matchType = mediaTypeFilter === "all" || item.mimeType.startsWith(`${mediaTypeFilter}/`);
     const keyword = mediaSearch.trim().toLowerCase();
     const matchSearch = !keyword || [mediaDisplayName(item), item.originalName, item.fileName, item.altText ?? "", item.mimeType].join(" ").toLowerCase().includes(keyword);
     return matchType && matchSearch;
@@ -3628,7 +5016,7 @@ function AdminPlaceholder({ page }: { page: string }) {
           href: "",
           media: item,
           actions: [
-            { label: "查看", title: isVideoMedia(item) ? "预览这个视频" : "预览这张图片", run: () => setPreviewMedia(item) },
+            { label: "查看", title: isAudioMedia(item) ? "预览这个音频" : isVideoMedia(item) ? "预览这个视频" : "预览这张图片", run: () => setPreviewMedia(item) },
             { label: "编辑说明", title: "更新媒体 alt_text，保存到 media_assets", run: () => updateMediaAlt(item.id, item.altText ?? "") },
             { label: "删除", title: "删除媒体数据库记录，并尝试删除本地上传文件", run: () => deleteMedia(item.id) },
           ],
@@ -3830,8 +5218,8 @@ function AdminPlaceholder({ page }: { page: string }) {
         {page === "media" && (
           <div className="admin-hint media-upload-strip">
             <button type="button" disabled={mediaUploading} onClick={() => mediaInputRef.current?.click()}>{mediaUploading ? "上传中..." : "上传媒体"}</button>
-            <span>可一次选择多张图片或视频；上传后会写入 media_assets，并可作为文章封面使用。</span>
-            <input ref={mediaInputRef} className="visually-hidden" type="file" accept="image/*,video/*" multiple onChange={uploadMediaFile} />
+            <span>可一次选择多张图片、视频或音频；上传后会写入 media_assets，音频可用于音乐页。</span>
+            <input ref={mediaInputRef} className="visually-hidden" type="file" accept="image/*,video/*,audio/*" multiple onChange={uploadMediaFile} />
           </div>
         )}
         {page === "media" && (
@@ -3841,12 +5229,13 @@ function AdminPlaceholder({ page }: { page: string }) {
                 ["all", "全部"],
                 ["image", "图片"],
                 ["video", "视频"],
+                ["audio", "音频"],
               ].map(([value, label]) => (
                 <button
                   key={value}
                   type="button"
                   className={mediaTypeFilter === value ? "active" : ""}
-                  onClick={() => { setMediaTypeFilter(value as "all" | "image" | "video"); setMediaPage(1); setSelectedKeys([]); }}
+                  onClick={() => { setMediaTypeFilter(value as "all" | "image" | "video" | "audio"); setMediaPage(1); setSelectedKeys([]); }}
                 >
                   {label}
                 </button>
@@ -3899,7 +5288,7 @@ function AdminPlaceholder({ page }: { page: string }) {
               </div>
             </div>
           )}
-          {loading ? <p className="soft-text">正在读取数据...</p> : rows.length ? rows.map((row) => <div className={`admin-row ${row.href ? "clickable" : ""} ${row.media ? "media-row" : ""} ${selectedKeys.includes(row.key) ? "selected" : ""}`} key={row.key} onClick={() => row.href && go(row.href)}>{batchMode && <label className="row-check" onClick={(event) => event.stopPropagation()}><input type="checkbox" checked={selectedKeys.includes(row.key)} onChange={(event) => setRowSelected(row.key, event.target.checked)} /><span className="visually-hidden">选择 {row.text}</span></label>}{row.media && <button className={`media-thumb ${isVideoMedia(row.media) ? "video-thumb" : ""}`} type="button" style={isVideoMedia(row.media) ? undefined : { backgroundImage: `url(${mediaPreviewUrl(row.media)})` }} onClick={(event) => { event.stopPropagation(); setPreviewMedia(row.media!); }} aria-label={`查看 ${row.text}`}>{isVideoMedia(row.media) && <><video src={mediaOriginalUrl(row.media)} muted preload="metadata" /><span>视频</span></>}</button>}{row.media ? <span className="media-text"><b>{row.text}</b><small>{mediaMetaText(row.media)}</small></span> : <span>{row.text}</span>}<div className="admin-row-actions"><small>{row.status}</small>{row.actions?.map((action) => <button key={action.label} title={action.title} onClick={(event) => { event.stopPropagation(); if (action.href) go(action.href); action.run?.(); }}>{action.label}</button>)}{row.review && row.review.status !== "approved" && <button onClick={(event) => { event.stopPropagation(); reviewRow(row.review!.kind, row.review!.id, "approved"); }}>通过</button>}{row.review && row.review.status !== "rejected" && <button onClick={(event) => { event.stopPropagation(); reviewRow(row.review!.kind, row.review!.id, "rejected"); }}>驳回</button>}</div></div>) : <p className="soft-text">{emptyText}</p>}
+          {loading ? <p className="soft-text">正在读取数据...</p> : rows.length ? rows.map((row) => <div className={`admin-row ${row.href ? "clickable" : ""} ${row.media ? "media-row" : ""} ${selectedKeys.includes(row.key) ? "selected" : ""}`} key={row.key} onClick={() => row.href && go(row.href)}>{batchMode && <label className="row-check" onClick={(event) => event.stopPropagation()}><input type="checkbox" checked={selectedKeys.includes(row.key)} onChange={(event) => setRowSelected(row.key, event.target.checked)} /><span className="visually-hidden">选择 {row.text}</span></label>}{row.media && <button className={`media-thumb ${isVideoMedia(row.media) ? "video-thumb" : ""} ${isAudioMedia(row.media) ? "audio-thumb" : ""}`} type="button" style={isVideoMedia(row.media) || isAudioMedia(row.media) ? undefined : { backgroundImage: `url(${mediaPreviewUrl(row.media)})` }} onClick={(event) => { event.stopPropagation(); setPreviewMedia(row.media!); }} aria-label={`查看 ${row.text}`}>{isVideoMedia(row.media) && <><video src={mediaOriginalUrl(row.media)} muted preload="metadata" /><span>视频</span></>}{isAudioMedia(row.media) && <span>音频</span>}</button>}{row.media ? <span className="media-text"><b>{row.text}</b><small>{mediaMetaText(row.media)}</small></span> : <span>{row.text}</span>}<div className="admin-row-actions"><small>{row.status}</small>{row.actions?.map((action) => <button key={action.label} title={action.title} onClick={(event) => { event.stopPropagation(); if (action.href) go(action.href); action.run?.(); }}>{action.label}</button>)}{row.review && row.review.status !== "approved" && <button onClick={(event) => { event.stopPropagation(); reviewRow(row.review!.kind, row.review!.id, "approved"); }}>通过</button>}{row.review && row.review.status !== "rejected" && <button onClick={(event) => { event.stopPropagation(); reviewRow(row.review!.kind, row.review!.id, "rejected"); }}>驳回</button>}</div></div>) : <p className="soft-text">{emptyText}</p>}
           {(page === "posts" || page === "drafts" || page === "trash") && !loading && (
             <div className="admin-pagination">
               <button disabled={postPage <= 1} onClick={() => { setPostPage((value) => Math.max(1, value - 1)); setSelectedKeys([]); }}>上一页</button>
@@ -3923,12 +5312,14 @@ function AdminPlaceholder({ page }: { page: string }) {
           )}
         </section>
         {previewMedia && (
-          <div className="media-modal" role="dialog" aria-modal="true" aria-label={isVideoMedia(previewMedia) ? "视频预览" : "图片预览"} onClick={() => setPreviewMedia(null)}>
+          <div className="media-modal" role="dialog" aria-modal="true" aria-label={isAudioMedia(previewMedia) ? "音频预览" : isVideoMedia(previewMedia) ? "视频预览" : "图片预览"} onClick={() => setPreviewMedia(null)}>
             <div className="media-modal-panel" onClick={(event) => event.stopPropagation()}>
               <header><b>{previewMedia.originalName}</b><button type="button" onClick={() => setPreviewMedia(null)}>关闭</button></header>
-              {isVideoMedia(previewMedia)
-                ? <video className="media-preview-video" src={mediaOriginalUrl(previewMedia)} controls preload="metadata" />
-                : <img src={mediaDisplayUrl(previewMedia)} alt={previewMedia.altText || previewMedia.originalName} />}
+              {isAudioMedia(previewMedia)
+                ? <div className="media-preview-audio"><b>{mediaDisplayName(previewMedia)}</b><audio src={mediaOriginalUrl(previewMedia)} controls preload="metadata" /></div>
+                : isVideoMedia(previewMedia)
+                  ? <video className="media-preview-video" src={mediaOriginalUrl(previewMedia)} controls preload="metadata" />
+                  : <img src={mediaDisplayUrl(previewMedia)} alt={previewMedia.altText || previewMedia.originalName} />}
               <p>{mediaMetaText(previewMedia)}</p>
               <p>{previewMedia.url}</p>
             </div>
@@ -5118,6 +6509,10 @@ export default function App() {
   const path = useRoute();
   const [authVersion, setAuthVersion] = useState(0);
   useEffect(() => {
+    const routePath = path.split("?")[0];
+    document.documentElement.dataset.surface = routePath === "/admin/login" || routePath === "/admin" || routePath.startsWith("/admin/") ? "admin" : "public";
+  }, [path]);
+  useEffect(() => {
     const syncAuth = () => setAuthVersion((value) => value + 1);
     window.addEventListener(api.authChangedEvent, syncAuth);
     return () => window.removeEventListener(api.authChangedEvent, syncAuth);
@@ -5136,6 +6531,7 @@ export default function App() {
     }
     if (routePath.startsWith("/article")) return <ArticlePage articleId={Number(routePath.split("/")[2]) || 0} />;
     if (routePath === "/posts" || routePath === "/archive" || routePath === "/categories" || routePath === "/tags") return <PostsPage />;
+    if (routePath === "/music") return <MusicPage />;
     if (routePath === "/about") return <AboutPage />;
     if (routePath === "/messages") return <MessagesPage />;
     return <HomePage />;

@@ -1,0 +1,36 @@
+{
+  "generatedAt": "2026-07-06T14:28:14.962Z",
+  "license": "Original generated assets for this blog project.",
+  "assets": [
+    {
+      "file": "/assets/3d/neon-cat.glb",
+      "role": "companion",
+      "description": "Small neon cat replacement for the reference portfolio dog model."
+    },
+    {
+      "file": "/assets/3d/neon-blog-room.glb",
+      "role": "environment",
+      "description": "Original cyber-neon blog room with route sign objects."
+    },
+    {
+      "file": "/assets/3d/neon-blog-scene.glb",
+      "role": "readyToUseHero",
+      "description": "Combined blog room and neon cat scene for homepage hero use."
+    },
+    {
+      "file": "/assets/3d/neon-3d-assets-preview.svg",
+      "role": "preview",
+      "description": "Flat preview sheet for quick visual identification."
+    }
+  ],
+  "routeObjects": {
+    "sign_posts": "/posts",
+    "sign_about": "/about",
+    "sign_messages": "/messages"
+  },
+  "notes": [
+    "These files do not copy GLB, texture, audio, or mesh data from the reference portfolio.",
+    "Text labels use English so they can be baked into geometry without external Chinese font files.",
+    "Homepage animation such as cat idle bob, blink, and tail sway should be driven in Three.js."
+  ]
+}
