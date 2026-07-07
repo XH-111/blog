@@ -1,9 +1,11 @@
 ﻿import { ChangeEvent, FormEvent, ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { api, getApiErrorMessage, sanitizeAssetUrl, sanitizeMarkdownUrl, sanitizeNavigationUrl } from "./services/api";
+import { createRoot, type Root } from "react-dom/client";
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { DRACOLoader } from "three/examples/jsm/loaders/DRACOLoader.js";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
+import { CSS3DObject, CSS3DRenderer } from "three/examples/jsm/renderers/CSS3DRenderer.js";
 import type { ClipboardEvent, PointerEvent, WheelEvent } from "react";
 import type { AboutPageSettings, AdminAiReviewFocus, AdminAiSettings, AdminAiStatus, AdminAiTaskItem, AdminAiTool, AdminCategoryItem, AdminCommentItem, AdminDashboardData, AdminMediaItem, AdminMessageItem, AdminPostListItem, AdminPostVersionItem, AdminSearchItem, AdminTagItem, HomeEntryCardSetting, HomePageSettings, ImportPreview, MusicPageSettings, MusicTrackItem, PublicCommentItem, PublicSiteStats, SiteSettings } from "./services/api";
 import type { Article, Message } from "./types";
@@ -79,6 +81,7 @@ const ADMIN_MEDIA_PAGE_SIZE = 10;
 const PUBLIC_COMMENT_PAGE_SIZE = 10;
 const PUBLIC_MESSAGE_PAGE_SIZE = 10;
 const QUICK_EMOJIS = ["😊", "👍", "👏", "❤️", "😂", "🙏"];
+const HERO_RETURN_QUERY_KEY = "return";
 
 function useRoute() {
   const [path, setPath] = useState(location.hash.replace("#", "") || "/");
@@ -117,6 +120,10 @@ function navigateConfiguredUrl(url = "/") {
     return;
   }
   go(target);
+}
+
+function requestHeroReturnAnimation(kind: "music") {
+  go(`/?${HERO_RETURN_QUERY_KEY}=${encodeURIComponent(kind)}`);
 }
 
 function emitAdminDataChanged() {
@@ -369,15 +376,28 @@ function Art({ type, wide = false, coverUrl }: { type: Article["image"]; wide?: 
 type NeonHeroSceneProps = {
   active: boolean;
   onNavigate: (url: string) => void;
+  musicReturnSignal?: number;
+  musicSceneOpen?: boolean;
+  onMusicSceneOpen?: () => void;
+  onMusicSceneClose?: () => void;
 };
 
-function NeonHeroScene({ active, onNavigate }: NeonHeroSceneProps) {
+function NeonHeroScene({ active, onNavigate, musicReturnSignal = 0, musicSceneOpen = false, onMusicSceneOpen, onMusicSceneClose }: NeonHeroSceneProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const activeRef = useRef(active);
   const navigateRef = useRef(onNavigate);
+  const musicReturnSignalRef = useRef(musicReturnSignal);
+  const musicSceneOpenRef = useRef(musicSceneOpen);
+  const onMusicSceneOpenRef = useRef(onMusicSceneOpen);
+  const onMusicSceneCloseRef = useRef(onMusicSceneClose);
 
   useEffect(() => {
     activeRef.current = active;
+    const canvas = canvasRef.current;
+    if (!active && canvas) {
+      canvas.dataset.hoveredHref = "";
+      canvas.style.cursor = "default";
+    }
   }, [active]);
 
   useEffect(() => {
@@ -385,8 +405,25 @@ function NeonHeroScene({ active, onNavigate }: NeonHeroSceneProps) {
   }, [onNavigate]);
 
   useEffect(() => {
+    musicReturnSignalRef.current = musicReturnSignal;
+  }, [musicReturnSignal]);
+
+  useEffect(() => {
+    musicSceneOpenRef.current = musicSceneOpen;
+  }, [musicSceneOpen]);
+
+  useEffect(() => {
+    onMusicSceneOpenRef.current = onMusicSceneOpen;
+  }, [onMusicSceneOpen]);
+
+  useEffect(() => {
+    onMusicSceneCloseRef.current = onMusicSceneClose;
+  }, [onMusicSceneClose]);
+
+  useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
+    const sceneCanvas = canvas;
 
     const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true, powerPreference: "high-performance" });
     renderer.setClearColor(0x000000, 0);
@@ -410,6 +447,11 @@ function NeonHeroScene({ active, onNavigate }: NeonHeroSceneProps) {
     controls.zoomSpeed = 0.82;
     controls.target.set(0, 0.52, 0);
     controls.update();
+
+    const resetOrbitDistanceLimits = () => {
+      controls.minDistance = 2.35;
+      controls.maxDistance = 15;
+    };
 
     const group = new THREE.Group();
     const city = new THREE.Group();
@@ -475,15 +517,88 @@ function NeonHeroScene({ active, onNavigate }: NeonHeroSceneProps) {
     const referencePortfolioRoot = new THREE.Group();
     referencePortfolioRoot.name = "reference_portfolio_preview_scene";
     const referenceDefaultRotationY = -0.72;
-    const referenceMusicRotationY = referenceDefaultRotationY + 2.36;
+    const articleFocusTarget = new THREE.Vector3(0, 0.64, 0);
     const musicFocusTarget = new THREE.Vector3(0, 0.8, 0);
+    const musicPanelAnchor = new THREE.Vector3(0, 0.8, 0);
+    const musicPanelOutward = new THREE.Vector3(0, 0, 1);
+    const musicPanelSize = new THREE.Vector3(0.7, 0.9, 0.08);
     const hoveredPoint = new THREE.Vector3();
     const transitionPosition = new THREE.Vector3();
     const transitionTarget = new THREE.Vector3();
+    const panelProjection = new THREE.Vector3();
+    const articleCategoryGroup = new THREE.Group();
+    articleCategoryGroup.name = "xhblog_article_category_vending";
+    articleCategoryGroup.visible = false;
+    scene.add(articleCategoryGroup);
+    const articleBottleGroups: THREE.Group[] = [];
+    const articleCategoryPalette = [0x72f7ff, 0xff6bf5, 0xffc65a, 0x9dff55, 0x9b7cff, 0xff7a59, 0x5cf1c8, 0xf2fbff];
+    const frontNormal = new THREE.Vector3(0, 0, 1);
+    const articleOutward = new THREE.Vector3(0, 0, 1);
+    type SceneTransitionKind = "music" | "article" | "music-return";
+    type ArticleBottleCategory = Pick<AdminCategoryItem, "id" | "name" | "slug" | "icon" | "postsCount"> & { href: string; isAll?: boolean };
+    let hasArticleFocusTarget = false;
     let hasMusicFocusTarget = false;
+    let hasMusicPanelAnchor = false;
     let hasHoveredPoint = false;
+    let articleVendingOpen = false;
     let navigationTimeout = 0;
+    let disposed = false;
+    let pendingMusicReturnPullback = routeQuery().get(HERO_RETURN_QUERY_KEY) === "music";
+    let handledMusicReturnSignal = musicReturnSignalRef.current;
+    let musicReturnView: { position: THREE.Vector3; target: THREE.Vector3 } | null = null;
+    canvas.dataset.heroReturnPending = pendingMusicReturnPullback ? "music" : "";
+    canvas.dataset.heroReturnStatus = "";
+    const panelStyleHost = canvas.parentElement as HTMLElement | null;
+    const cssScene = new THREE.Scene();
+    const cssRenderer = new CSS3DRenderer();
+    cssRenderer.domElement.className = "neon-css3d-layer";
+    cssRenderer.domElement.setAttribute("aria-hidden", "true");
+    if (panelStyleHost) {
+      panelStyleHost.insertBefore(cssRenderer.domElement, canvas);
+    }
+    const musicCssElement = document.createElement("div");
+    musicCssElement.className = "music-css3d-screen-shell";
+    musicCssElement.style.width = "458px";
+    musicCssElement.style.height = "575px";
+    musicCssElement.dataset.visible = "false";
+    const musicCssObject = new CSS3DObject(musicCssElement);
+    musicCssObject.visible = false;
+    cssScene.add(musicCssObject);
+    const musicScreenMeshes: THREE.Mesh[] = [];
+    let musicCssClosedByUser = false;
+    let forwardingMusicCssClick = false;
+    const forwardMusicCssClick = (event: MouseEvent) => {
+      if (forwardingMusicCssClick) return;
+      const target = event.target as HTMLElement | null;
+      if (target?.closest("button")) return;
+      const clickables = Array.from(musicCssElement.querySelectorAll("button")) as HTMLButtonElement[];
+      const targetButton = clickables.find((button) => {
+        const rect = button.getBoundingClientRect();
+        return event.clientX >= rect.left && event.clientX <= rect.right && event.clientY >= rect.top && event.clientY <= rect.bottom;
+      });
+      if (!targetButton) return;
+      event.preventDefault();
+      event.stopPropagation();
+      forwardingMusicCssClick = true;
+      targetButton.click();
+      forwardingMusicCssClick = false;
+    };
+    musicCssElement.addEventListener("click", forwardMusicCssClick, true);
+    let musicCssRoot: Root | null = createRoot(musicCssElement);
+    musicCssRoot.render(
+      <MusicMachinePlayer
+        onClose={() => {
+          musicCssClosedByUser = true;
+          musicCssObject.visible = false;
+          musicCssElement.dataset.visible = "false";
+          onMusicSceneCloseRef.current?.();
+        }}
+        sceneEmbedded
+      />
+    );
     let cameraTransition: {
+      mode: "focus" | "return";
+      kind: SceneTransitionKind;
       href: string;
       startedAt: number;
       duration: number;
@@ -493,6 +608,13 @@ function NeonHeroScene({ active, onNavigate }: NeonHeroSceneProps) {
       midTarget: THREE.Vector3;
       endPosition: THREE.Vector3;
       endTarget: THREE.Vector3;
+      orbitPivot: THREE.Vector3;
+      startAngle: number;
+      endAngle: number;
+      startRadius: number;
+      midRadius: number;
+      startY: number;
+      midY: number;
       startReferenceRotationY: number;
       endReferenceRotationY: number;
       navigated: boolean;
@@ -530,6 +652,193 @@ function NeonHeroScene({ active, onNavigate }: NeonHeroSceneProps) {
       texture.anisotropy = 4;
       labelTextures.push(texture);
       return texture;
+    }
+
+    function createCategoryBottleLabelTexture(item: ArticleBottleCategory, color: string) {
+      const labelCanvas = document.createElement("canvas");
+      labelCanvas.width = 512;
+      labelCanvas.height = 512;
+      const context = labelCanvas.getContext("2d");
+      if (context) {
+        const label = item.name || "Articles";
+        context.clearRect(0, 0, labelCanvas.width, labelCanvas.height);
+        context.fillStyle = "rgba(2, 8, 18, .92)";
+        context.fillRect(0, 0, labelCanvas.width, labelCanvas.height);
+        context.strokeStyle = color;
+        context.lineWidth = 18;
+        context.shadowColor = color;
+        context.shadowBlur = 32;
+        context.strokeRect(34, 34, labelCanvas.width - 68, labelCanvas.height - 68);
+        context.fillStyle = "rgba(255, 255, 255, .08)";
+        context.fillRect(62, 70, labelCanvas.width - 124, 96);
+        context.textAlign = "center";
+        context.textBaseline = "middle";
+        context.fillStyle = color;
+        context.shadowBlur = 38;
+        context.font = "900 62px Arial Black, Microsoft YaHei, sans-serif";
+        context.fillText(item.icon || (item.isAll ? "ALL" : "CAT"), labelCanvas.width / 2, 118);
+        let fontSize = label.length > 8 ? 56 : 70;
+        do {
+          context.font = `900 ${fontSize}px Microsoft YaHei, Arial Black, sans-serif`;
+          fontSize -= 4;
+        } while (context.measureText(label).width > labelCanvas.width * 0.72 && fontSize > 34);
+        context.fillStyle = "#f2fbff";
+        context.shadowColor = "rgba(0, 229, 255, .88)";
+        context.shadowBlur = 24;
+        const chars = [...label];
+        const firstLine = chars.length > 8 ? chars.slice(0, 8).join("") : label;
+        const secondLine = chars.length > 8 ? chars.slice(8, 15).join("") : "";
+        context.fillText(firstLine, labelCanvas.width / 2, secondLine ? 254 : 280);
+        if (secondLine) context.fillText(secondLine, labelCanvas.width / 2, 326);
+        context.font = "700 36px Consolas, Microsoft YaHei, monospace";
+        context.fillStyle = color;
+        context.shadowBlur = 26;
+        context.fillText(`${item.postsCount} POSTS`, labelCanvas.width / 2, 420);
+      }
+      const texture = new THREE.CanvasTexture(labelCanvas);
+      texture.colorSpace = THREE.SRGBColorSpace;
+      texture.anisotropy = 4;
+      labelTextures.push(texture);
+      return texture;
+    }
+
+    function markArticleCategoryInteractive(object: THREE.Object3D, item: ArticleBottleCategory) {
+      object.userData.href = item.href;
+      object.userData.articleCategoryBottle = true;
+      object.userData.categoryName = item.name;
+      interactiveSigns.push(object);
+    }
+
+    function clearArticleCategoryBottles() {
+      articleCategoryGroup.traverse((object) => {
+        const index = interactiveSigns.indexOf(object);
+        if (index >= 0) interactiveSigns.splice(index, 1);
+      });
+      articleBottleGroups.length = 0;
+      while (articleCategoryGroup.children.length) {
+        articleCategoryGroup.remove(articleCategoryGroup.children[0]);
+      }
+    }
+
+    function createCategoryBottle(item: ArticleBottleCategory, index: number, total: number) {
+      const color = articleCategoryPalette[index % articleCategoryPalette.length];
+      const colorStyle = `#${color.toString(16).padStart(6, "0")}`;
+      const bottle = new THREE.Group();
+      bottle.name = `xhblog_category_bottle_${item.slug || item.id}`;
+      const columns = Math.min(4, Math.max(1, total));
+      const row = Math.floor(index / columns);
+      const column = index % columns;
+      const widthStep = 0.42;
+      bottle.position.set((column - (columns - 1) / 2) * widthStep, 0.32 - row * 0.54, 0.08);
+      bottle.userData.baseY = bottle.position.y;
+
+      const bodyMaterial = new THREE.MeshStandardMaterial({
+        color,
+        emissive: color,
+        emissiveIntensity: 1.25,
+        roughness: 0.23,
+        metalness: 0.12,
+        transparent: true,
+        opacity: 0.92,
+      });
+      const capMaterial = new THREE.MeshStandardMaterial({
+        color: 0xf2fbff,
+        emissive: color,
+        emissiveIntensity: 0.82,
+        roughness: 0.18,
+        metalness: 0.34,
+      });
+      const body = new THREE.Mesh(new THREE.CylinderGeometry(0.105, 0.13, 0.48, 22), bodyMaterial);
+      body.name = `${bottle.name}_body`;
+      body.position.y = 0;
+      markArticleCategoryInteractive(body, item);
+      bottle.add(body);
+
+      const neck = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.09, 0.14, 20), bodyMaterial.clone());
+      neck.name = `${bottle.name}_neck`;
+      neck.position.y = 0.31;
+      markArticleCategoryInteractive(neck, item);
+      bottle.add(neck);
+
+      const cap = new THREE.Mesh(new THREE.CylinderGeometry(0.083, 0.083, 0.055, 20), capMaterial);
+      cap.name = `${bottle.name}_cap`;
+      cap.position.y = 0.41;
+      markArticleCategoryInteractive(cap, item);
+      bottle.add(cap);
+
+      const glow = new THREE.Mesh(
+        new THREE.PlaneGeometry(0.38, 0.62),
+        new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.2, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide })
+      );
+      glow.name = `${bottle.name}_glow`;
+      glow.position.set(0, 0.1, -0.012);
+      bottle.add(glow);
+
+      const label = new THREE.Mesh(
+        new THREE.PlaneGeometry(0.28, 0.28),
+        new THREE.MeshBasicMaterial({
+          map: createCategoryBottleLabelTexture(item, colorStyle),
+          transparent: true,
+          depthWrite: false,
+          side: THREE.DoubleSide,
+          toneMapped: false,
+        })
+      );
+      label.name = `${bottle.name}_label`;
+      label.position.set(0, 0.02, 0.132);
+      markArticleCategoryInteractive(label, item);
+      bottle.add(label);
+
+      return bottle;
+    }
+
+    function rebuildArticleCategoryBottles(categories: AdminCategoryItem[]) {
+      clearArticleCategoryBottles();
+      const totalPosts = categories.reduce((sum, item) => sum + item.postsCount, 0);
+      const bottleItems: ArticleBottleCategory[] = [
+        { id: 0, name: "All", slug: "all", postsCount: totalPosts, href: "/posts?view=all", isAll: true },
+        ...categories.slice(0, 7).map((item) => ({
+          id: item.id,
+          name: item.name,
+          slug: item.slug,
+          icon: item.icon,
+          postsCount: item.postsCount,
+          href: `/posts?category=${encodeURIComponent(item.name)}`,
+        })),
+      ];
+
+      const headerTexture = createLabelTexture("Articles", "#72f7ff", "CATEGORY VENDING");
+      const header = new THREE.Mesh(
+        new THREE.PlaneGeometry(1.7, 0.32),
+        new THREE.MeshBasicMaterial({ map: headerTexture, transparent: true, depthWrite: false, side: THREE.DoubleSide, toneMapped: false })
+      );
+      header.name = "xhblog_article_vending_header";
+      header.position.set(0, 0.96, 0.06);
+      articleCategoryGroup.add(header);
+
+      const shelfBack = new THREE.Mesh(
+        new THREE.PlaneGeometry(1.82, 1.55),
+        new THREE.MeshBasicMaterial({ color: 0x020817, transparent: true, opacity: 0.7, depthWrite: false, side: THREE.DoubleSide })
+      );
+      shelfBack.name = "xhblog_article_vending_back";
+      shelfBack.position.set(0, 0.26, 0);
+      articleCategoryGroup.add(shelfBack);
+
+      const shelfMaterial = new THREE.MeshBasicMaterial({ color: 0x72f7ff, transparent: true, opacity: 0.72 });
+      [-0.02, -0.56].forEach((y, shelfIndex) => {
+        const shelf = new THREE.Mesh(new THREE.BoxGeometry(1.74, 0.035, 0.06), shelfMaterial.clone());
+        shelf.name = `xhblog_article_vending_shelf_${shelfIndex}`;
+        shelf.position.set(0, y, 0.12);
+        articleCategoryGroup.add(shelf);
+      });
+
+      bottleItems.forEach((item, index) => {
+        const bottle = createCategoryBottle(item, index, bottleItems.length);
+        articleBottleGroups.push(bottle);
+        articleCategoryGroup.add(bottle);
+      });
+      sceneCanvas.dataset.articleCategoryCount = String(bottleItems.length);
+      articleCategoryGroup.visible = articleVendingOpen;
     }
 
     function createBrandSignTexture() {
@@ -1007,16 +1316,16 @@ function NeonHeroScene({ active, onNavigate }: NeonHeroSceneProps) {
     const referenceTextureMaterials = Object.values(referenceMaterials);
     type ReferenceMaterialKey = keyof typeof referenceMaterials;
 
+    const compactReferenceName = (name: string) => name.toLowerCase().replace(/[^a-z0-9]/g, "");
+
     const routeForReferenceObject = (name: string) => {
-      const lowerName = name.toLowerCase();
-      if (/frame4|frame41|arcade|gamemachine|vending|music/.test(lowerName)) return "/music";
-      if (/frame3|frame31|neon_shows/.test(lowerName)) return "/posts";
-      if (/frame2|frame21|neon_tv|\btv\b/.test(lowerName)) return "/about";
-      if (/frame5|frame51/.test(lowerName)) return "/messages";
+      const compactName = compactReferenceName(name);
+      if (compactName === "neontv" || compactName === "tvscreen") return "/about";
+      if (compactName === "neonvending" || compactName === "vendingscreen" || compactName.startsWith("mesh1848869498")) return "/posts";
+      if (compactName === "arcademiddle" || compactName === "arcadeneon" || compactName === "arcadescreen" || compactName.startsWith("gamemachine")) return "/music";
       return "";
     };
 
-    const compactReferenceName = (name: string) => name.toLowerCase().replace(/[^a-z0-9]/g, "");
     const materialKeyForReferenceObject = (name: string): ReferenceMaterialKey => {
       const compactName = compactReferenceName(name);
 
@@ -1150,9 +1459,14 @@ function NeonHeroScene({ active, onNavigate }: NeonHeroSceneProps) {
       root.traverse((object) => {
         const mesh = object as THREE.Mesh;
         if (!mesh.isMesh) return;
+        const compactName = compactReferenceName(mesh.name);
 
         if (!applyBakedTextures && /^(name_sign|burger_sign|neon_burger|titles|Cube003_1|Cube004_1|Cube020_1|Cube034_1)$/i.test(mesh.name)) {
           mesh.visible = false;
+        }
+
+        if (compactName === "arcadescreen") {
+          musicScreenMeshes.push(mesh);
         }
 
         if (applyBakedTextures) {
@@ -1171,24 +1485,98 @@ function NeonHeroScene({ active, onNavigate }: NeonHeroSceneProps) {
       });
     };
 
-    const refreshMusicFocusTarget = () => {
+    const refreshReferenceFocusTarget = (route: string, target: THREE.Vector3, datasetKey: string) => {
       referencePortfolioRoot.updateMatrixWorld(true);
       const focusBox = new THREE.Box3();
       let found = false;
       referencePortfolioRoot.traverse((object) => {
-        const lowerName = object.name.toLowerCase();
-        if (!/arcade|gamemachine|vending|music/.test(lowerName)) return;
+        if (routeForReferenceObject(object.name) !== route) return;
         const objectBox = new THREE.Box3().setFromObject(object);
         if (objectBox.isEmpty()) return;
         if (found) focusBox.union(objectBox);
         else focusBox.copy(objectBox);
         found = true;
       });
-      if (!found) return;
-      focusBox.getCenter(musicFocusTarget);
-      musicFocusTarget.y += 0.12;
-      hasMusicFocusTarget = true;
-      canvas.dataset.musicFocusTarget = `${musicFocusTarget.x.toFixed(2)},${musicFocusTarget.y.toFixed(2)},${musicFocusTarget.z.toFixed(2)}`;
+      if (!found) return false;
+      focusBox.getCenter(target);
+      target.y += 0.12;
+      canvas.dataset[datasetKey] = `${target.x.toFixed(2)},${target.y.toFixed(2)},${target.z.toFixed(2)}`;
+      return true;
+    };
+
+    const refreshMusicPanelAnchor = () => {
+      referencePortfolioRoot.updateMatrixWorld(true);
+      const screenBox = new THREE.Box3();
+      const panelBox = new THREE.Box3();
+      const fallbackBox = new THREE.Box3();
+      let foundScreen = false;
+      let foundPanel = false;
+      let foundFallback = false;
+      referencePortfolioRoot.traverse((object) => {
+        const compactName = compactReferenceName(object.name);
+        const objectBox = new THREE.Box3().setFromObject(object);
+        if (objectBox.isEmpty()) return;
+
+        if (compactName === "arcadescreen") {
+          if (foundScreen) screenBox.union(objectBox);
+          else screenBox.copy(objectBox);
+          foundScreen = true;
+          return;
+        }
+
+        if (compactName === "arcadescreen" || compactName === "arcademiddle" || compactName.startsWith("gamemachine")) {
+          if (foundPanel) panelBox.union(objectBox);
+          else panelBox.copy(objectBox);
+          foundPanel = true;
+          return;
+        }
+
+        if (routeForReferenceObject(object.name) === "/music") {
+          if (foundFallback) fallbackBox.union(objectBox);
+          else fallbackBox.copy(objectBox);
+          foundFallback = true;
+        }
+      });
+      if (!foundScreen && !foundPanel && !foundFallback) return false;
+      const nextBox = foundScreen ? screenBox : foundPanel ? panelBox : fallbackBox;
+      nextBox.getCenter(musicPanelAnchor);
+      nextBox.getSize(musicPanelSize);
+
+      const rootCenter = new THREE.Vector3();
+      referencePortfolioRoot.getWorldPosition(rootCenter);
+      const outward = musicPanelAnchor.clone().sub(rootCenter);
+      outward.y = 0;
+      if (outward.lengthSq() < 0.001) outward.set(0, 0, 1);
+      outward.normalize();
+      musicPanelOutward.copy(outward);
+      musicPanelAnchor.addScaledVector(outward, compactScene ? 0.035 : 0.045);
+      musicPanelAnchor.y += compactScene ? 0.14 : 0.2;
+      canvas.dataset.musicPanelAnchor = `${musicPanelAnchor.x.toFixed(2)},${musicPanelAnchor.y.toFixed(2)},${musicPanelAnchor.z.toFixed(2)}`;
+      canvas.dataset.musicPanelSize = `${musicPanelSize.x.toFixed(2)},${musicPanelSize.y.toFixed(2)},${musicPanelSize.z.toFixed(2)}`;
+      return true;
+    };
+
+    const positionArticleCategoryGroup = () => {
+      if (!hasArticleFocusTarget) return;
+      referencePortfolioRoot.updateMatrixWorld(true);
+      const rootCenter = new THREE.Vector3();
+      referencePortfolioRoot.getWorldPosition(rootCenter);
+      articleOutward.copy(articleFocusTarget).sub(rootCenter);
+      articleOutward.y = 0;
+      if (articleOutward.lengthSq() < 0.001) articleOutward.set(0, 0, -1);
+      articleOutward.normalize();
+      articleCategoryGroup.position.copy(articleFocusTarget).addScaledVector(articleOutward, compactScene ? 0.34 : 0.42);
+      articleCategoryGroup.position.y += compactScene ? 0.08 : 0.14;
+      articleCategoryGroup.scale.setScalar(compactScene ? 0.48 : 0.6);
+      articleCategoryGroup.quaternion.setFromUnitVectors(frontNormal, articleOutward);
+      canvas.dataset.articleFocusTarget = `${articleFocusTarget.x.toFixed(2)},${articleFocusTarget.y.toFixed(2)},${articleFocusTarget.z.toFixed(2)}`;
+    };
+
+    const refreshSceneFocusTargets = () => {
+      hasMusicFocusTarget = refreshReferenceFocusTarget("/music", musicFocusTarget, "musicFocusTarget") || hasMusicFocusTarget;
+      hasMusicPanelAnchor = refreshMusicPanelAnchor() || hasMusicPanelAnchor;
+      hasArticleFocusTarget = refreshReferenceFocusTarget("/posts", articleFocusTarget, "articleFocusTarget") || hasArticleFocusTarget;
+      positionArticleCategoryGroup();
     };
 
     const smoothStep = (value: number) => {
@@ -1198,41 +1586,194 @@ function NeonHeroScene({ active, onNavigate }: NeonHeroSceneProps) {
 
     const smoothRange = (value: number, start: number, end: number) => smoothStep((value - start) / (end - start));
 
-    const startMusicCameraTransition = () => {
-      if (cameraTransition) return;
-      const midTarget = compactScene
-        ? new THREE.Vector3(0.08, 0.42, 0.02)
-        : new THREE.Vector3(0, 0.46, 0.02);
-      const midPosition = compactScene
-        ? new THREE.Vector3(0.08, 3.1, 6.42)
-        : new THREE.Vector3(0, 3.04, 5.92);
-      const endTarget = compactScene
-        ? new THREE.Vector3(0.04, -0.08, 0.02)
-        : new THREE.Vector3(0, -0.18, 0.02);
-      const endPosition = compactScene
-        ? new THREE.Vector3(0.04, 1.58, 4.72)
-        : new THREE.Vector3(0, 1.34, 4.48);
+    const shortestAngleDelta = (from: number, to: number) => {
+      const fullTurn = Math.PI * 2;
+      return ((to - from + Math.PI) % fullTurn + fullTurn) % fullTurn - Math.PI;
+    };
 
-      if (reducedMotion) {
-        navigateRef.current("/music");
-        return;
+    const createFocusCameraTransition = (
+      kind: SceneTransitionKind,
+      href: string,
+      focusTarget: THREE.Vector3,
+      options: {
+        duration: number;
+        compactMidDistance: number;
+        midDistance: number;
+        compactEndDistance: number;
+        endDistance: number;
+        compactMidY: number;
+        midY: number;
+        compactEndY: number;
+        endY: number;
+        compactMidTargetY: number;
+        midTargetY: number;
+        compactEndTargetY: number;
+        endTargetY: number;
       }
+    ) => {
+      referencePortfolioRoot.updateMatrixWorld(true);
+      const rootCenter = new THREE.Vector3();
+      referencePortfolioRoot.getWorldPosition(rootCenter);
+      const outward = focusTarget.clone().sub(rootCenter);
+      outward.y = 0;
+      if (outward.lengthSq() < 0.001) {
+        outward.copy(camera.position).sub(focusTarget);
+        outward.y = 0;
+      }
+      if (outward.lengthSq() < 0.001) outward.set(0, 0, 1);
+      outward.normalize();
 
-      cameraTransition = {
-        href: "/music",
+      const orbitPivot = rootCenter.clone();
+      orbitPivot.y = 0;
+      const startOffset = camera.position.clone().sub(orbitPivot);
+      const midDistance = compactScene ? options.compactMidDistance : options.midDistance;
+      const endDistance = compactScene ? options.compactEndDistance : options.endDistance;
+      const midTarget = focusTarget.clone().add(new THREE.Vector3(0, compactScene ? options.compactMidTargetY : options.midTargetY, 0));
+      const midPosition = focusTarget.clone().addScaledVector(outward, midDistance);
+      midPosition.y += compactScene ? options.compactMidY : options.midY;
+      const endTarget = focusTarget.clone().add(new THREE.Vector3(0, compactScene ? options.compactEndTargetY : options.endTargetY, 0));
+      const endPosition = focusTarget.clone().addScaledVector(outward, endDistance);
+      endPosition.y += compactScene ? options.compactEndY : options.endY;
+      const midOffset = midPosition.clone().sub(orbitPivot);
+
+      return {
+        mode: "focus" as const,
+        kind,
+        href,
         startedAt: window.performance.now(),
-        duration: 2600,
+        duration: options.duration,
         startPosition: camera.position.clone(),
         startTarget: controls.target.clone(),
         midPosition,
         midTarget,
         endPosition,
         endTarget,
+        orbitPivot,
+        startAngle: Math.atan2(startOffset.z, startOffset.x),
+        endAngle: Math.atan2(midOffset.z, midOffset.x),
+        startRadius: Math.max(0.1, Math.hypot(startOffset.x, startOffset.z)),
+        midRadius: Math.max(0.1, Math.hypot(midOffset.x, midOffset.z)),
+        startY: camera.position.y,
+        midY: midPosition.y,
         startReferenceRotationY: referencePortfolioRoot.rotation.y,
-        endReferenceRotationY: referenceMusicRotationY,
+        endReferenceRotationY: referencePortfolioRoot.rotation.y,
         navigated: false,
       };
-      canvas.dataset.cameraTransition = "music-house-rotate";
+    };
+
+    const createReturnCameraTransition = (
+      kind: SceneTransitionKind,
+      startPosition: THREE.Vector3,
+      startTarget: THREE.Vector3,
+      endPosition: THREE.Vector3,
+      endTarget: THREE.Vector3,
+      duration: number
+    ) => ({
+      mode: "return" as const,
+      kind,
+      href: "/",
+      startedAt: window.performance.now(),
+      duration,
+      startPosition: startPosition.clone(),
+      startTarget: startTarget.clone(),
+      midPosition: startPosition.clone().lerp(endPosition, 0.45),
+      midTarget: startTarget.clone().lerp(endTarget, 0.45),
+      endPosition: endPosition.clone(),
+      endTarget: endTarget.clone(),
+      orbitPivot: new THREE.Vector3(),
+      startAngle: 0,
+      endAngle: 0,
+      startRadius: 0,
+      midRadius: 0,
+      startY: startPosition.y,
+      midY: startPosition.y + (endPosition.y - startPosition.y) * 0.45,
+      startReferenceRotationY: referencePortfolioRoot.rotation.y,
+      endReferenceRotationY: referencePortfolioRoot.rotation.y,
+      navigated: false,
+    });
+
+    const openArticleVendingScene = () => {
+      articleVendingOpen = true;
+      articleCategoryGroup.visible = true;
+      controls.minDistance = compactScene ? 1.5 : 1.75;
+      controls.maxDistance = compactScene ? 7.8 : 9.5;
+      canvas.dataset.articleVending = "open";
+      canvas.dataset.cameraTransition = "article-vending-open";
+    };
+
+    const closeArticleVendingScene = (resetCameraLimits = true) => {
+      articleVendingOpen = false;
+      articleCategoryGroup.visible = false;
+      if (resetCameraLimits) resetOrbitDistanceLimits();
+      canvas.dataset.articleVending = "closed";
+    };
+
+    const startMusicCameraTransition = () => {
+      if (cameraTransition) return;
+      if (canvas.dataset.cameraTransition === "music-open") return;
+      musicCssClosedByUser = false;
+      musicReturnView = { position: camera.position.clone(), target: controls.target.clone() };
+      closeArticleVendingScene(false);
+      controls.minDistance = compactScene ? 1.18 : 1.28;
+      controls.maxDistance = compactScene ? 7.2 : 8.8;
+      if (reducedMotion) {
+        canvas.dataset.cameraTransition = "music-open";
+        onMusicSceneOpenRef.current?.();
+        return;
+      }
+
+      const focusTarget = hasMusicPanelAnchor
+        ? musicPanelAnchor.clone().add(new THREE.Vector3(0, compactScene ? -0.08 : -0.1, 0))
+        : hasMusicFocusTarget
+          ? musicFocusTarget.clone()
+          : new THREE.Vector3(0, 0.68, 0);
+      cameraTransition = createFocusCameraTransition("music", "/music", focusTarget, {
+        duration: 2000,
+        compactMidDistance: 4.05,
+        midDistance: 4.8,
+        compactEndDistance: 1.78,
+        endDistance: 2.05,
+        compactMidY: 1.06,
+        midY: 1.18,
+        compactEndY: 0.03,
+        endY: 0.04,
+        compactMidTargetY: 0.02,
+        midTargetY: 0.02,
+        compactEndTargetY: 0,
+        endTargetY: 0,
+      });
+      canvas.dataset.cameraTransition = "music-orbit-focus";
+      canvas.dataset.cameraTransitionProgress = "0";
+    };
+
+    const startArticleCameraTransition = () => {
+      if (cameraTransition) return;
+      const focusTarget = hasArticleFocusTarget ? articleFocusTarget.clone() : new THREE.Vector3(-0.68, 0.36, -1.2);
+      const nextTransition = createFocusCameraTransition("article", "/posts", focusTarget, {
+        duration: 2450,
+        compactMidDistance: 4.1,
+        midDistance: 5.05,
+        compactEndDistance: 2.24,
+        endDistance: 2.72,
+        compactMidY: 1.82,
+        midY: 2.08,
+        compactEndY: 0.9,
+        endY: 1.08,
+        compactMidTargetY: 0.2,
+        midTargetY: 0.24,
+        compactEndTargetY: 0.08,
+        endTargetY: 0.1,
+      });
+      closeArticleVendingScene();
+      if (reducedMotion) {
+        camera.position.copy(nextTransition.endPosition);
+        controls.target.copy(nextTransition.endTarget);
+        controls.update();
+        openArticleVendingScene();
+        return;
+      }
+      cameraTransition = nextTransition;
+      canvas.dataset.cameraTransition = "article-vending-focus";
       canvas.dataset.cameraTransitionProgress = "0";
     };
 
@@ -1241,6 +1782,11 @@ function NeonHeroScene({ active, onNavigate }: NeonHeroSceneProps) {
         startMusicCameraTransition();
         return;
       }
+      if (href === "/posts") {
+        startArticleCameraTransition();
+        return;
+      }
+      closeArticleVendingScene();
       navigateRef.current(href);
     };
 
@@ -1259,7 +1805,7 @@ function NeonHeroScene({ active, onNavigate }: NeonHeroSceneProps) {
             addDirectionalSignOverlays(gltf.scene);
           }
           referencePortfolioRoot.add(gltf.scene);
-          refreshMusicFocusTarget();
+          refreshSceneFocusTargets();
           gltf.animations.forEach((clip) => {
             const mixer = new THREE.AnimationMixer(gltf.scene);
             mixer.clipAction(clip).play();
@@ -1275,6 +1821,17 @@ function NeonHeroScene({ active, onNavigate }: NeonHeroSceneProps) {
     };
     loadReferenceModel("/assets/reference-portfolio/3d/build.glb", true);
     loadReferenceModel("/assets/reference-portfolio/3d/build2.glb", false);
+    api.getPublicCategories()
+      .then((result) => {
+        if (disposed) return;
+        rebuildArticleCategoryBottles(result.items);
+        positionArticleCategoryGroup();
+        canvas.dataset.articleCategorySource = result.source;
+      })
+      .catch((error) => {
+        console.error("Failed to load article categories for vending scene", error);
+        if (!disposed) rebuildArticleCategoryBottles([]);
+      });
 
     const pointer = new THREE.Vector2();
     const raycaster = new THREE.Raycaster();
@@ -1286,12 +1843,29 @@ function NeonHeroScene({ active, onNavigate }: NeonHeroSceneProps) {
     let hasSetInitialView = false;
     let lastControlTelemetry = "";
 
+    const isInteractiveObjectVisible = (object: THREE.Object3D) => {
+      if (object.userData.articleCategoryBottle && !articleVendingOpen) return false;
+      let current: THREE.Object3D | null = object;
+      while (current) {
+        if (!current.visible) return false;
+        current = current.parent;
+      }
+      return true;
+    };
+
     const updateHover = (event: globalThis.PointerEvent) => {
+      if (!activeRef.current) {
+        hoveredHref = "";
+        hasHoveredPoint = false;
+        canvas.dataset.hoveredHref = "";
+        canvas.style.cursor = "default";
+        return "";
+      }
       const rect = canvas.getBoundingClientRect();
       pointer.x = ((event.clientX - rect.left) / Math.max(1, rect.width)) * 2 - 1;
       pointer.y = -((event.clientY - rect.top) / Math.max(1, rect.height)) * 2 + 1;
       raycaster.setFromCamera(pointer, camera);
-      const hit = raycaster.intersectObjects(interactiveSigns, false)[0];
+      const hit = raycaster.intersectObjects(interactiveSigns, false).find((item) => isInteractiveObjectVisible(item.object));
       hoveredHref = typeof hit?.object.userData.href === "string" ? hit.object.userData.href : "";
       if (hit?.point) {
         hoveredPoint.copy(hit.point);
@@ -1305,7 +1879,7 @@ function NeonHeroScene({ active, onNavigate }: NeonHeroSceneProps) {
     };
 
     const handlePointerDown = (event: globalThis.PointerEvent) => {
-      if (cameraTransition) return;
+      if (!activeRef.current || cameraTransition) return;
       pointerDownX = event.clientX;
       pointerDownY = event.clientY;
       movedDistance = 0;
@@ -1313,30 +1887,125 @@ function NeonHeroScene({ active, onNavigate }: NeonHeroSceneProps) {
     };
 
     const handlePointerMove = (event: globalThis.PointerEvent) => {
-      if (cameraTransition) return;
+      if (!activeRef.current || cameraTransition) return;
       movedDistance = Math.max(movedDistance, Math.hypot(event.clientX - pointerDownX, event.clientY - pointerDownY));
       updateHover(event);
     };
 
     const handlePointerUp = (event: globalThis.PointerEvent) => {
-      if (cameraTransition) return;
+      if (!activeRef.current || cameraTransition) return;
       const href = updateHover(event);
       if (movedDistance < 5 && href) handleSceneNavigation(href);
       canvas.style.cursor = href ? "pointer" : "grab";
     };
 
+    const getDefaultCameraTarget = () => new THREE.Vector3(compactScene ? 0.16 : 0, compactScene ? 0.72 : 0.88, 0);
+
+    const getDefaultCameraPosition = () => new THREE.Vector3(
+      compactScene ? 0.18 : 0,
+      compactScene ? 3.88 : 4.18,
+      compactScene ? 8.22 : 7.82
+    );
+
     const setDefaultCameraTarget = () => {
-      controls.target.set(compactScene ? 0.16 : 0, compactScene ? 0.72 : 0.88, 0);
+      controls.target.copy(getDefaultCameraTarget());
     };
 
     const applyInitialCameraView = () => {
-      setDefaultCameraTarget();
-      camera.position.set(
-        compactScene ? 0.18 : 0,
-        compactScene ? 3.88 : 4.18,
-        compactScene ? 8.22 : 7.82
-      );
+      controls.target.copy(getDefaultCameraTarget());
+      camera.position.copy(getDefaultCameraPosition());
       controls.update();
+    };
+
+    const getMusicCloseView = () => {
+      referencePortfolioRoot.updateMatrixWorld(true);
+      const rootCenter = new THREE.Vector3();
+      referencePortfolioRoot.getWorldPosition(rootCenter);
+      const focusTarget = hasMusicPanelAnchor
+        ? musicPanelAnchor.clone().add(new THREE.Vector3(0, compactScene ? -0.08 : -0.1, 0))
+        : hasMusicFocusTarget
+          ? musicFocusTarget.clone()
+          : new THREE.Vector3(0, 0.68, 0);
+      const outward = focusTarget.clone().sub(rootCenter);
+      outward.y = 0;
+      if (outward.lengthSq() < 0.001) {
+        outward.copy(camera.position).sub(focusTarget);
+        outward.y = 0;
+      }
+      if (outward.lengthSq() < 0.001) outward.set(0, 0, 1);
+      outward.normalize();
+
+      const target = focusTarget.clone();
+      const position = focusTarget.clone().addScaledVector(outward, compactScene ? 1.78 : 2.05);
+      position.y += compactScene ? 0.03 : 0.04;
+      return { position, target };
+    };
+
+    const getMusicPullbackView = () => {
+      if (musicReturnView) {
+        return { position: musicReturnView.position.clone(), target: musicReturnView.target.clone() };
+      }
+      referencePortfolioRoot.updateMatrixWorld(true);
+      const rootCenter = new THREE.Vector3();
+      referencePortfolioRoot.getWorldPosition(rootCenter);
+      const focusTarget = hasMusicFocusTarget ? musicFocusTarget.clone() : new THREE.Vector3(0, 0.68, 0);
+      const outward = focusTarget.clone().sub(rootCenter);
+      outward.y = 0;
+      if (outward.lengthSq() < 0.001) {
+        outward.copy(camera.position).sub(focusTarget);
+        outward.y = 0;
+      }
+      if (outward.lengthSq() < 0.001) outward.set(0, 0, 1);
+      outward.normalize();
+
+      const target = focusTarget.clone().add(new THREE.Vector3(0, compactScene ? 0.72 : 0.92, 0));
+      const position = focusTarget.clone().addScaledVector(outward, compactScene ? 6.4 : 7.35);
+      position.y += compactScene ? 3.2 : 3.7;
+      return { position, target };
+    };
+
+    const startMusicReturnPullbackIfReady = () => {
+      if (!pendingMusicReturnPullback) return;
+      if (cameraTransition) {
+        canvas.dataset.heroReturnStatus = "waiting-transition";
+        return;
+      }
+      if (!hasMusicFocusTarget) {
+        canvas.dataset.heroReturnStatus = "waiting-focus";
+        return;
+      }
+      pendingMusicReturnPullback = false;
+      replaceHash("/");
+      canvas.dataset.heroReturnPending = "";
+      canvas.dataset.heroReturnStatus = "pullback-started";
+      closeArticleVendingScene(false);
+      const closeView = getMusicCloseView();
+      const pullbackView = getMusicPullbackView();
+
+      if (reducedMotion) {
+        resetOrbitDistanceLimits();
+        camera.position.copy(pullbackView.position);
+        controls.target.copy(pullbackView.target);
+        controls.update();
+        canvas.dataset.cameraTransition = "music-return-complete";
+        canvas.dataset.heroReturnStatus = "complete";
+        return;
+      }
+
+      camera.position.copy(closeView.position);
+      controls.target.copy(closeView.target);
+      controls.update();
+      cameraTransition = createReturnCameraTransition("music-return", closeView.position, closeView.target, pullbackView.position, pullbackView.target, 2000);
+      canvas.dataset.cameraTransition = "music-return-pullback";
+      canvas.dataset.cameraTransitionProgress = "0";
+    };
+
+    const consumeMusicReturnSignal = () => {
+      if (musicReturnSignalRef.current === handledMusicReturnSignal) return;
+      handledMusicReturnSignal = musicReturnSignalRef.current;
+      pendingMusicReturnPullback = true;
+      canvas.dataset.heroReturnPending = "music";
+      canvas.dataset.heroReturnStatus = "waiting-focus";
     };
 
     const syncControlTelemetry = () => {
@@ -1350,20 +2019,81 @@ function NeonHeroScene({ active, onNavigate }: NeonHeroSceneProps) {
       canvas.dataset.cameraAzimuth = azimuth;
     };
 
+    const updateMusicPanelAttachment = () => {
+      if (!panelStyleHost) return;
+      if (!hasMusicPanelAnchor) {
+        panelStyleHost.style.setProperty("--music-panel-opacity", "0");
+        panelStyleHost.dataset.musicPanelAttachment = "pending";
+        return;
+      }
+
+      const rect = canvas.getBoundingClientRect();
+      panelProjection.copy(musicPanelAnchor).project(camera);
+      const isInFront = panelProjection.z >= -1 && panelProjection.z <= 1;
+      const panelX = (panelProjection.x * 0.5 + 0.5) * rect.width;
+      const panelY = (-panelProjection.y * 0.5 + 0.5) * rect.height + (compactScene ? 42 : 66);
+      const distance = camera.position.distanceTo(musicPanelAnchor);
+      const panelScale = THREE.MathUtils.clamp(
+        (compactScene ? 1.58 : 1.84) / Math.max(distance, 0.1),
+        compactScene ? 0.5 : 0.54,
+        compactScene ? 0.78 : 0.76
+      );
+      const panelWidth = compactScene ? 360 : 400;
+      const panelHeight = compactScene ? 470 : 540;
+
+      panelStyleHost.style.setProperty("--music-panel-x", `${panelX.toFixed(2)}px`);
+      panelStyleHost.style.setProperty("--music-panel-y", `${panelY.toFixed(2)}px`);
+      panelStyleHost.style.setProperty("--music-panel-scale", panelScale.toFixed(3));
+      panelStyleHost.style.setProperty("--music-panel-width", `${panelWidth}px`);
+      panelStyleHost.style.setProperty("--music-panel-height", `${panelHeight}px`);
+      panelStyleHost.style.setProperty("--music-panel-opacity", isInFront ? "1" : "0");
+      panelStyleHost.dataset.musicPanelAttachment = isInFront ? "ready" : "hidden";
+      canvas.dataset.musicPanelProjection = `${panelX.toFixed(1)},${panelY.toFixed(1)},${panelScale.toFixed(3)},${distance.toFixed(2)}`;
+    };
+
+    const updateMusicCssPanelObject = () => {
+      const isMusicOpen = musicSceneOpenRef.current || canvas.dataset.cameraTransition === "music-open";
+      const shouldShowPanel = isMusicOpen && !musicCssClosedByUser && hasMusicPanelAnchor;
+      musicCssObject.visible = shouldShowPanel;
+      musicCssElement.dataset.visible = shouldShowPanel ? "true" : "false";
+      cssRenderer.domElement.dataset.musicPanel = shouldShowPanel ? "open" : "hidden";
+      cssRenderer.domElement.style.pointerEvents = shouldShowPanel ? "auto" : "none";
+      musicScreenMeshes.forEach((mesh) => {
+        mesh.visible = !shouldShowPanel;
+      });
+      canvas.dataset.musicScreenHidden = shouldShowPanel ? String(musicScreenMeshes.length) : "0";
+      if (!shouldShowPanel) return;
+
+      const panelScale = compactScene ? 0.001 : 0.00111;
+      musicCssObject.position.copy(musicPanelAnchor).addScaledVector(musicPanelOutward, compactScene ? 0.012 : 0.016);
+      musicCssObject.position.y -= compactScene ? 0.073 : 0.092;
+      musicCssObject.quaternion.setFromUnitVectors(frontNormal, musicPanelOutward);
+      musicCssObject.scale.setScalar(panelScale);
+      canvas.dataset.musicCssPanel = `${musicCssObject.position.x.toFixed(3)},${musicCssObject.position.y.toFixed(3)},${musicCssObject.position.z.toFixed(3)},${panelScale.toFixed(5)}`;
+    };
+
     const updateCameraTransition = (now: number) => {
       if (!cameraTransition) return false;
       const progress = Math.min(1, (now - cameraTransition.startedAt) / cameraTransition.duration);
-      const turnProgress = smoothRange(progress, 0, 0.68);
-      const approachProgress = smoothRange(progress, 0.08, 0.68);
-      const zoomProgress = smoothRange(progress, 0.36, 1);
-      transitionPosition
-        .copy(cameraTransition.startPosition)
-        .lerp(cameraTransition.midPosition, approachProgress)
-        .lerp(cameraTransition.endPosition, zoomProgress);
-      transitionTarget
-        .copy(cameraTransition.startTarget)
-        .lerp(cameraTransition.midTarget, approachProgress)
-        .lerp(cameraTransition.endTarget, zoomProgress);
+      let turnProgress = smoothRange(progress, 0, 0.66);
+      let zoomProgress = smoothRange(progress, 0.58, 1);
+      if (cameraTransition.mode === "return") {
+        turnProgress = smoothRange(progress, 0, 0.88);
+        zoomProgress = smoothRange(progress, 0.08, 1);
+        transitionPosition.copy(cameraTransition.startPosition).lerp(cameraTransition.endPosition, turnProgress);
+        transitionTarget.copy(cameraTransition.startTarget).lerp(cameraTransition.endTarget, zoomProgress);
+      } else {
+        const angle = cameraTransition.startAngle + shortestAngleDelta(cameraTransition.startAngle, cameraTransition.endAngle) * turnProgress;
+        const radius = THREE.MathUtils.lerp(cameraTransition.startRadius, cameraTransition.midRadius, turnProgress);
+        transitionPosition.set(
+          cameraTransition.orbitPivot.x + Math.cos(angle) * radius,
+          THREE.MathUtils.lerp(cameraTransition.startY, cameraTransition.midY, turnProgress),
+          cameraTransition.orbitPivot.z + Math.sin(angle) * radius
+        );
+        transitionTarget.copy(cameraTransition.startTarget).lerp(cameraTransition.midTarget, turnProgress);
+        transitionPosition.lerp(cameraTransition.endPosition, zoomProgress);
+        transitionTarget.lerp(cameraTransition.endTarget, zoomProgress);
+      }
       camera.position.copy(transitionPosition);
       controls.target.copy(transitionTarget);
       referencePortfolioRoot.rotation.y = THREE.MathUtils.lerp(
@@ -1378,10 +2108,24 @@ function NeonHeroScene({ active, onNavigate }: NeonHeroSceneProps) {
       canvas.dataset.referenceRotationY = referencePortfolioRoot.rotation.y.toFixed(3);
       if (progress >= 1 && !cameraTransition.navigated) {
         cameraTransition.navigated = true;
-        canvas.dataset.cameraTransition = "music-complete";
-        navigationTimeout = window.setTimeout(() => {
-          navigateRef.current(cameraTransition?.href ?? "/music");
-        }, 620);
+        if (cameraTransition.kind === "article") {
+          openArticleVendingScene();
+          cameraTransition = null;
+          return true;
+        }
+        if (cameraTransition.kind === "music-return") {
+          resetOrbitDistanceLimits();
+          canvas.dataset.cameraTransition = "music-return-complete";
+          canvas.dataset.heroReturnStatus = "complete";
+          cameraTransition = null;
+          return true;
+        }
+        if (cameraTransition.kind === "music") {
+          canvas.dataset.cameraTransition = "music-open";
+          cameraTransition = null;
+          onMusicSceneOpenRef.current?.();
+          return true;
+        }
       }
       return true;
     };
@@ -1402,13 +2146,23 @@ function NeonHeroScene({ active, onNavigate }: NeonHeroSceneProps) {
       const delta = (now - lastRenderAt) / 1000;
       lastRenderAt = now;
       controls.enabled = activeRef.current && !cameraTransition;
+      consumeMusicReturnSignal();
+      startMusicReturnPullbackIfReady();
       if (!updateCameraTransition(now)) controls.update();
       syncControlTelemetry();
+      updateMusicPanelAttachment();
+      updateMusicCssPanelObject();
       torus.rotation.z = elapsed * 0.36;
       halo.rotation.z = -elapsed * 0.18;
       cyanLight.intensity = 8.4 + Math.sin(elapsed * 2.1) * 1.2;
       magentaLight.intensity = 6.2 + Math.sin(elapsed * 1.7 + 1.2) * 0.9;
       mixers.forEach((mixer) => mixer.update(delta));
+      if (articleVendingOpen) {
+        articleBottleGroups.forEach((bottle, index) => {
+          bottle.position.y = (Number(bottle.userData.baseY) || 0) + Math.sin(elapsed * 1.4 + index * 0.62) * 0.018;
+          bottle.rotation.y = Math.sin(elapsed * 0.95 + index) * 0.08;
+        });
+      }
       if (!reducedMotion) {
         floaters.forEach((floater, index) => {
           floater.position.y += Math.sin(elapsed * 0.9 + index) * 0.0018;
@@ -1417,6 +2171,7 @@ function NeonHeroScene({ active, onNavigate }: NeonHeroSceneProps) {
         });
       }
       renderer.render(scene, camera);
+      cssRenderer.render(cssScene, camera);
       animationFrame = window.requestAnimationFrame(render);
     }
 
@@ -1425,21 +2180,25 @@ function NeonHeroScene({ active, onNavigate }: NeonHeroSceneProps) {
       const nextWidth = Math.max(1, Math.floor(width));
       const nextHeight = Math.max(1, Math.floor(height));
       renderer.setSize(nextWidth, nextHeight, false);
+      cssRenderer.setSize(nextWidth, nextHeight);
       camera.aspect = nextWidth / nextHeight;
       camera.updateProjectionMatrix();
       compactScene = nextWidth < 720;
       city.scale.setScalar(compactScene ? 0.74 : 1);
       city.position.x = compactScene ? 0.28 : 0;
-      refreshMusicFocusTarget();
+      refreshSceneFocusTargets();
       if (!hasSetInitialView) {
         applyInitialCameraView();
         hasSetInitialView = true;
-      } else if (!cameraTransition) {
+      } else if (!cameraTransition && !["music-open", "music-return-complete"].includes(canvas.dataset.cameraTransition || "")) {
         setDefaultCameraTarget();
         controls.update();
       }
       syncControlTelemetry();
+      updateMusicPanelAttachment();
+      updateMusicCssPanelObject();
       renderer.render(scene, camera);
+      cssRenderer.render(cssScene, camera);
     };
     const observer = new ResizeObserver(resize);
     observer.observe(canvas);
@@ -1447,6 +2206,7 @@ function NeonHeroScene({ active, onNavigate }: NeonHeroSceneProps) {
     render();
 
     return () => {
+      disposed = true;
       if (navigationTimeout) window.clearTimeout(navigationTimeout);
       window.cancelAnimationFrame(animationFrame);
       canvas.removeEventListener("pointerdown", handlePointerDown);
@@ -1454,6 +2214,14 @@ function NeonHeroScene({ active, onNavigate }: NeonHeroSceneProps) {
       canvas.removeEventListener("pointerup", handlePointerUp);
       canvas.removeEventListener("pointerleave", handlePointerUp);
       observer.disconnect();
+      musicScreenMeshes.forEach((mesh) => {
+        mesh.visible = true;
+      });
+      musicCssElement.removeEventListener("click", forwardMusicCssClick, true);
+      const rootToUnmount = musicCssRoot;
+      musicCssRoot = null;
+      window.setTimeout(() => rootToUnmount?.unmount(), 0);
+      cssRenderer.domElement.remove();
       labelTextures.forEach((texture) => texture.dispose());
       referenceTextureMaterials.forEach((material) => {
         material.map?.dispose();
@@ -1475,21 +2243,7 @@ function NeonHeroScene({ active, onNavigate }: NeonHeroSceneProps) {
   return <canvas ref={canvasRef} className="neon-scene-canvas" role="img" aria-label="霓虹博客 3D 场景" />;
 }
 
-function HomePage() {
-  return (
-    <main className="home-landing home-landing-model-only">
-      <section className="home-hero-shell home-hero-model-only" aria-label="3D 首页模型">
-        <div className="home-hero-layout">
-          <div className="home-hero-stage">
-            <NeonHeroScene active={true} onNavigate={navigateConfiguredUrl} />
-          </div>
-        </div>
-      </section>
-    </main>
-  );
-}
-
-function MusicPage() {
+function MusicMachinePlayer({ onClose, sceneEmbedded = false }: { onClose: () => void; sceneEmbedded?: boolean }) {
   const [musicConfig, setMusicConfig] = useState<MusicPageSettings>(defaultMusicSettings);
   const [musicUsingMock, setMusicUsingMock] = useState(false);
   const [activeTrackIndex, setActiveTrackIndex] = useState(0);
@@ -1541,10 +2295,16 @@ function MusicPage() {
     audio.play().then(() => setIsPlaying(true)).catch(() => setIsPlaying(false));
   };
 
+  const closeMusicWithSceneReturn = () => {
+    audioRef.current?.pause();
+    setIsPlaying(false);
+    onClose();
+  };
+
   return (
-    <main className="music-vending-page">
+    <>
       {musicUsingMock && <span className="visually-hidden">Preview playlist</span>}
-      <section className="music-machine-stage" aria-label="饮料机音乐播放器">
+      <section className={`music-machine-stage ${sceneEmbedded ? "scene-embedded" : ""}`} aria-label="饮料机音乐播放器">
         <div className="music-wall-photo" aria-hidden="true" />
         <div className="music-guitar" aria-hidden="true" />
         <div className="music-machine" aria-label={musicConfig.title || "Music"}>
@@ -1554,19 +2314,20 @@ function MusicPage() {
               <header className="music-machine-screen-head">
                 <span className="music-note-icon" aria-hidden="true">♪</span>
                 <h1>Playing</h1>
-                <button type="button" aria-label="返回首页" onClick={() => go("/")}>×</button>
+                <button type="button" aria-label="返回首页" onClick={closeMusicWithSceneReturn}>×</button>
               </header>
               <div className="music-machine-list">
                 {enabledTracks.length ? enabledTracks.map((track, index) => {
                   const cover = sanitizeAssetUrl(track.coverUrl);
                   const audio = sanitizeAssetUrl(track.audioUrl);
                   const isActive = activeTrack === track;
+                  const displayArtist = track.artist || track.album || track.note || musicConfig.subtitle || "Playlist";
                   return (
                     <button key={`${track.title}-${track.artist}-${track.audioUrl}-${index}`} className={isActive ? "active" : ""} type="button" onClick={() => setActiveTrackIndex(index)}>
                       <span className={`music-track-cover ${cover ? "has-cover" : ""}`} style={cover ? { backgroundImage: `url(${cover})` } : undefined}>
                         {!cover && (track.title || "M").slice(0, 1)}
                       </span>
-                      <b><span>{track.title || "Untitled"}</span><small>{track.artist || (audio ? musicConfig.subtitle : "No audio configured")}</small></b>
+                      <b><span>{track.title || "Untitled"}</span><small>{displayArtist}</small></b>
                       <em>{track.duration || (audio ? "" : "OFF")}</em>
                     </button>
                   );
@@ -1583,6 +2344,43 @@ function MusicPage() {
         </div>
       </section>
       {activeAudio && <audio ref={audioRef} key={activeAudio} src={activeAudio} preload="metadata" onPlay={() => setIsPlaying(true)} onPause={() => setIsPlaying(false)} onEnded={() => setIsPlaying(false)} />}
+    </>
+  );
+}
+
+function HomePage() {
+  const [musicSceneOpen, setMusicSceneOpen] = useState(false);
+  const [musicReturnSignal, setMusicReturnSignal] = useState(0);
+
+  const closeMusicScene = () => {
+    setMusicSceneOpen(false);
+    setMusicReturnSignal((value) => value + 1);
+  };
+
+  return (
+    <main className="home-landing home-landing-model-only">
+      <section className="home-hero-shell home-hero-model-only" aria-label="3D 首页模型">
+        <div className="home-hero-layout">
+          <div className={`home-hero-stage ${musicSceneOpen ? "music-scene-open" : ""}`}>
+            <NeonHeroScene
+              active={!musicSceneOpen}
+              onNavigate={navigateConfiguredUrl}
+              musicReturnSignal={musicReturnSignal}
+              musicSceneOpen={musicSceneOpen}
+              onMusicSceneOpen={() => setMusicSceneOpen(true)}
+              onMusicSceneClose={closeMusicScene}
+            />
+          </div>
+        </div>
+      </section>
+    </main>
+  );
+}
+
+function MusicPage() {
+  return (
+    <main className="music-vending-page">
+      <MusicMachinePlayer onClose={() => requestHeroReturnAnimation("music")} />
     </main>
   );
 }
