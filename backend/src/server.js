@@ -275,11 +275,16 @@ async function ensureRuntimeSchema() {
   `);
   await query(`
     ALTER TABLE categories
+      ADD COLUMN IF NOT EXISTS description text,
+      ADD COLUMN IF NOT EXISTS icon text,
       ADD COLUMN IF NOT EXISTS cover text,
       ADD COLUMN IF NOT EXISTS background text,
-      ADD COLUMN IF NOT EXISTS theme_color varchar(40)
+      ADD COLUMN IF NOT EXISTS theme_color varchar(40),
+      ADD COLUMN IF NOT EXISTS sort_order integer NOT NULL DEFAULT 0,
+      ADD COLUMN IF NOT EXISTS posts_count integer NOT NULL DEFAULT 0
   `);
   await query("ALTER TABLE categories ALTER COLUMN icon TYPE text");
+  await backfillCategoryVisuals();
   await query(`
     ALTER TABLE media_assets
       ADD COLUMN IF NOT EXISTS thumbnail_url text,
@@ -490,6 +495,164 @@ function slugify(input) {
   return base || `post-${Date.now()}`;
 }
 
+const CATEGORY_VISUAL_DEFAULTS = [
+  {
+    keys: ["前端开发", "frontend"],
+    icon: "code",
+    cover: "/assets/thumb-next.png",
+    background: "linear-gradient(135deg, rgba(0,229,255,.18), rgba(72,94,255,.08))",
+    themeColor: "#00e5ff",
+    description: "聚焦 React、Vue、TypeScript 与现代前端工程实践。",
+  },
+  {
+    keys: ["后端开发", "backend"],
+    icon: "server",
+    cover: "/assets/thumb-docker.png",
+    background: "linear-gradient(135deg, rgba(0,229,255,.2), rgba(45,92,255,.1))",
+    themeColor: "#00e5ff",
+    description: "专注后端开发技术、架构设计、性能优化与最佳实践。",
+  },
+  {
+    keys: ["运维部署", "devops"],
+    icon: "cloud",
+    cover: "/assets/thumb-linux.png",
+    background: "linear-gradient(135deg, rgba(91,255,186,.18), rgba(0,229,255,.08))",
+    themeColor: "#5dffba",
+    description: "记录 Linux、Docker、CI/CD 与线上稳定性相关经验。",
+  },
+  {
+    keys: ["数据库", "database"],
+    icon: "database",
+    cover: "/assets/article-cover.png",
+    background: "linear-gradient(135deg, rgba(157,104,255,.2), rgba(0,229,255,.08))",
+    themeColor: "#9d68ff",
+    description: "沉淀数据库建模、查询优化、索引设计与数据可靠性实践。",
+  },
+  {
+    keys: ["工具教程", "tools"],
+    icon: "tool",
+    cover: "/assets/editor-cover.png",
+    background: "linear-gradient(135deg, rgba(255,198,90,.18), rgba(0,229,255,.08))",
+    themeColor: "#ffc65a",
+    description: "分享高效开发工具、调试方法和工作流优化技巧。",
+  },
+  {
+    keys: ["随笔杂谈", "notes"],
+    icon: "chat",
+    cover: "/assets/home-hero-scene.png",
+    background: "linear-gradient(135deg, rgba(255,61,242,.18), rgba(0,229,255,.08))",
+    themeColor: "#ff8df8",
+    description: "记录技术之外的思考、复盘、成长和日常灵感。",
+  },
+  {
+    keys: ["AI 工程", "ai-工程", "ai-engineering"],
+    icon: "ai",
+    cover: "/assets/home-hero-scene.png",
+    background: "linear-gradient(135deg, rgba(0,229,255,.2), rgba(124,58,237,.18))",
+    themeColor: "#72f7ff",
+    description: "按发布时间浏览 AI 工程、提示词、智能体与工具链实践。",
+  },
+  {
+    keys: ["AI 实践", "ai-实践", "ai-practice"],
+    icon: "sparkles",
+    cover: "/assets/article-cover.png",
+    background: "linear-gradient(135deg, rgba(139,92,246,.22), rgba(0,229,255,.1))",
+    themeColor: "#9d68ff",
+    description: "记录 AI 编程、模型应用和真实项目中的落地经验。",
+  },
+  {
+    keys: ["学习记录", "learning", "study"],
+    icon: "book",
+    cover: "/assets/editor-cover.png",
+    background: "linear-gradient(135deg, rgba(34,211,238,.16), rgba(91,255,186,.1))",
+    themeColor: "#5dffba",
+    description: "整理学习路线、读书笔记、踩坑记录和阶段性复盘。",
+  },
+  {
+    keys: ["技术笔记", "tech-notes"],
+    icon: "file",
+    cover: "/assets/article-cover.png",
+    background: "linear-gradient(135deg, rgba(0,229,255,.14), rgba(119,140,255,.1))",
+    themeColor: "#00e5ff",
+    description: "沉淀开发过程中的关键知识点、问题定位和实践经验。",
+  },
+  {
+    keys: ["项目复盘", "projects", "project-review"],
+    icon: "rocket",
+    cover: "/assets/about-project-blogcore.png",
+    background: "linear-gradient(135deg, rgba(255,198,90,.18), rgba(124,58,237,.12))",
+    themeColor: "#ffc65a",
+    description: "复盘项目从设计、开发到上线维护的关键决策与经验。",
+  },
+];
+
+function categoryVisualDefaultsFor(name = "技术笔记", slug = "") {
+  const normalizedName = String(name || "").trim();
+  const normalizedSlug = String(slug || slugify(normalizedName)).trim().toLowerCase();
+  const exact = CATEGORY_VISUAL_DEFAULTS.find((item) => item.keys.some((key) => key.toLowerCase() === normalizedName.toLowerCase() || key.toLowerCase() === normalizedSlug));
+  if (exact) return exact;
+  if (/ai|人工智能|大模型|智能体|机器学习/i.test(`${normalizedName} ${normalizedSlug}`)) return CATEGORY_VISUAL_DEFAULTS.find((item) => item.keys.includes("AI 工程"));
+  if (/前端|frontend|react|vue/i.test(`${normalizedName} ${normalizedSlug}`)) return CATEGORY_VISUAL_DEFAULTS.find((item) => item.keys.includes("前端开发"));
+  if (/后端|backend|server|node|java/i.test(`${normalizedName} ${normalizedSlug}`)) return CATEGORY_VISUAL_DEFAULTS.find((item) => item.keys.includes("后端开发"));
+  if (/运维|部署|devops|docker|linux|k8s/i.test(`${normalizedName} ${normalizedSlug}`)) return CATEGORY_VISUAL_DEFAULTS.find((item) => item.keys.includes("运维部署"));
+  if (/数据|database|mysql|postgres|sql/i.test(`${normalizedName} ${normalizedSlug}`)) return CATEGORY_VISUAL_DEFAULTS.find((item) => item.keys.includes("数据库"));
+  if (/学习|读书|study|learn/i.test(`${normalizedName} ${normalizedSlug}`)) return CATEGORY_VISUAL_DEFAULTS.find((item) => item.keys.includes("学习记录"));
+  if (/项目|复盘|project/i.test(`${normalizedName} ${normalizedSlug}`)) return CATEGORY_VISUAL_DEFAULTS.find((item) => item.keys.includes("项目复盘"));
+  return CATEGORY_VISUAL_DEFAULTS.find((item) => item.keys.includes("技术笔记"));
+}
+
+function mapCategoryRow(row) {
+  return {
+    id: row.id,
+    name: row.name,
+    slug: row.slug,
+    description: row.description,
+    icon: row.icon,
+    cover: row.cover,
+    background: row.background,
+    theme_color: row.theme_color,
+    themeColor: row.theme_color,
+    sort_order: row.sort_order,
+    sortOrder: row.sort_order,
+    posts_count: row.posts_count,
+    postsCount: row.posts_count,
+    created_at: row.created_at,
+    createdAt: row.created_at,
+    updated_at: row.updated_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+async function applyMissingCategoryVisuals(client, id, defaults) {
+  if (!defaults) return;
+  await client.query(
+    `UPDATE categories
+     SET description = COALESCE(NULLIF(description, ''), $2),
+         icon = COALESCE(NULLIF(icon, ''), $3),
+         cover = COALESCE(NULLIF(cover, ''), $4),
+         background = COALESCE(NULLIF(background, ''), $5),
+         theme_color = COALESCE(NULLIF(theme_color, ''), $6),
+         updated_at = now()
+     WHERE id = $1`,
+    [id, defaults.description, defaults.icon, safeAssetUrl(defaults.cover), defaults.background, defaults.themeColor],
+  );
+}
+
+async function backfillCategoryVisuals() {
+  const result = await query(`
+    SELECT id, name, slug
+    FROM categories
+    WHERE NULLIF(description, '') IS NULL
+       OR NULLIF(icon, '') IS NULL
+       OR NULLIF(cover, '') IS NULL
+       OR NULLIF(background, '') IS NULL
+       OR NULLIF(theme_color, '') IS NULL
+  `);
+  for (const item of result.rows) {
+    await applyMissingCategoryVisuals({ query }, item.id, categoryVisualDefaultsFor(item.name, item.slug));
+  }
+}
+
 function estimateReadingMinutes(content) {
   const length = String(content || "").replace(/\s+/g, "").length;
   return Math.max(1, Math.ceil(length / 500));
@@ -581,13 +744,24 @@ function parseSections(content) {
 async function ensureCategory(client, name = "技术笔记") {
   const slug = slugify(name);
   const existing = await client.query("SELECT id FROM categories WHERE name = $1 OR slug = $2 LIMIT 1", [name, slug]);
-  if (existing.rowCount) return existing.rows[0].id;
+  const defaults = categoryVisualDefaultsFor(name, slug);
+  if (existing.rowCount) {
+    await applyMissingCategoryVisuals(client, existing.rows[0].id, defaults);
+    return existing.rows[0].id;
+  }
   const result = await client.query(
-    `INSERT INTO categories(name, slug)
-     VALUES ($1, $2)
-     ON CONFLICT (slug) DO UPDATE SET name = EXCLUDED.name, updated_at = now()
+    `INSERT INTO categories(name, slug, description, icon, cover, background, theme_color)
+     VALUES ($1, $2, $3, $4, $5, $6, $7)
+     ON CONFLICT (slug) DO UPDATE SET
+       name = EXCLUDED.name,
+       description = COALESCE(NULLIF(categories.description, ''), EXCLUDED.description),
+       icon = COALESCE(NULLIF(categories.icon, ''), EXCLUDED.icon),
+       cover = COALESCE(NULLIF(categories.cover, ''), EXCLUDED.cover),
+       background = COALESCE(NULLIF(categories.background, ''), EXCLUDED.background),
+       theme_color = COALESCE(NULLIF(categories.theme_color, ''), EXCLUDED.theme_color),
+       updated_at = now()
      RETURNING id`,
-    [name, slug],
+    [name, slug, defaults.description, defaults.icon, safeAssetUrl(defaults.cover), defaults.background, defaults.themeColor],
   );
   return result.rows[0].id;
 }
@@ -2790,7 +2964,7 @@ async function handleAdminCategories(req, res) {
     WHERE NOT (posts_count = 0 AND name ~ '^\\?+$')
     ORDER BY sort_order ASC, name ASC
   `);
-  sendJson(res, 200, { items: result.rows }, corsHeaders(req));
+  sendJson(res, 200, { items: result.rows.map(mapCategoryRow) }, corsHeaders(req));
 }
 
 async function handleAdminCreateCategory(req, res) {
@@ -2798,17 +2972,19 @@ async function handleAdminCreateCategory(req, res) {
   const name = String(body.name || "").trim();
   if (!name) return sendJson(res, 400, { error: "name_required", message: "Category name is required" }, corsHeaders(req));
   const slug = slugify(body.slug || name);
-  const icon = String(body.icon ?? "").trim() || null;
-  const cover = safeAssetUrl(body.cover) || null;
-  const background = String(body.background ?? "").trim() || null;
-  const themeColor = String(body.themeColor ?? body.theme_color ?? "").trim() || null;
+  const defaults = categoryVisualDefaultsFor(name, slug);
+  const description = String(body.description ?? defaults.description ?? "").trim() || null;
+  const icon = String(body.icon ?? defaults.icon ?? "").trim() || null;
+  const cover = safeAssetUrl(body.cover ?? defaults.cover) || null;
+  const background = String(body.background ?? defaults.background ?? "").trim() || null;
+  const themeColor = String(body.themeColor ?? body.theme_color ?? defaults.themeColor ?? "").trim() || null;
   const result = await query(
     `INSERT INTO categories(name, slug, description, icon, cover, background, theme_color, sort_order)
      VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
      RETURNING id, name, slug, description, icon, cover, background, theme_color, sort_order, posts_count, created_at, updated_at`,
-    [name, slug, body.description ?? null, icon, cover, background, themeColor, Number(body.sortOrder ?? body.sort_order ?? 0) || 0],
+    [name, slug, description, icon, cover, background, themeColor, Number(body.sortOrder ?? body.sort_order ?? 0) || 0],
   );
-  sendJson(res, 201, { item: result.rows[0], ok: true }, corsHeaders(req));
+  sendJson(res, 201, { item: mapCategoryRow(result.rows[0]), ok: true }, corsHeaders(req));
 }
 
 async function handleAdminUpdateCategory(req, res, id) {
@@ -2836,7 +3012,7 @@ async function handleAdminUpdateCategory(req, res, id) {
     [name, slug, body.description ?? null, icon, cover, background, themeColor, Number(body.sortOrder ?? body.sort_order ?? 0) || 0, id],
   );
   if (!result.rowCount) return sendJson(res, 404, { error: "category_not_found", message: "Category not found" }, corsHeaders(req));
-  sendJson(res, 200, { item: result.rows[0], ok: true }, corsHeaders(req));
+  sendJson(res, 200, { item: mapCategoryRow(result.rows[0]), ok: true }, corsHeaders(req));
 }
 
 async function handleAdminDeleteCategory(req, res, id) {
@@ -3405,7 +3581,7 @@ async function handleRequest(req, res) {
       await publishDueScheduledPosts();
       await refreshPublishedTaxonomyCounts();
       const result = await query("SELECT id, name, slug, description, icon, cover, background, theme_color, posts_count FROM categories WHERE posts_count > 0 ORDER BY sort_order ASC, name ASC");
-      return sendJson(res, 200, { items: result.rows }, headers);
+      return sendJson(res, 200, { items: result.rows.map(mapCategoryRow) }, headers);
     }
     if (req.method === "GET" && url.pathname === "/api/public/tags") {
       await publishDueScheduledPosts();

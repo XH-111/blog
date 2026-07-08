@@ -400,6 +400,9 @@ type NeonHeroSceneProps = {
   onMusicSceneClose?: () => void;
 };
 
+type MusicControlAction = "previous" | "toggle" | "next";
+const MUSIC_CONTROL_EVENT = "xhblog:music-control";
+
 function NeonHeroScene({ active, onNavigate, startScene = true, onLoadProgress, homeReturnSignal = 0, musicReturnSignal = 0, musicSceneOpen = false, onMusicSceneOpen, onMusicSceneClose }: NeonHeroSceneProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const activeRef = useRef(active && startScene);
@@ -635,6 +638,52 @@ function NeonHeroScene({ active, onNavigate, startScene = true, onLoadProgress, 
     const musicScreenMeshes: THREE.Mesh[] = [];
     let musicCssClosedByUser = false;
     let forwardingMusicCssClick = false;
+    const musicControlTarget = new EventTarget();
+    const musicControlOverlay = document.createElement("div");
+    musicControlOverlay.className = "music-scene-control-overlay";
+    musicControlOverlay.dataset.visible = "false";
+    musicControlOverlay.setAttribute("aria-hidden", "true");
+    const musicControlOverlayButtons = (["previous", "toggle", "next"] as MusicControlAction[]).map((action) => {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.tabIndex = -1;
+      button.className = "music-scene-control-hotspot";
+      button.dataset.musicControl = action;
+      button.setAttribute("aria-label", action === "previous" ? "上一首" : action === "next" ? "下一首" : "播放或暂停");
+      panelStyleHost?.appendChild(button);
+      return button;
+    });
+    const handleMusicControlOverlayClick = (event: MouseEvent) => {
+      const button = (event.target as HTMLElement | null)?.closest<HTMLButtonElement>("[data-music-control]");
+      const action = button?.dataset.musicControl as MusicControlAction | undefined;
+      if (!action) return;
+      event.preventDefault();
+      event.stopPropagation();
+      canvas.dataset.musicOverlayClick = action;
+      if (action === "toggle") {
+        const audio = musicCssElement.querySelector("audio");
+        if (audio instanceof HTMLAudioElement && audio.currentSrc) {
+          if (audio.paused) {
+            audio.play()
+              .then(() => {
+                canvas.dataset.musicOverlayPlayback = "playing";
+              })
+              .catch((error) => {
+                canvas.dataset.musicOverlayPlayback = `error:${error instanceof Error ? error.name : "unknown"}`;
+                musicControlTarget.dispatchEvent(new CustomEvent<MusicControlAction>(MUSIC_CONTROL_EVENT, { detail: action }));
+              });
+          } else {
+            audio.pause();
+            canvas.dataset.musicOverlayPlayback = "paused";
+          }
+          return;
+        }
+      }
+      musicControlTarget.dispatchEvent(new CustomEvent<MusicControlAction>(MUSIC_CONTROL_EVENT, { detail: action }));
+    };
+    musicControlOverlay.addEventListener("click", handleMusicControlOverlayClick, true);
+    musicControlOverlayButtons.forEach((button) => button.addEventListener("click", handleMusicControlOverlayClick, true));
+    panelStyleHost?.appendChild(musicControlOverlay);
     const forwardMusicCssClick = (event: MouseEvent) => {
       if (forwardingMusicCssClick) return;
       const target = event.target as HTMLElement | null;
@@ -642,11 +691,22 @@ function NeonHeroScene({ active, onNavigate, startScene = true, onLoadProgress, 
       const clickables = Array.from(musicCssElement.querySelectorAll("button")) as HTMLButtonElement[];
       const targetButton = clickables.find((button) => {
         const rect = button.getBoundingClientRect();
-        return event.clientX >= rect.left && event.clientX <= rect.right && event.clientY >= rect.top && event.clientY <= rect.bottom;
+        const hitPadding = button.dataset.musicControl ? 18 : 0;
+        return (
+          event.clientX >= rect.left - hitPadding &&
+          event.clientX <= rect.right + hitPadding &&
+          event.clientY >= rect.top - hitPadding &&
+          event.clientY <= rect.bottom + hitPadding
+        );
       });
       if (!targetButton) return;
       event.preventDefault();
       event.stopPropagation();
+      const musicControlAction = targetButton.dataset.musicControl as MusicControlAction | undefined;
+      if (musicControlAction) {
+        musicControlTarget.dispatchEvent(new CustomEvent<MusicControlAction>(MUSIC_CONTROL_EVENT, { detail: musicControlAction }));
+        return;
+      }
       forwardingMusicCssClick = true;
       targetButton.click();
       forwardingMusicCssClick = false;
@@ -659,6 +719,7 @@ function NeonHeroScene({ active, onNavigate, startScene = true, onLoadProgress, 
       musicCssPlayerActive = sceneActive;
       musicCssRoot.render(
         <MusicMachinePlayer
+          controlTarget={musicControlTarget}
           onClose={() => {
             musicCssClosedByUser = true;
             musicCssObject.visible = false;
@@ -1393,6 +1454,14 @@ function NeonHeroScene({ active, onNavigate, startScene = true, onLoadProgress, 
 
     const compactReferenceName = (name: string) => name.toLowerCase().replace(/[^a-z0-9]/g, "");
 
+    const musicControlActionForReferenceObject = (name: string): MusicControlAction | "" => {
+      const compactName = compactReferenceName(name);
+      if (compactName === "leftbtn") return "previous";
+      if (compactName === "stopbtn") return "toggle";
+      if (compactName === "rightbtn") return "next";
+      return "";
+    };
+
     const routeForReferenceObject = (name: string) => {
       const compactName = compactReferenceName(name);
       if (compactName === "neontv" || compactName === "tvscreen") return "/about";
@@ -1550,6 +1619,11 @@ function NeonHeroScene({ active, onNavigate, startScene = true, onLoadProgress, 
           const material = mesh.material;
           const materials = Array.isArray(material) ? material : [material];
           materials.forEach((item) => prepareEmbeddedReferenceMaterial(mesh.name, item));
+        }
+
+        const musicControlAction = musicControlActionForReferenceObject(mesh.name);
+        if (musicControlAction) {
+          mesh.userData.musicControlAction = musicControlAction;
         }
 
         const href = routeForReferenceObject(mesh.name);
@@ -1961,6 +2035,7 @@ function NeonHeroScene({ active, onNavigate, startScene = true, onLoadProgress, 
     const pointer = new THREE.Vector2();
     const raycaster = new THREE.Raycaster();
     let hoveredHref = "";
+    let hoveredMusicControlAction: MusicControlAction | "" = "";
     let pointerDownX = 0;
     let pointerDownY = 0;
     let movedDistance = 0;
@@ -1981,8 +2056,10 @@ function NeonHeroScene({ active, onNavigate, startScene = true, onLoadProgress, 
     const updateHover = (event: globalThis.PointerEvent) => {
       if (!activeRef.current) {
         hoveredHref = "";
+        hoveredMusicControlAction = "";
         hasHoveredPoint = false;
         canvas.dataset.hoveredHref = "";
+        canvas.dataset.hoveredMusicControl = "";
         canvas.style.cursor = "default";
         return "";
       }
@@ -1992,14 +2069,16 @@ function NeonHeroScene({ active, onNavigate, startScene = true, onLoadProgress, 
       raycaster.setFromCamera(pointer, camera);
       const hit = raycaster.intersectObjects(interactiveSigns, false).find((item) => isInteractiveObjectVisible(item.object));
       hoveredHref = typeof hit?.object.userData.href === "string" ? hit.object.userData.href : "";
+      hoveredMusicControlAction = hit?.object.userData.musicControlAction || "";
       if (hit?.point) {
         hoveredPoint.copy(hit.point);
         hasHoveredPoint = true;
       } else {
         hasHoveredPoint = false;
       }
-      canvas.style.cursor = hoveredHref ? "pointer" : "grab";
+      canvas.style.cursor = hoveredHref || hoveredMusicControlAction ? "pointer" : "grab";
       canvas.dataset.hoveredHref = hoveredHref;
+      canvas.dataset.hoveredMusicControl = hoveredMusicControlAction;
       return hoveredHref;
     };
 
@@ -2020,8 +2099,12 @@ function NeonHeroScene({ active, onNavigate, startScene = true, onLoadProgress, 
     const handlePointerUp = (event: globalThis.PointerEvent) => {
       if (!activeRef.current || cameraTransition) return;
       const href = updateHover(event);
-      if (movedDistance < 5 && href) handleSceneNavigation(href);
-      canvas.style.cursor = href ? "pointer" : "grab";
+      if (movedDistance < 5 && hoveredMusicControlAction) {
+        musicControlTarget.dispatchEvent(new CustomEvent<MusicControlAction>(MUSIC_CONTROL_EVENT, { detail: hoveredMusicControlAction }));
+      } else if (movedDistance < 5 && href) {
+        handleSceneNavigation(href);
+      }
+      canvas.style.cursor = href || hoveredMusicControlAction ? "pointer" : "grab";
     };
 
     const getDefaultCameraTarget = () => new THREE.Vector3(
@@ -2239,6 +2322,49 @@ function NeonHeroScene({ active, onNavigate, startScene = true, onLoadProgress, 
       canvas.dataset.musicCssPanel = `${musicCssObject.position.x.toFixed(3)},${musicCssObject.position.y.toFixed(3)},${musicCssObject.position.z.toFixed(3)},${panelScale.toFixed(5)}`;
     };
 
+    const updateMusicControlOverlay = () => {
+      const shouldShowOverlay = musicCssObject.visible && musicCssElement.dataset.visible === "true";
+      musicControlOverlay.dataset.visible = shouldShowOverlay ? "true" : "false";
+      if (!shouldShowOverlay || !panelStyleHost) {
+        musicControlOverlayButtons.forEach((button) => {
+          button.hidden = true;
+        });
+        return;
+      }
+      const hostRect = panelStyleHost.getBoundingClientRect();
+      const controlRects = musicControlOverlayButtons.map((overlayButton) => {
+        const action = overlayButton.dataset.musicControl as MusicControlAction | undefined;
+        const sourceButton = action ? musicCssElement.querySelector<HTMLElement>(`[data-music-control="${action}"]`) : null;
+        if (!sourceButton) {
+          return { overlayButton, action, rect: null };
+        }
+        return { overlayButton, action, rect: sourceButton.getBoundingClientRect() };
+      });
+      const visibleRects = controlRects.filter((item): item is typeof item & { rect: DOMRect } => Boolean(item.rect));
+      visibleRects.forEach((item, index) => {
+        const { overlayButton, rect } = item;
+        const previousRect = visibleRects[index - 1]?.rect;
+        const nextRect = visibleRects[index + 1]?.rect;
+        const leftBound = previousRect
+          ? (previousRect.left + previousRect.width / 2 + rect.left + rect.width / 2) / 2
+          : rect.left - 8;
+        const rightBound = nextRect
+          ? (rect.left + rect.width / 2 + nextRect.left + nextRect.width / 2) / 2
+          : rect.right + 8;
+        const visualButtonYOffset = 134;
+        const hitPaddingTop = 12;
+        const hitPaddingBottom = 18;
+        overlayButton.hidden = false;
+        overlayButton.style.left = `${leftBound - hostRect.left}px`;
+        overlayButton.style.top = `${rect.top - hostRect.top + visualButtonYOffset - hitPaddingTop}px`;
+        overlayButton.style.width = `${rightBound - leftBound}px`;
+        overlayButton.style.height = `${rect.height + hitPaddingTop + hitPaddingBottom}px`;
+      });
+      controlRects.forEach(({ overlayButton, rect }) => {
+        if (!rect) overlayButton.hidden = true;
+      });
+    };
+
     const updateCameraTransition = (now: number) => {
       if (!cameraTransition) return false;
       const progress = Math.min(1, (now - cameraTransition.startedAt) / cameraTransition.duration);
@@ -2357,6 +2483,7 @@ function NeonHeroScene({ active, onNavigate, startScene = true, onLoadProgress, 
       }
       renderer.render(scene, camera);
       cssRenderer.render(cssScene, camera);
+      updateMusicControlOverlay();
       animationFrame = window.requestAnimationFrame(render);
     }
 
@@ -2384,6 +2511,7 @@ function NeonHeroScene({ active, onNavigate, startScene = true, onLoadProgress, 
       updateMusicCssPanelObject();
       renderer.render(scene, camera);
       cssRenderer.render(cssScene, camera);
+      updateMusicControlOverlay();
     };
     const observer = new ResizeObserver(resize);
     observer.observe(canvas);
@@ -2403,6 +2531,10 @@ function NeonHeroScene({ active, onNavigate, startScene = true, onLoadProgress, 
         mesh.visible = true;
       });
       musicCssElement.removeEventListener("click", forwardMusicCssClick, true);
+      musicControlOverlay.removeEventListener("click", handleMusicControlOverlayClick, true);
+      musicControlOverlayButtons.forEach((button) => button.removeEventListener("click", handleMusicControlOverlayClick, true));
+      musicControlOverlayButtons.forEach((button) => button.remove());
+      musicControlOverlay.remove();
       const rootToUnmount = musicCssRoot;
       musicCssRoot = null;
       window.setTimeout(() => rootToUnmount?.unmount(), 0);
@@ -2428,7 +2560,7 @@ function NeonHeroScene({ active, onNavigate, startScene = true, onLoadProgress, 
   return <canvas ref={canvasRef} className="neon-scene-canvas" role="img" aria-label="霓虹博客 3D 场景" />;
 }
 
-function MusicMachinePlayer({ onClose, sceneEmbedded = false, sceneActive = true }: { onClose: () => void; sceneEmbedded?: boolean; sceneActive?: boolean }) {
+function MusicMachinePlayer({ onClose, sceneEmbedded = false, sceneActive = true, controlTarget }: { onClose: () => void; sceneEmbedded?: boolean; sceneActive?: boolean; controlTarget?: EventTarget }) {
   const [musicConfig, setMusicConfig] = useState<MusicPageSettings>(defaultMusicSettings);
   const [musicUsingMock, setMusicUsingMock] = useState(false);
   const [activeTrackIndex, setActiveTrackIndex] = useState(0);
@@ -2455,19 +2587,13 @@ function MusicMachinePlayer({ onClose, sceneEmbedded = false, sceneActive = true
     audioRef.current?.pause();
   }, []);
 
-  useEffect(() => {
-    if (!sceneEmbedded || sceneActive) return;
-    audioRef.current?.pause();
-    setIsPlaying(false);
-  }, [sceneActive, sceneEmbedded]);
-
   const enabledTracks = musicConfig.tracks.filter((track) => track.enabled !== false && sanitizeAssetUrl(track.audioUrl));
-  const displayTracks = sceneEmbedded
-    ? musicConfig.tracks.filter((track) => track.enabled !== false)
-    : enabledTracks;
   const activeTrack = enabledTracks[activeTrackIndex] ?? enabledTracks[0];
   const activeCover = sanitizeAssetUrl(activeTrack?.coverUrl);
   const activeAudio = sanitizeAssetUrl(activeTrack?.audioUrl);
+  const displayTracks = sceneEmbedded
+    ? (activeTrack ? [activeTrack] : [])
+    : enabledTracks;
 
   const syncAudioSource = (audio: HTMLAudioElement, audioUrl: string) => {
     const nextSource = new URL(audioUrl, window.location.href).href;
@@ -2535,18 +2661,81 @@ function MusicMachinePlayer({ onClose, sceneEmbedded = false, sceneActive = true
     audio.play().then(() => setIsPlaying(true)).catch(() => setIsPlaying(false));
   };
 
-  const closeMusicWithSceneReturn = () => {
-    audioRef.current?.pause();
-    setIsPlaying(false);
-    onClose();
+  const runMusicControlAction = (action: MusicControlAction) => {
+    if (action === "previous") moveTrack(-1);
+    if (action === "toggle") togglePlayback();
+    if (action === "next") moveTrack(1);
   };
 
-  if (sceneEmbedded && !sceneActive) return null;
+  const getEmbeddedControlActionAt = (root: ParentNode, clientX: number, clientY: number) => {
+    const buttons = Array.from(root.querySelectorAll<HTMLElement>("[data-music-control]"));
+    const hitButton = buttons.find((button) => {
+      const rect = button.getBoundingClientRect();
+      const hitPadding = 18;
+      return (
+        clientX >= rect.left - hitPadding &&
+        clientX <= rect.right + hitPadding &&
+        clientY >= rect.top - hitPadding &&
+        clientY <= rect.bottom + hitPadding
+      );
+    });
+    const action = hitButton?.dataset.musicControl as MusicControlAction | undefined;
+    if (!hitButton || hitButton.hasAttribute("disabled") || !action) return "";
+    return action;
+  };
+
+  const handleEmbeddedControlClick = (event: React.MouseEvent<HTMLElement>) => {
+    if (!sceneEmbedded) return;
+    const target = event.target as HTMLElement | null;
+    if (target?.closest(".music-machine-screen-head") || target?.closest(".music-machine-list")) return;
+    const action = getEmbeddedControlActionAt(event.currentTarget, event.clientX, event.clientY);
+    if (!action) return;
+    event.preventDefault();
+    event.stopPropagation();
+    runMusicControlAction(action);
+  };
+
+  useEffect(() => {
+    if (!sceneEmbedded || !sceneActive) return;
+    const handleWindowClick = (event: MouseEvent) => {
+      const target = event.target as HTMLElement | null;
+      if (target?.closest(".music-scene-control-hotspot")) return;
+      if (target?.closest(".music-machine-screen-head") || target?.closest(".music-machine-list")) return;
+      const root = document.querySelector<HTMLElement>(".music-machine-stage.scene-embedded");
+      if (!root) return;
+      const action = getEmbeddedControlActionAt(root, event.clientX, event.clientY);
+      if (!action) return;
+      event.preventDefault();
+      event.stopPropagation();
+      event.stopImmediatePropagation();
+      runMusicControlAction(action);
+    };
+    window.addEventListener("click", handleWindowClick, true);
+    return () => window.removeEventListener("click", handleWindowClick, true);
+  }, [activeAudio, activeTrackIndex, enabledTracks.length, isPlaying, sceneActive, sceneEmbedded]);
+
+  useEffect(() => {
+    if (!controlTarget) return;
+    const handleMusicControl = (event: Event) => {
+      const action = (event as CustomEvent<MusicControlAction>).detail;
+      runMusicControlAction(action);
+    };
+    controlTarget.addEventListener(MUSIC_CONTROL_EVENT, handleMusicControl);
+    return () => controlTarget.removeEventListener(MUSIC_CONTROL_EVENT, handleMusicControl);
+  }, [activeAudio, activeTrackIndex, controlTarget, enabledTracks.length, isPlaying]);
+
+  const closeMusicWithSceneReturn = () => {
+    if (!sceneEmbedded) {
+      audioRef.current?.pause();
+      setIsPlaying(false);
+    }
+    onClose();
+  };
 
   return (
     <>
       {musicUsingMock && <span className="visually-hidden">Preview playlist</span>}
-      <section className={`music-machine-stage ${sceneEmbedded ? "scene-embedded" : ""}`} aria-label="饮料机音乐播放器">
+      {(!sceneEmbedded || sceneActive) && <section className={`music-machine-stage ${sceneEmbedded ? "scene-embedded" : ""}`} aria-label="饮料机音乐播放器" onClickCapture={handleEmbeddedControlClick}>
         <div className="music-wall-photo" aria-hidden="true" />
         <div className="music-guitar" aria-hidden="true" />
         <div className="music-machine" aria-label={musicConfig.title || "Music"}>
@@ -2578,14 +2767,14 @@ function MusicMachinePlayer({ onClose, sceneEmbedded = false, sceneActive = true
               </div>
             </div>
             <div className="music-machine-controls" aria-label="音乐控制">
-              <button className="music-control previous" data-music-control="previous" type="button" aria-label="上一首" onClick={() => moveTrack(-1)} disabled={!enabledTracks.length}><span /></button>
-              <button className={`music-control play ${isPlaying ? "playing" : ""}`} data-music-control="toggle" type="button" aria-label={isPlaying ? "暂停" : "播放"} onClick={togglePlayback} disabled={!activeAudio}><span /></button>
-              <button className="music-control next" data-music-control="next" type="button" aria-label="下一首" onClick={() => moveTrack(1)} disabled={!enabledTracks.length}><span /></button>
+              <button className="music-control previous" data-music-control="previous" type="button" aria-label="上一首" onClick={() => runMusicControlAction("previous")} disabled={!enabledTracks.length}><span /></button>
+              <button className={`music-control play ${isPlaying ? "playing" : ""}`} data-music-control="toggle" type="button" aria-label={isPlaying ? "暂停" : "播放"} onClick={() => runMusicControlAction("toggle")} disabled={!activeAudio}><span /></button>
+              <button className="music-control next" data-music-control="next" type="button" aria-label="下一首" onClick={() => runMusicControlAction("next")} disabled={!enabledTracks.length}><span /></button>
             </div>
           </div>
           <div className="music-machine-base" aria-hidden="true" />
         </div>
-      </section>
+      </section>}
       <audio ref={audioRef} preload="metadata" onPlay={() => setIsPlaying(true)} onPause={() => setIsPlaying(false)} onEnded={() => setIsPlaying(false)} />
     </>
   );
@@ -5382,6 +5571,49 @@ type CategoryFormState = {
   background: string;
 };
 
+const CATEGORY_ICON_PRESETS = [
+  ["ai", "AI"],
+  ["sparkles", "灵感"],
+  ["code", "前端"],
+  ["server", "后端"],
+  ["database", "数据"],
+  ["cloud", "运维"],
+  ["book", "学习"],
+  ["rocket", "项目"],
+  ["tool", "工具"],
+  ["chat", "随笔"],
+  ["file", "文档"],
+  ["folder", "归档"],
+] as const;
+
+const CATEGORY_THEME_PRESETS = [
+  {
+    label: "AI 青紫",
+    themeColor: "#72f7ff",
+    background: "linear-gradient(135deg, rgba(0,229,255,.2), rgba(124,58,237,.18))",
+  },
+  {
+    label: "后端蓝",
+    themeColor: "#00e5ff",
+    background: "linear-gradient(135deg, rgba(0,229,255,.2), rgba(45,92,255,.1))",
+  },
+  {
+    label: "运维绿",
+    themeColor: "#5dffba",
+    background: "linear-gradient(135deg, rgba(91,255,186,.18), rgba(0,229,255,.08))",
+  },
+  {
+    label: "数据库紫",
+    themeColor: "#9d68ff",
+    background: "linear-gradient(135deg, rgba(157,104,255,.2), rgba(0,229,255,.08))",
+  },
+  {
+    label: "项目琥珀",
+    themeColor: "#ffc65a",
+    background: "linear-gradient(135deg, rgba(255,198,90,.18), rgba(124,58,237,.12))",
+  },
+] as const;
+
 function createEmptyCategoryForm(): CategoryFormState {
   return {
     name: "",
@@ -5395,15 +5627,16 @@ function createEmptyCategoryForm(): CategoryFormState {
 }
 
 function categoryToForm(item: AdminCategoryItem): CategoryFormState {
+  const visual = getCategoryVisual(item);
   return {
     id: item.id,
     name: item.name,
     slug: item.slug,
-    description: item.description ?? "",
-    icon: item.icon ?? "folder",
-    cover: item.cover ?? "",
-    themeColor: item.themeColor ?? "#00e5ff",
-    background: item.background ?? "linear-gradient(135deg, rgba(0,229,255,.18), rgba(157,104,255,.08))",
+    description: visual.description ?? "",
+    icon: visual.icon ?? "folder",
+    cover: visual.cover ?? "",
+    themeColor: visual.themeColor ?? "#00e5ff",
+    background: visual.background ?? "linear-gradient(135deg, rgba(0,229,255,.18), rgba(157,104,255,.08))",
   };
 }
 
@@ -5987,6 +6220,14 @@ function AdminPlaceholder({ page }: { page: string }) {
     setCategoryForm((current) => ({ ...current, [key]: value }));
   }
 
+  function applyCategoryThemePreset(preset: typeof CATEGORY_THEME_PRESETS[number]) {
+    setCategoryForm((current) => ({
+      ...current,
+      themeColor: preset.themeColor,
+      background: preset.background,
+    }));
+  }
+
   function createCategory() {
     setCategoryForm(createEmptyCategoryForm());
     setCategoryFormOpen(true);
@@ -6426,10 +6667,26 @@ function AdminPlaceholder({ page }: { page: string }) {
               <label>Slug<input value={categoryForm.slug} onChange={(event) => updateCategoryForm("slug", event.target.value)} placeholder="留空时后端自动生成" /></label>
               <label>主题颜色<span className="category-color-field"><input type="color" value={validHexColor(categoryForm.themeColor, "#00e5ff")} onChange={(event) => updateCategoryForm("themeColor", event.target.value)} /><input value={categoryForm.themeColor} onChange={(event) => updateCategoryForm("themeColor", event.target.value)} placeholder="#00e5ff" /></span></label>
               <label className="wide">分类 icon<input value={categoryForm.icon} onChange={(event) => updateCategoryForm("icon", event.target.value)} placeholder="server / database / svg / 图片地址" /></label>
+              <div className="category-icon-preset-list wide" aria-label="分类 icon 预设">
+                {CATEGORY_ICON_PRESETS.map(([icon, label]) => (
+                  <button key={icon} type="button" className={categoryForm.icon === icon ? "active" : ""} onClick={() => updateCategoryForm("icon", icon)} aria-pressed={categoryForm.icon === icon}>
+                    <CategoryIcon icon={icon} label={label} />
+                    <span>{label}</span>
+                  </button>
+                ))}
+              </div>
               <label className="upload-inline">上传 icon<input type="file" accept="image/*" onChange={(event) => uploadCategoryAsset("icon", event.target.files?.[0])} /><span>{categoryUploadingField === "icon" ? "上传中..." : "选择图片"}</span></label>
-              <label className="wide">分类封面<input value={categoryForm.cover} onChange={(event) => updateCategoryForm("cover", event.target.value)} placeholder="/assets/backend-cover.png 或 /uploads/..." /></label>
+              <label className="wide">Hero 背景图 / 分类封面<input value={categoryForm.cover} onChange={(event) => updateCategoryForm("cover", event.target.value)} placeholder="/assets/backend-cover.png 或 /uploads/..." /></label>
               <label className="upload-inline">上传封面<input type="file" accept="image/*" onChange={(event) => uploadCategoryAsset("cover", event.target.files?.[0])} /><span>{categoryUploadingField === "cover" ? "上传中..." : "选择图片"}</span></label>
-              <label className="wide">背景样式<input value={categoryForm.background} onChange={(event) => updateCategoryForm("background", event.target.value)} placeholder="linear-gradient(135deg, ...)" /></label>
+              <label className="wide">背景渐变 / 玻璃背景<input value={categoryForm.background} onChange={(event) => updateCategoryForm("background", event.target.value)} placeholder="linear-gradient(135deg, ...)" /></label>
+              <div className="category-theme-preset-list wide" aria-label="分类背景预设">
+                {CATEGORY_THEME_PRESETS.map((preset) => (
+                  <button key={preset.label} type="button" style={categoryVisualStyle({ id: 0, name: preset.label, slug: preset.label, postsCount: 0, themeColor: preset.themeColor, background: preset.background })} onClick={() => applyCategoryThemePreset(preset)}>
+                    <span />
+                    {preset.label}
+                  </button>
+                ))}
+              </div>
               <label className="wide">描述<textarea value={categoryForm.description} onChange={(event) => updateCategoryForm("description", event.target.value)} placeholder="分类描述会展示在前台 Hero 区域。" /></label>
               <div className="category-config-preview" style={categoryVisualStyle({
                 id: categoryForm.id ?? 0,
@@ -6447,6 +6704,7 @@ function AdminPlaceholder({ page }: { page: string }) {
                   <b>{categoryForm.name || "分类预览"}</b>
                   <span>{categoryForm.description || "这里会显示分类描述。"}</span>
                 </div>
+                {sanitizeAssetUrl(categoryForm.cover) && <img className="category-config-cover" src={sanitizeAssetUrl(categoryForm.cover)} alt="" loading="lazy" />}
               </div>
             </div>
           </section>

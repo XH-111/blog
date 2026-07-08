@@ -73,10 +73,58 @@ export const defaultCategoryVisuals: Record<string, VisualDefaults> = {
     themeColor: "#ff8df8",
     description: "记录技术之外的思考、复盘、成长和日常灵感。",
   },
+  "AI 工程": {
+    icon: "ai",
+    cover: "/assets/home-hero-scene.png",
+    background: "linear-gradient(135deg, rgba(0,229,255,.2), rgba(124,58,237,.18))",
+    themeColor: "#72f7ff",
+    description: "按发布时间浏览 AI 工程、提示词、智能体与工具链实践。",
+  },
+  "AI 实践": {
+    icon: "sparkles",
+    cover: "/assets/article-cover.png",
+    background: "linear-gradient(135deg, rgba(139,92,246,.22), rgba(0,229,255,.1))",
+    themeColor: "#9d68ff",
+    description: "记录 AI 编程、模型应用和真实项目中的落地经验。",
+  },
+  学习记录: {
+    icon: "book",
+    cover: "/assets/editor-cover.png",
+    background: "linear-gradient(135deg, rgba(34,211,238,.16), rgba(91,255,186,.1))",
+    themeColor: "#5dffba",
+    description: "整理学习路线、读书笔记、踩坑记录和阶段性复盘。",
+  },
+  技术笔记: {
+    icon: "file",
+    cover: "/assets/article-cover.png",
+    background: "linear-gradient(135deg, rgba(0,229,255,.14), rgba(119,140,255,.1))",
+    themeColor: "#00e5ff",
+    description: "沉淀开发过程中的关键知识点、问题定位和实践经验。",
+  },
+  项目复盘: {
+    icon: "rocket",
+    cover: "/assets/about-project-blogcore.png",
+    background: "linear-gradient(135deg, rgba(255,198,90,.18), rgba(124,58,237,.12))",
+    themeColor: "#ffc65a",
+    description: "复盘项目从设计、开发到上线维护的关键决策与经验。",
+  },
 };
 
+function inferCategoryDefaults(category: AdminCategoryItem) {
+  const text = `${category.name} ${category.slug}`.toLowerCase();
+  if (/ai|人工智能|大模型|智能体|机器学习/i.test(text)) return defaultCategoryVisuals["AI 工程"];
+  if (/前端|frontend|react|vue/i.test(text)) return defaultCategoryVisuals.前端开发;
+  if (/后端|backend|server|node|java/i.test(text)) return defaultCategoryVisuals.后端开发;
+  if (/运维|部署|devops|docker|linux|k8s/i.test(text)) return defaultCategoryVisuals.运维部署;
+  if (/数据|database|mysql|postgres|sql/i.test(text)) return defaultCategoryVisuals.数据库;
+  if (/工具|教程|tool/i.test(text)) return defaultCategoryVisuals.工具教程;
+  if (/学习|读书|study|learn/i.test(text)) return defaultCategoryVisuals.学习记录;
+  if (/项目|复盘|project/i.test(text)) return defaultCategoryVisuals.项目复盘;
+  return defaultCategoryVisuals.全部文章;
+}
+
 export function getCategoryVisual(category: AdminCategoryItem): CategoryVisual {
-  const defaults = defaultCategoryVisuals[category.name] ?? defaultCategoryVisuals[category.slug] ?? defaultCategoryVisuals.全部文章;
+  const defaults = defaultCategoryVisuals[category.name] ?? defaultCategoryVisuals[category.slug] ?? inferCategoryDefaults(category);
   return {
     ...category,
     icon: category.icon || defaults.icon,

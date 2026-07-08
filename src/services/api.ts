@@ -699,7 +699,9 @@ type BackendCategory = {
   background?: string;
   theme_color?: string;
   themeColor?: string;
+  postsCount?: number | string;
   posts_count?: number | string;
+  updatedAt?: string;
   updated_at?: string;
 };
 
@@ -946,8 +948,8 @@ function mapBackendCategory(item: BackendCategory): AdminCategoryItem {
     cover: resolveBackendAssetUrl(item.cover),
     background: item.background,
     themeColor: item.themeColor ?? item.theme_color,
-    postsCount: toNumber(item.posts_count),
-    updatedAt: item.updated_at,
+    postsCount: toNumber(item.postsCount ?? item.posts_count),
+    updatedAt: item.updatedAt ?? item.updated_at,
   };
 }
 

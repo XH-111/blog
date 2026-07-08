@@ -53,6 +53,26 @@ const iconPaths: Record<string, ReactNode> = {
       <path d="M16 3v6h6M10 14h8M10 18h6" />
     </>
   ),
+  ai: (
+    <>
+      <rect x="7" y="7" width="14" height="14" rx="3" />
+      <path d="M10 3v4M14 3v4M18 3v4M10 21v4M14 21v4M18 21v4M3 10h4M3 14h4M3 18h4M21 10h4M21 14h4M21 18h4" />
+      <path d="M11 17h1l2-6 2 6h1M12.5 15h3" />
+    </>
+  ),
+  book: (
+    <>
+      <path d="M6 5.5A2.5 2.5 0 0 1 8.5 3H22v20H8.5A2.5 2.5 0 0 1 6 20.5v-15Z" />
+      <path d="M6 19.5A2.5 2.5 0 0 1 8.5 17H22M10 8h7M10 12h5" />
+    </>
+  ),
+  rocket: (
+    <>
+      <path d="M14 3c4 1 7 4 8 8l-5 5-5-5 5-5Z" />
+      <path d="m12 11-6 2-2 6 6-2M17 16l-2 6-6 2 2-6" />
+      <circle cx="17" cy="8" r="1.5" />
+    </>
+  ),
   search: (
     <>
       <circle cx="12" cy="12" r="7" />
@@ -74,6 +94,9 @@ function iconKey(value = "") {
   if (key === "devops") return "cloud";
   if (key === "tools") return "tool";
   if (key === "notes") return "chat";
+  if (key === "ai-engineering" || key === "ai") return "ai";
+  if (key === "learning" || key === "study") return "book";
+  if (key === "project" || key === "projects") return "rocket";
   return key || "folder";
 }
 
