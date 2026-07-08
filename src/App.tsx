@@ -6,6 +6,11 @@ import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { DRACOLoader } from "three/examples/jsm/loaders/DRACOLoader.js";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { CSS3DObject, CSS3DRenderer } from "three/examples/jsm/renderers/CSS3DRenderer.js";
+import ArticleCard from "./components/ArticleCard";
+import CategoryHero from "./components/CategoryHero";
+import CategoryIcon from "./components/CategoryIcon";
+import CategorySidebar, { type CategoryListMode } from "./components/CategorySidebar";
+import { categoryVisualStyle, getCategoryVisual } from "./components/categoryVisuals";
 import type { ClipboardEvent, PointerEvent, WheelEvent } from "react";
 import type { AboutPageSettings, AdminAiReviewFocus, AdminAiSettings, AdminAiStatus, AdminAiTaskItem, AdminAiTool, AdminCategoryItem, AdminCommentItem, AdminDashboardData, AdminMediaItem, AdminMessageItem, AdminPostListItem, AdminPostVersionItem, AdminSearchItem, AdminTagItem, HomeEntryCardSetting, HomePageSettings, ImportPreview, MusicPageSettings, MusicTrackItem, PublicCommentItem, PublicSiteStats, SiteSettings } from "./services/api";
 import type { Article, Message } from "./types";
@@ -388,18 +393,20 @@ type NeonHeroSceneProps = {
   onNavigate: (url: string) => void;
   startScene?: boolean;
   onLoadProgress?: (snapshot: HeroLoadSnapshot) => void;
+  homeReturnSignal?: number;
   musicReturnSignal?: number;
   musicSceneOpen?: boolean;
   onMusicSceneOpen?: () => void;
   onMusicSceneClose?: () => void;
 };
 
-function NeonHeroScene({ active, onNavigate, startScene = true, onLoadProgress, musicReturnSignal = 0, musicSceneOpen = false, onMusicSceneOpen, onMusicSceneClose }: NeonHeroSceneProps) {
+function NeonHeroScene({ active, onNavigate, startScene = true, onLoadProgress, homeReturnSignal = 0, musicReturnSignal = 0, musicSceneOpen = false, onMusicSceneOpen, onMusicSceneClose }: NeonHeroSceneProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const activeRef = useRef(active && startScene);
   const startSceneRef = useRef(startScene);
   const navigateRef = useRef(onNavigate);
   const onLoadProgressRef = useRef(onLoadProgress);
+  const homeReturnSignalRef = useRef(homeReturnSignal);
   const musicReturnSignalRef = useRef(musicReturnSignal);
   const musicSceneOpenRef = useRef(musicSceneOpen);
   const onMusicSceneOpenRef = useRef(onMusicSceneOpen);
@@ -431,6 +438,10 @@ function NeonHeroScene({ active, onNavigate, startScene = true, onLoadProgress, 
   useEffect(() => {
     onLoadProgressRef.current = onLoadProgress;
   }, [onLoadProgress]);
+
+  useEffect(() => {
+    homeReturnSignalRef.current = homeReturnSignal;
+  }, [homeReturnSignal]);
 
   useEffect(() => {
     musicReturnSignalRef.current = musicReturnSignal;
@@ -590,7 +601,7 @@ function NeonHeroScene({ active, onNavigate, startScene = true, onLoadProgress, 
     const articleCategoryPalette = [0x72f7ff, 0xff6bf5, 0xffc65a, 0x9dff55, 0x9b7cff, 0xff7a59, 0x5cf1c8, 0xf2fbff];
     const frontNormal = new THREE.Vector3(0, 0, 1);
     const articleOutward = new THREE.Vector3(0, 0, 1);
-    type SceneTransitionKind = "music" | "article" | "article-category" | "music-return";
+    type SceneTransitionKind = "music" | "article" | "article-category" | "home-return" | "music-return";
     type ArticleBottleCategory = Pick<AdminCategoryItem, "id" | "name" | "slug" | "icon" | "postsCount"> & { href: string; isAll?: boolean };
     let hasArticleFocusTarget = false;
     let hasMusicFocusTarget = false;
@@ -598,6 +609,8 @@ function NeonHeroScene({ active, onNavigate, startScene = true, onLoadProgress, 
     let hasHoveredPoint = false;
     let articleVendingOpen = false;
     let navigationTimeout = 0;
+    let pendingHomeReturnPullback = false;
+    let handledHomeReturnSignal = homeReturnSignalRef.current;
     let pendingMusicReturnPullback = routeQuery().get(HERO_RETURN_QUERY_KEY) === "music";
     let handledMusicReturnSignal = musicReturnSignalRef.current;
     let musicReturnView: { position: THREE.Vector3; target: THREE.Vector3 } | null = null;
@@ -640,17 +653,24 @@ function NeonHeroScene({ active, onNavigate, startScene = true, onLoadProgress, 
     };
     musicCssElement.addEventListener("click", forwardMusicCssClick, true);
     let musicCssRoot: Root | null = createRoot(musicCssElement);
-    musicCssRoot.render(
-      <MusicMachinePlayer
-        onClose={() => {
-          musicCssClosedByUser = true;
-          musicCssObject.visible = false;
-          musicCssElement.dataset.visible = "false";
-          onMusicSceneCloseRef.current?.();
-        }}
-        sceneEmbedded
-      />
-    );
+    let musicCssPlayerActive: boolean | null = null;
+    const syncMusicCssPlayer = (sceneActive: boolean) => {
+      if (!musicCssRoot || musicCssPlayerActive === sceneActive) return;
+      musicCssPlayerActive = sceneActive;
+      musicCssRoot.render(
+        <MusicMachinePlayer
+          onClose={() => {
+            musicCssClosedByUser = true;
+            musicCssObject.visible = false;
+            musicCssElement.dataset.visible = "false";
+            onMusicSceneCloseRef.current?.();
+          }}
+          sceneActive={sceneActive}
+          sceneEmbedded
+        />
+      );
+    };
+    syncMusicCssPlayer(false);
     let cameraTransition: {
       mode: "focus" | "return";
       kind: SceneTransitionKind;
@@ -1377,7 +1397,7 @@ function NeonHeroScene({ active, onNavigate, startScene = true, onLoadProgress, 
       const compactName = compactReferenceName(name);
       if (compactName === "neontv" || compactName === "tvscreen") return "/about";
       if (compactName === "neonvending" || compactName === "vendingscreen" || compactName.startsWith("mesh1848869498")) return "/posts";
-      if (compactName === "arcademiddle" || compactName === "arcadeneon" || compactName === "arcadescreen" || compactName.startsWith("gamemachine")) return "/music";
+      if (compactName === "arcademiddle" || compactName === "arcadeneon" || compactName === "arcadescreen" || compactName === "leftbtn" || compactName === "stopbtn" || compactName === "rightbtn" || compactName.startsWith("gamemachine")) return "/music";
       return "";
     };
 
@@ -2004,12 +2024,16 @@ function NeonHeroScene({ active, onNavigate, startScene = true, onLoadProgress, 
       canvas.style.cursor = href ? "pointer" : "grab";
     };
 
-    const getDefaultCameraTarget = () => new THREE.Vector3(compactScene ? 0.16 : 0, compactScene ? 0.72 : 0.88, 0);
+    const getDefaultCameraTarget = () => new THREE.Vector3(
+      compactScene ? 0.28 : 0.22,
+      compactScene ? 0.82 : 0.98,
+      compactScene ? -0.06 : -0.12
+    );
 
     const getDefaultCameraPosition = () => new THREE.Vector3(
-      compactScene ? 0.18 : 0,
-      compactScene ? 3.88 : 4.18,
-      compactScene ? 8.22 : 7.82
+      compactScene ? 1.16 : 1.38,
+      compactScene ? 4.28 : 4.76,
+      compactScene ? 9.28 : 9.62
     );
 
     const setDefaultCameraTarget = () => {
@@ -2020,6 +2044,35 @@ function NeonHeroScene({ active, onNavigate, startScene = true, onLoadProgress, 
       controls.target.copy(getDefaultCameraTarget());
       camera.position.copy(getDefaultCameraPosition());
       controls.update();
+    };
+
+    const startHomeReturnPullbackIfReady = () => {
+      if (!pendingHomeReturnPullback) return;
+      if (cameraTransition) {
+        canvas.dataset.heroReturnStatus = "waiting-transition";
+        return;
+      }
+      pendingHomeReturnPullback = false;
+      canvas.dataset.heroReturnPending = "";
+      canvas.dataset.heroReturnStatus = "home-pullback-started";
+      closeArticleVendingScene();
+      musicCssClosedByUser = false;
+      const homePosition = getDefaultCameraPosition();
+      const homeTarget = getDefaultCameraTarget();
+
+      if (reducedMotion) {
+        resetOrbitDistanceLimits();
+        camera.position.copy(homePosition);
+        controls.target.copy(homeTarget);
+        controls.update();
+        canvas.dataset.cameraTransition = "home-return-complete";
+        canvas.dataset.heroReturnStatus = "complete";
+        return;
+      }
+
+      cameraTransition = createReturnCameraTransition("home-return", camera.position, controls.target, homePosition, homeTarget, 1450);
+      canvas.dataset.cameraTransition = "home-return-pullback";
+      canvas.dataset.cameraTransitionProgress = "0";
     };
 
     const getMusicCloseView = () => {
@@ -2113,6 +2166,14 @@ function NeonHeroScene({ active, onNavigate, startScene = true, onLoadProgress, 
       canvas.dataset.heroReturnStatus = "waiting-focus";
     };
 
+    const consumeHomeReturnSignal = () => {
+      if (homeReturnSignalRef.current === handledHomeReturnSignal) return;
+      handledHomeReturnSignal = homeReturnSignalRef.current;
+      pendingHomeReturnPullback = true;
+      canvas.dataset.heroReturnPending = "home";
+      canvas.dataset.heroReturnStatus = "waiting-default-view";
+    };
+
     const syncControlTelemetry = () => {
       const distance = controls.getDistance().toFixed(2);
       const azimuth = controls.getAzimuthalAngle().toFixed(3);
@@ -2159,6 +2220,7 @@ function NeonHeroScene({ active, onNavigate, startScene = true, onLoadProgress, 
     const updateMusicCssPanelObject = () => {
       const isMusicOpen = musicSceneOpenRef.current || canvas.dataset.cameraTransition === "music-open";
       const shouldShowPanel = isMusicOpen && !musicCssClosedByUser && hasMusicPanelAnchor;
+      syncMusicCssPlayer(shouldShowPanel);
       musicCssObject.visible = shouldShowPanel;
       musicCssElement.dataset.visible = shouldShowPanel ? "true" : "false";
       cssRenderer.domElement.dataset.musicPanel = shouldShowPanel ? "open" : "hidden";
@@ -2227,6 +2289,13 @@ function NeonHeroScene({ active, onNavigate, startScene = true, onLoadProgress, 
           navigateRef.current(targetHref);
           return true;
         }
+        if (cameraTransition.kind === "home-return") {
+          resetOrbitDistanceLimits();
+          canvas.dataset.cameraTransition = "home-return-complete";
+          canvas.dataset.heroReturnStatus = "complete";
+          cameraTransition = null;
+          return true;
+        }
         if (cameraTransition.kind === "music-return") {
           resetOrbitDistanceLimits();
           canvas.dataset.cameraTransition = "music-return-complete";
@@ -2260,7 +2329,9 @@ function NeonHeroScene({ active, onNavigate, startScene = true, onLoadProgress, 
       const delta = (now - lastRenderAt) / 1000;
       lastRenderAt = now;
       controls.enabled = activeRef.current && !cameraTransition;
+      consumeHomeReturnSignal();
       consumeMusicReturnSignal();
+      startHomeReturnPullbackIfReady();
       startMusicReturnPullbackIfReady();
       if (!updateCameraTransition(now)) controls.update();
       syncControlTelemetry();
@@ -2304,7 +2375,7 @@ function NeonHeroScene({ active, onNavigate, startScene = true, onLoadProgress, 
       if (!hasSetInitialView) {
         applyInitialCameraView();
         hasSetInitialView = true;
-      } else if (!cameraTransition && !["music-open", "music-return-complete"].includes(canvas.dataset.cameraTransition || "")) {
+      } else if (!cameraTransition && !["home-return-complete", "music-open", "music-return-complete"].includes(canvas.dataset.cameraTransition || "")) {
         setDefaultCameraTarget();
         controls.update();
       }
@@ -2357,7 +2428,7 @@ function NeonHeroScene({ active, onNavigate, startScene = true, onLoadProgress, 
   return <canvas ref={canvasRef} className="neon-scene-canvas" role="img" aria-label="霓虹博客 3D 场景" />;
 }
 
-function MusicMachinePlayer({ onClose, sceneEmbedded = false }: { onClose: () => void; sceneEmbedded?: boolean }) {
+function MusicMachinePlayer({ onClose, sceneEmbedded = false, sceneActive = true }: { onClose: () => void; sceneEmbedded?: boolean; sceneActive?: boolean }) {
   const [musicConfig, setMusicConfig] = useState<MusicPageSettings>(defaultMusicSettings);
   const [musicUsingMock, setMusicUsingMock] = useState(false);
   const [activeTrackIndex, setActiveTrackIndex] = useState(0);
@@ -2380,22 +2451,76 @@ function MusicMachinePlayer({ onClose, sceneEmbedded = false }: { onClose: () =>
     };
   }, []);
 
-  const enabledTracks = musicConfig.tracks.filter((track) => track.enabled !== false);
+  useEffect(() => () => {
+    audioRef.current?.pause();
+  }, []);
+
+  useEffect(() => {
+    if (!sceneEmbedded || sceneActive) return;
+    audioRef.current?.pause();
+    setIsPlaying(false);
+  }, [sceneActive, sceneEmbedded]);
+
+  const enabledTracks = musicConfig.tracks.filter((track) => track.enabled !== false && sanitizeAssetUrl(track.audioUrl));
+  const displayTracks = sceneEmbedded
+    ? musicConfig.tracks.filter((track) => track.enabled !== false)
+    : enabledTracks;
   const activeTrack = enabledTracks[activeTrackIndex] ?? enabledTracks[0];
   const activeCover = sanitizeAssetUrl(activeTrack?.coverUrl);
   const activeAudio = sanitizeAssetUrl(activeTrack?.audioUrl);
+
+  const syncAudioSource = (audio: HTMLAudioElement, audioUrl: string) => {
+    const nextSource = new URL(audioUrl, window.location.href).href;
+    if (audio.src === nextSource) return;
+    audio.src = audioUrl;
+    audio.load();
+  };
+
+  const playTrackAt = (index: number) => {
+    const track = enabledTracks[index];
+    const audioUrl = sanitizeAssetUrl(track?.audioUrl);
+    setActiveTrackIndex(index);
+    const audio = audioRef.current;
+    if (!audio || !audioUrl) {
+      audio?.pause();
+      setIsPlaying(false);
+      return;
+    }
+    syncAudioSource(audio, audioUrl);
+    audio.play().then(() => setIsPlaying(true)).catch(() => setIsPlaying(false));
+  };
+
+  const playDisplayTrack = (track: MusicTrackItem) => {
+    const nextIndex = enabledTracks.indexOf(track);
+    if (nextIndex < 0) return;
+    playTrackAt(nextIndex);
+  };
 
   useEffect(() => {
     if (activeTrackIndex >= enabledTracks.length) setActiveTrackIndex(0);
   }, [activeTrackIndex, enabledTracks.length]);
 
   useEffect(() => {
-    setIsPlaying(false);
+    const audio = audioRef.current;
+    if (!audio) return;
+    if (!activeAudio) {
+      audio.pause();
+      audio.removeAttribute("src");
+      audio.load();
+      setIsPlaying(false);
+      return;
+    }
+    syncAudioSource(audio, activeAudio);
   }, [activeAudio]);
 
   const moveTrack = (direction: -1 | 1) => {
     if (!enabledTracks.length) return;
-    setActiveTrackIndex((current) => (current + direction + enabledTracks.length) % enabledTracks.length);
+    const nextIndex = (activeTrackIndex + direction + enabledTracks.length) % enabledTracks.length;
+    if (isPlaying) {
+      playTrackAt(nextIndex);
+    } else {
+      setActiveTrackIndex(nextIndex);
+    }
   };
 
   const togglePlayback = () => {
@@ -2406,6 +2531,7 @@ function MusicMachinePlayer({ onClose, sceneEmbedded = false }: { onClose: () =>
       setIsPlaying(false);
       return;
     }
+    syncAudioSource(audio, activeAudio);
     audio.play().then(() => setIsPlaying(true)).catch(() => setIsPlaying(false));
   };
 
@@ -2414,6 +2540,8 @@ function MusicMachinePlayer({ onClose, sceneEmbedded = false }: { onClose: () =>
     setIsPlaying(false);
     onClose();
   };
+
+  if (sceneEmbedded && !sceneActive) return null;
 
   return (
     <>
@@ -2431,13 +2559,14 @@ function MusicMachinePlayer({ onClose, sceneEmbedded = false }: { onClose: () =>
                 <button type="button" aria-label="返回首页" onClick={closeMusicWithSceneReturn}>×</button>
               </header>
               <div className="music-machine-list">
-                {enabledTracks.length ? enabledTracks.map((track, index) => {
+                {displayTracks.length ? displayTracks.map((track, index) => {
                   const cover = sanitizeAssetUrl(track.coverUrl);
                   const audio = sanitizeAssetUrl(track.audioUrl);
                   const isActive = activeTrack === track;
                   const displayArtist = track.artist || track.album || track.note || musicConfig.subtitle || "Playlist";
+                  const playable = Boolean(audio);
                   return (
-                    <button key={`${track.title}-${track.artist}-${track.audioUrl}-${index}`} className={isActive ? "active" : ""} type="button" onClick={() => setActiveTrackIndex(index)}>
+                    <button key={`${track.title}-${track.artist}-${track.audioUrl}-${index}`} className={isActive ? "active" : ""} type="button" onClick={() => playDisplayTrack(track)} disabled={!playable}>
                       <span className={`music-track-cover ${cover ? "has-cover" : ""}`} style={cover ? { backgroundImage: `url(${cover})` } : undefined}>
                         {!cover && (track.title || "M").slice(0, 1)}
                       </span>
@@ -2445,28 +2574,30 @@ function MusicMachinePlayer({ onClose, sceneEmbedded = false }: { onClose: () =>
                       <em>{track.duration || (audio ? "" : "OFF")}</em>
                     </button>
                   );
-                }) : <p className="music-machine-empty">No tracks</p>}
+                }) : <p className="music-machine-empty">No audio configured</p>}
               </div>
             </div>
             <div className="music-machine-controls" aria-label="音乐控制">
-              <button className="music-control previous" type="button" aria-label="上一首" onClick={() => moveTrack(-1)} disabled={!enabledTracks.length}><span /></button>
-              <button className={`music-control play ${isPlaying ? "playing" : ""}`} type="button" aria-label={isPlaying ? "暂停" : "播放"} onClick={togglePlayback} disabled={!activeAudio}><span /></button>
-              <button className="music-control next" type="button" aria-label="下一首" onClick={() => moveTrack(1)} disabled={!enabledTracks.length}><span /></button>
+              <button className="music-control previous" data-music-control="previous" type="button" aria-label="上一首" onClick={() => moveTrack(-1)} disabled={!enabledTracks.length}><span /></button>
+              <button className={`music-control play ${isPlaying ? "playing" : ""}`} data-music-control="toggle" type="button" aria-label={isPlaying ? "暂停" : "播放"} onClick={togglePlayback} disabled={!activeAudio}><span /></button>
+              <button className="music-control next" data-music-control="next" type="button" aria-label="下一首" onClick={() => moveTrack(1)} disabled={!enabledTracks.length}><span /></button>
             </div>
           </div>
           <div className="music-machine-base" aria-hidden="true" />
         </div>
       </section>
-      {activeAudio && <audio ref={audioRef} key={activeAudio} src={activeAudio} preload="metadata" onPlay={() => setIsPlaying(true)} onPause={() => setIsPlaying(false)} onEnded={() => setIsPlaying(false)} />}
+      <audio ref={audioRef} preload="metadata" onPlay={() => setIsPlaying(true)} onPause={() => setIsPlaying(false)} onEnded={() => setIsPlaying(false)} />
     </>
   );
 }
 
 function HomePage({ visible, routePath }: { visible: boolean; routePath: string }) {
   const [musicSceneOpen, setMusicSceneOpen] = useState(false);
+  const [homeReturnSignal, setHomeReturnSignal] = useState(0);
   const [musicReturnSignal, setMusicReturnSignal] = useState(0);
   const [heroStarted, setHeroStarted] = useState(false);
   const [heroLoad, setHeroLoad] = useState<HeroLoadSnapshot>({ progress: 0, loaded: 0, total: 0, ready: false });
+  const wasVisibleRef = useRef(visible);
 
   const closeMusicScene = () => {
     setMusicSceneOpen(false);
@@ -2481,6 +2612,23 @@ function HomePage({ visible, routePath }: { visible: boolean; routePath: string 
     setMusicReturnSignal((value) => value + 1);
   }, [routePath]);
 
+  useEffect(() => {
+    const wasVisible = wasVisibleRef.current;
+    wasVisibleRef.current = visible;
+    if (!visible || wasVisible) return;
+    const [pathOnly, query = ""] = routePath.split("?");
+    if (pathOnly !== "/") return;
+    if (new URLSearchParams(query).get(HERO_RETURN_QUERY_KEY) === "music") return;
+    setMusicSceneOpen(false);
+    setHomeReturnSignal((value) => value + 1);
+  }, [routePath, visible]);
+
+  useEffect(() => {
+    if (visible || !musicSceneOpen) return;
+    setMusicSceneOpen(false);
+    setMusicReturnSignal((value) => value + 1);
+  }, [musicSceneOpen, visible]);
+
   const progress = Math.max(0, Math.min(100, heroLoad.progress));
   const shouldShowGate = visible && !musicSceneOpen && (!heroLoad.ready || !heroStarted || Boolean(heroLoad.error));
 
@@ -2494,6 +2642,7 @@ function HomePage({ visible, routePath }: { visible: boolean; routePath: string 
               onNavigate={navigateConfiguredUrl}
               startScene={heroStarted && heroLoad.ready && !heroLoad.error}
               onLoadProgress={setHeroLoad}
+              homeReturnSignal={homeReturnSignal}
               musicReturnSignal={musicReturnSignal}
               musicSceneOpen={musicSceneOpen}
               onMusicSceneOpen={() => setMusicSceneOpen(true)}
@@ -3345,11 +3494,10 @@ function PostsPage() {
   const initialSort = initialParams.get("sort") === "hot" ? "hot" : "latest";
   const initialPage = Math.max(1, Number(initialParams.get("page") ?? 1) || 1);
   const [search, setSearch] = useState(initialSearch);
-  const [searchDraft, setSearchDraft] = useState(initialSearch);
   const [category, setCategory] = useState(initialCategory);
   const [sortMode, setSortMode] = useState<"latest" | "hot">(initialSort);
   const [page, setPage] = useState(initialPage);
-  const [listMode, setListMode] = useState<"featured" | "all" | "category" | "search">(
+  const [listMode, setListMode] = useState<CategoryListMode>(
     initialSearch ? "search" : initialCategory !== "全部分类" ? "category" : initialView === "all" ? "all" : "featured"
   );
   const [archiveArticles, setArchiveArticles] = useState<Article[]>([]);
@@ -3365,7 +3513,6 @@ function PostsPage() {
     const nextSort = nextParams.get("sort") === "hot" ? "hot" : "latest";
     const nextPage = Math.max(1, Number(nextParams.get("page") ?? 1) || 1);
     setSearch(nextSearch);
-    setSearchDraft(nextSearch);
     setCategory(nextCategory);
     setSortMode(nextSort);
     setPage(nextPage);
@@ -3402,21 +3549,49 @@ function PostsPage() {
       alive = false;
     };
   }, [listMode, category, search, sortMode, page]);
-  const databaseCategoryOptions = archiveCategories.map((item) => item.name);
-  const categoryCountMap = new Map(archiveCategories.map((item) => [item.name, item.postsCount]));
+  const normalizedCategories = useMemo(() => archiveCategories.map(getCategoryVisual), [archiveCategories]);
+  const categoryByName = useMemo(() => new Map(normalizedCategories.map((item) => [item.name, item])), [normalizedCategories]);
   const visibleArticles = archiveArticles;
   const totalArticles = archivePagination.total;
   const totalPages = Math.max(1, Math.ceil(totalArticles / ARCHIVE_PAGE_SIZE));
-  const currentTitle = listMode === "featured" ? "精选文章" : listMode === "all" ? "全部文章" : listMode === "search" ? "搜索结果" : `${category} 分类文章`;
-  const currentDescription = listMode === "featured"
-    ? `默认展示最多 ${ARCHIVE_PAGE_SIZE} 篇精选文章，点击全部或分类后只看对应文章。`
-    : listMode === "all"
-      ? `当前共 ${totalArticles} 篇已发布文章，本页最多显示 ${ARCHIVE_PAGE_SIZE} 篇。`
-      : listMode === "search"
-        ? `包含关键词“${search}”的文章共 ${totalArticles} 篇，本页最多显示 ${ARCHIVE_PAGE_SIZE} 篇。`
-        : `该分类下共有 ${totalArticles} 篇文章，本页最多显示 ${ARCHIVE_PAGE_SIZE} 篇。`;
-  const currentSortLabel = sortMode === "hot" ? "热门优先" : "最新优先";
-  function buildPostsPath(nextMode: typeof listMode, options: { nextSearch?: string; nextCategory?: string; nextSort?: "latest" | "hot"; nextPage?: number } = {}) {
+  const totalPublishedPosts = archiveStats?.posts ?? normalizedCategories.reduce((sum, item) => sum + item.postsCount, 0);
+  const featuredCount = listMode === "featured" ? totalArticles : Math.min(totalPublishedPosts, ARCHIVE_PAGE_SIZE);
+  const currentCategoryItem = useMemo<AdminCategoryItem>(() => {
+    if (listMode === "all") {
+      return {
+        id: 0,
+        name: "全部文章",
+        slug: "all",
+        postsCount: totalPublishedPosts,
+      };
+    }
+    if (listMode === "search") {
+      return {
+        id: -2,
+        name: "搜索结果",
+        slug: "search",
+        postsCount: totalArticles,
+        description: search ? `包含关键词“${search}”的文章共 ${totalArticles} 篇。` : "根据关键词筛选文章标题、摘要、正文、分类和标签。",
+      };
+    }
+    if (listMode === "category") {
+      return categoryByName.get(category) ?? {
+        id: -3,
+        name: category,
+        slug: category,
+        postsCount: totalArticles,
+        description: `该分类下共有 ${totalArticles} 篇文章。`,
+      };
+    }
+    return {
+      id: -1,
+      name: "精选文章",
+      slug: "featured",
+      postsCount: featuredCount,
+    };
+  }, [category, categoryByName, featuredCount, listMode, search, totalArticles, totalPublishedPosts]);
+
+  function buildPostsPath(nextMode: CategoryListMode, options: { nextSearch?: string; nextCategory?: string; nextSort?: "latest" | "hot"; nextPage?: number } = {}) {
     const params = new URLSearchParams();
     const targetSort = options.nextSort ?? sortMode;
     const targetPage = Math.max(1, options.nextPage ?? 1);
@@ -3437,13 +3612,7 @@ function PostsPage() {
   function openCategory(nextCategory: string) {
     go(buildPostsPath("category", { nextCategory }));
   }
-  function submitArchiveSearch(event: FormEvent) {
-    event.preventDefault();
-    const keyword = searchDraft.trim();
-    go(keyword ? buildPostsPath("search", { nextSearch: keyword }) : buildPostsPath("featured"));
-  }
   function clearArchiveSearch() {
-    setSearchDraft("");
     go(buildPostsPath("featured"));
   }
   function changeSort(nextSort: "latest" | "hot") {
@@ -3460,53 +3629,36 @@ function PostsPage() {
   return (
     <>
       <PublicHeader active="/posts" />
-      <main className="page archive-layout">
-        <aside className="filter card archive-category-panel">
-          <h3>文章分类</h3>
-          <p>默认先看精选，切换全部或分类后只显示对应文章。</p>
-          <button className={listMode === "featured" ? "active" : ""} onClick={openFeaturedArticles}>精选文章 <small>{listMode === "featured" ? totalArticles : ""}</small></button>
-          <button className={listMode === "all" ? "active" : ""} onClick={openAllArticles}>全部文章 <small>{archiveStats?.posts ?? archiveArticles.length}</small></button>
-          <h4>按分类浏览</h4>
-          {databaseCategoryOptions.map((x) => <button className={listMode === "category" && category === x ? "active" : ""} key={x} onClick={() => openCategory(x)}>{x} <small>{categoryCountMap.get(x) ?? archiveArticles.filter((item) => item.category === x).length}</small></button>)}
-        </aside>
-        <section className="timeline-wrap archive-main">
+      <main className="page archive-layout category-page-layout">
+        <CategorySidebar
+          categories={normalizedCategories}
+          activeMode={listMode}
+          activeCategory={category}
+          totalPosts={totalPublishedPosts}
+          featuredCount={featuredCount}
+          onFeatured={openFeaturedArticles}
+          onAll={openAllArticles}
+          onCategory={openCategory}
+        />
+        <section className="category-content-panel">
           <PublicDataNotice show={archiveUsingMock} surface="归档页" />
-          <section className="archive-search-panel">
-            <form className="archive-search-form" onSubmit={submitArchiveSearch}>
-              <label htmlFor="archive-search-input">搜索文章</label>
-              <div>
-                <input
-                  id="archive-search-input"
-                  value={searchDraft}
-                  onChange={(event) => setSearchDraft(event.target.value)}
-                  placeholder="输入标题、摘要、分类或标签"
-                />
-                <button type="submit">搜索</button>
-                {listMode === "search" && <button className="ghost" type="button" onClick={clearArchiveSearch}>清空</button>}
-              </div>
-            </form>
-            {listMode === "search" && (
-              <p className="archive-active-filter">
-                正在搜索 <b>{search}</b>
-                <span>{totalArticles ? `找到 ${totalArticles} 篇文章` : "暂时没有匹配文章"}</span>
-              </p>
-            )}
-          </section>
-          <div className="archive-hero">
-            <div>
-              <h1>{currentTitle}</h1>
-              <p>{currentDescription} 当前排序：{currentSortLabel}。</p>
-            </div>
-            {listMode === "featured" ? <button onClick={openAllArticles}>查看全部文章</button> : <button onClick={openFeaturedArticles}>返回精选</button>}
-          </div>
-          <div className="archive-sort-toolbar" aria-label="文章排序">
-            <span>排序</span>
-            <button className={sortMode === "latest" ? "active" : ""} onClick={() => changeSort("latest")}>最新</button>
-            <button className={sortMode === "hot" ? "active" : ""} onClick={() => changeSort("hot")}>热门</button>
+          <CategoryHero category={currentCategoryItem} count={totalArticles} sortMode={sortMode} onSortChange={changeSort} />
+          <div className="category-list-toolbar">
+            <span>{listMode === "search" ? `正在搜索 “${search}”` : `共 ${totalArticles} 篇文章`}</span>
+            {listMode === "search" && <button type="button" onClick={clearArchiveSearch}>清空搜索</button>}
+            {listMode !== "featured" && <button type="button" onClick={openFeaturedArticles}>返回精选</button>}
           </div>
           {visibleArticles.length ? (
-            <div className="archive-featured-grid">
-              {visibleArticles.map((item) => <ArchiveArticleCard key={item.id} item={item} keyword={listMode === "search" ? search : undefined} />)}
+            <div className="category-article-list">
+              {visibleArticles.map((item) => (
+                <ArticleCard
+                  key={item.id}
+                  article={item}
+                  category={categoryByName.get(item.category)}
+                  keyword={listMode === "search" ? search : undefined}
+                  onOpen={(id) => go(`/article/${id}`)}
+                />
+              ))}
             </div>
           ) : (
             <section className="archive-empty-state">
@@ -3515,7 +3667,7 @@ function PostsPage() {
               {listMode === "search" ? <button onClick={clearArchiveSearch}>清空搜索</button> : <button onClick={openAllArticles}>查看全部文章</button>}
             </section>
           )}
-          <div className="archive-pagination">
+          <div className="category-pagination">
             <button disabled={page <= 1} onClick={() => changePage(page - 1)}>上一页</button>
             <span>第 {page} / {totalPages} 页 · 共 {totalArticles} 篇</span>
             <button disabled={!archivePagination.hasMore} onClick={() => changePage(page + 1)}>下一页</button>
@@ -5219,6 +5371,42 @@ type AdminRow = {
   };
 };
 
+type CategoryFormState = {
+  id?: number;
+  name: string;
+  slug: string;
+  description: string;
+  icon: string;
+  cover: string;
+  themeColor: string;
+  background: string;
+};
+
+function createEmptyCategoryForm(): CategoryFormState {
+  return {
+    name: "",
+    slug: "",
+    description: "",
+    icon: "folder",
+    cover: "",
+    themeColor: "#00e5ff",
+    background: "linear-gradient(135deg, rgba(0,229,255,.18), rgba(157,104,255,.08))",
+  };
+}
+
+function categoryToForm(item: AdminCategoryItem): CategoryFormState {
+  return {
+    id: item.id,
+    name: item.name,
+    slug: item.slug,
+    description: item.description ?? "",
+    icon: item.icon ?? "folder",
+    cover: item.cover ?? "",
+    themeColor: item.themeColor ?? "#00e5ff",
+    background: item.background ?? "linear-gradient(135deg, rgba(0,229,255,.18), rgba(157,104,255,.08))",
+  };
+}
+
 const emptyDashboard: AdminDashboardData = {
   counts: { posts: 0, published: 0, draft: 0, scheduled: 0, archived: 0, pendingComments: 0, pendingMessages: 0, media: 0, categories: 0, tags: 0, views: 0, likes: 0, comments: 0 },
   hotPosts: [],
@@ -5551,11 +5739,15 @@ function AdminPlaceholder({ page }: { page: string }) {
   const [moderationPagination, setModerationPagination] = useState({ page: 1, pageSize: ADMIN_LIST_PAGE_SIZE, total: 0, hasMore: false });
   const [mediaUploading, setMediaUploading] = useState(false);
   const mediaInputRef = useRef<HTMLInputElement | null>(null);
+  const [categoryFormOpen, setCategoryFormOpen] = useState(false);
+  const [categoryForm, setCategoryForm] = useState<CategoryFormState>(() => createEmptyCategoryForm());
+  const [categoryUploadingField, setCategoryUploadingField] = useState<"icon" | "cover" | null>(null);
 
   useEffect(() => {
     setPostPage(1);
     setModerationPage(1);
     setSelectedKeys([]);
+    if (page !== "categories") setCategoryFormOpen(false);
   }, [page]);
 
   useEffect(() => {
@@ -5791,31 +5983,65 @@ function AdminPlaceholder({ page }: { page: string }) {
     }
   }
 
-  async function createCategory() {
-    const name = window.prompt("请输入新分类名称");
-    if (!name?.trim()) return;
-    const description = window.prompt("请输入分类描述（可留空）") ?? "";
+  function updateCategoryForm<K extends keyof CategoryFormState>(key: K, value: CategoryFormState[K]) {
+    setCategoryForm((current) => ({ ...current, [key]: value }));
+  }
+
+  function createCategory() {
+    setCategoryForm(createEmptyCategoryForm());
+    setCategoryFormOpen(true);
+    setActionNotice("正在创建分类，请填写名称和视觉配置后保存。");
+  }
+
+  function updateCategory(item: AdminCategoryItem) {
+    setCategoryForm(categoryToForm(item));
+    setCategoryFormOpen(true);
+    setActionNotice(`正在编辑分类：${item.name}`);
+  }
+
+  async function saveCategoryForm() {
+    const name = categoryForm.name.trim();
+    if (!name) {
+      setActionNotice("请先填写分类名称。");
+      return;
+    }
+    const payload = {
+      name,
+      slug: categoryForm.slug.trim() || undefined,
+      description: categoryForm.description.trim() || undefined,
+      icon: categoryForm.icon.trim() || undefined,
+      cover: categoryForm.cover.trim() || undefined,
+      themeColor: categoryForm.themeColor.trim() || undefined,
+      background: categoryForm.background.trim() || undefined,
+    };
     try {
-      const result = await api.createCategory({ name: name.trim(), description: description.trim() });
-      setAdminCategories((items) => [...items, result.item]);
-      setActionNotice("分类已写入数据库。");
+      if (categoryForm.id) {
+        const result = await api.updateCategory(categoryForm.id, payload);
+        setAdminCategories((items) => items.map((current) => current.id === categoryForm.id ? result.item : current));
+        setActionNotice("分类视觉配置已更新到数据库。");
+      } else {
+        const result = await api.createCategory(payload);
+        setAdminCategories((items) => [...items, result.item]);
+        setActionNotice("分类已写入数据库。");
+      }
+      setCategoryFormOpen(false);
       emitAdminDataChanged();
     } catch (error) {
       setActionNotice(getApiErrorMessage(error));
     }
   }
 
-  async function updateCategory(item: AdminCategoryItem) {
-    const name = window.prompt("请输入分类名称", item.name);
-    if (!name?.trim()) return;
-    const description = window.prompt("请输入分类描述（可留空）", item.description ?? "") ?? "";
+  async function uploadCategoryAsset(field: "icon" | "cover", file?: File) {
+    if (!file) return;
+    setCategoryUploadingField(field);
     try {
-      const result = await api.updateCategory(item.id, { name: name.trim(), slug: item.slug, description: description.trim(), icon: item.icon });
-      setAdminCategories((items) => items.map((current) => current.id === item.id ? result.item : current));
-      setActionNotice("分类已更新到数据库。");
-      emitAdminDataChanged();
+      const result = await api.uploadMedia(file, `${categoryForm.name || "分类"}${field === "icon" ? "图标" : "封面"}`);
+      updateCategoryForm(field, mediaDisplayUrl(result.item));
+      setActionNotice(field === "icon" ? "分类 icon 已上传，保存分类后生效。" : "分类封面已上传，保存分类后生效。");
     } catch (error) {
       setActionNotice(getApiErrorMessage(error));
+    } finally {
+      setCategoryUploadingField(null);
     }
   }
 
@@ -5994,10 +6220,10 @@ function AdminPlaceholder({ page }: { page: string }) {
               key: `category-${item.id}`,
               id: item.id,
               text: `${item.name} · ${item.slug}${item.description ? ` · ${item.description}` : ""}`,
-              status: `${item.postsCount} 篇文章`,
+              status: `${item.postsCount} 篇文章${item.themeColor ? ` · ${item.themeColor}` : ""}${item.cover ? " · 已配置封面" : ""}`,
               href: `/posts?category=${encodeURIComponent(item.name)}`,
               actions: [
-                { label: "编辑", title: "修改分类名称和描述，保存到 categories", run: () => updateCategory(item) },
+                { label: "编辑", title: "修改分类名称、图标、封面、主题色、背景和描述", run: () => updateCategory(item) },
                 { label: "删除", title: "删除未被文章使用的分类", run: () => deleteCategory(item.id) },
               ],
             }))
@@ -6183,6 +6409,48 @@ function AdminPlaceholder({ page }: { page: string }) {
         </div>
         {postPageHint && <p className="admin-hint">{postPageHint}</p>}
         {actionNotice && <p className="admin-hint">{actionNotice}</p>}
+        {page === "categories" && categoryFormOpen && (
+          <section className="settings-panel category-visual-editor wide">
+            <header>
+              <div>
+                <b>{categoryForm.id ? "编辑分类视觉" : "新建分类"}</b>
+                <span>配置后前台分类侧边栏、分类 Hero 和文章列表会自动使用这些视觉信息。</span>
+              </div>
+              <div className="category-editor-actions">
+                <button type="button" onClick={saveCategoryForm}>保存分类</button>
+                <button type="button" className="ghost" onClick={() => setCategoryFormOpen(false)}>取消</button>
+              </div>
+            </header>
+            <div className="category-editor-grid">
+              <label>分类名称<input value={categoryForm.name} onChange={(event) => updateCategoryForm("name", event.target.value)} placeholder="例如：后端开发" /></label>
+              <label>Slug<input value={categoryForm.slug} onChange={(event) => updateCategoryForm("slug", event.target.value)} placeholder="留空时后端自动生成" /></label>
+              <label>主题颜色<span className="category-color-field"><input type="color" value={validHexColor(categoryForm.themeColor, "#00e5ff")} onChange={(event) => updateCategoryForm("themeColor", event.target.value)} /><input value={categoryForm.themeColor} onChange={(event) => updateCategoryForm("themeColor", event.target.value)} placeholder="#00e5ff" /></span></label>
+              <label className="wide">分类 icon<input value={categoryForm.icon} onChange={(event) => updateCategoryForm("icon", event.target.value)} placeholder="server / database / svg / 图片地址" /></label>
+              <label className="upload-inline">上传 icon<input type="file" accept="image/*" onChange={(event) => uploadCategoryAsset("icon", event.target.files?.[0])} /><span>{categoryUploadingField === "icon" ? "上传中..." : "选择图片"}</span></label>
+              <label className="wide">分类封面<input value={categoryForm.cover} onChange={(event) => updateCategoryForm("cover", event.target.value)} placeholder="/assets/backend-cover.png 或 /uploads/..." /></label>
+              <label className="upload-inline">上传封面<input type="file" accept="image/*" onChange={(event) => uploadCategoryAsset("cover", event.target.files?.[0])} /><span>{categoryUploadingField === "cover" ? "上传中..." : "选择图片"}</span></label>
+              <label className="wide">背景样式<input value={categoryForm.background} onChange={(event) => updateCategoryForm("background", event.target.value)} placeholder="linear-gradient(135deg, ...)" /></label>
+              <label className="wide">描述<textarea value={categoryForm.description} onChange={(event) => updateCategoryForm("description", event.target.value)} placeholder="分类描述会展示在前台 Hero 区域。" /></label>
+              <div className="category-config-preview" style={categoryVisualStyle({
+                id: categoryForm.id ?? 0,
+                name: categoryForm.name || "分类预览",
+                slug: categoryForm.slug || "preview",
+                description: categoryForm.description,
+                icon: categoryForm.icon,
+                cover: categoryForm.cover,
+                background: categoryForm.background,
+                themeColor: categoryForm.themeColor,
+                postsCount: 0,
+              })}>
+                <CategoryIcon icon={categoryForm.icon} label={categoryForm.name || "分类预览"} />
+                <div>
+                  <b>{categoryForm.name || "分类预览"}</b>
+                  <span>{categoryForm.description || "这里会显示分类描述。"}</span>
+                </div>
+              </div>
+            </div>
+          </section>
+        )}
         {page === "media" && (
           <div className="admin-hint media-upload-strip">
             <button type="button" disabled={mediaUploading} onClick={() => mediaInputRef.current?.click()}>{mediaUploading ? "上传中..." : "上传媒体"}</button>

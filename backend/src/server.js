@@ -274,6 +274,13 @@ async function ensureRuntimeSchema() {
       ADD COLUMN IF NOT EXISTS source varchar(40) NOT NULL DEFAULT 'user'
   `);
   await query(`
+    ALTER TABLE categories
+      ADD COLUMN IF NOT EXISTS cover text,
+      ADD COLUMN IF NOT EXISTS background text,
+      ADD COLUMN IF NOT EXISTS theme_color varchar(40)
+  `);
+  await query("ALTER TABLE categories ALTER COLUMN icon TYPE text");
+  await query(`
     ALTER TABLE media_assets
       ADD COLUMN IF NOT EXISTS thumbnail_url text,
       ADD COLUMN IF NOT EXISTS display_url text
@@ -2778,7 +2785,7 @@ async function handleAdminDeleteMedia(req, res, id) {
 
 async function handleAdminCategories(req, res) {
   const result = await query(`
-    SELECT id, name, slug, description, icon, sort_order, posts_count, created_at, updated_at
+    SELECT id, name, slug, description, icon, cover, background, theme_color, sort_order, posts_count, created_at, updated_at
     FROM categories
     WHERE NOT (posts_count = 0 AND name ~ '^\\?+$')
     ORDER BY sort_order ASC, name ASC
@@ -2791,11 +2798,15 @@ async function handleAdminCreateCategory(req, res) {
   const name = String(body.name || "").trim();
   if (!name) return sendJson(res, 400, { error: "name_required", message: "Category name is required" }, corsHeaders(req));
   const slug = slugify(body.slug || name);
+  const icon = String(body.icon ?? "").trim() || null;
+  const cover = safeAssetUrl(body.cover) || null;
+  const background = String(body.background ?? "").trim() || null;
+  const themeColor = String(body.themeColor ?? body.theme_color ?? "").trim() || null;
   const result = await query(
-    `INSERT INTO categories(name, slug, description, icon, sort_order)
-     VALUES ($1,$2,$3,$4,$5)
-     RETURNING id, name, slug, description, icon, sort_order, posts_count, created_at, updated_at`,
-    [name, slug, body.description ?? null, body.icon ?? null, Number(body.sortOrder ?? body.sort_order ?? 0) || 0],
+    `INSERT INTO categories(name, slug, description, icon, cover, background, theme_color, sort_order)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+     RETURNING id, name, slug, description, icon, cover, background, theme_color, sort_order, posts_count, created_at, updated_at`,
+    [name, slug, body.description ?? null, icon, cover, background, themeColor, Number(body.sortOrder ?? body.sort_order ?? 0) || 0],
   );
   sendJson(res, 201, { item: result.rows[0], ok: true }, corsHeaders(req));
 }
@@ -2805,17 +2816,24 @@ async function handleAdminUpdateCategory(req, res, id) {
   const name = String(body.name || "").trim();
   if (!name) return sendJson(res, 400, { error: "name_required", message: "Category name is required" }, corsHeaders(req));
   const slug = slugify(body.slug || name);
+  const icon = String(body.icon ?? "").trim() || null;
+  const cover = safeAssetUrl(body.cover) || null;
+  const background = String(body.background ?? "").trim() || null;
+  const themeColor = String(body.themeColor ?? body.theme_color ?? "").trim() || null;
   const result = await query(
     `UPDATE categories
      SET name = $1,
          slug = $2,
          description = $3,
          icon = $4,
-         sort_order = $5,
+         cover = $5,
+         background = $6,
+         theme_color = $7,
+         sort_order = $8,
          updated_at = now()
-     WHERE id = $6
-     RETURNING id, name, slug, description, icon, sort_order, posts_count, created_at, updated_at`,
-    [name, slug, body.description ?? null, body.icon ?? null, Number(body.sortOrder ?? body.sort_order ?? 0) || 0, id],
+     WHERE id = $9
+     RETURNING id, name, slug, description, icon, cover, background, theme_color, sort_order, posts_count, created_at, updated_at`,
+    [name, slug, body.description ?? null, icon, cover, background, themeColor, Number(body.sortOrder ?? body.sort_order ?? 0) || 0, id],
   );
   if (!result.rowCount) return sendJson(res, 404, { error: "category_not_found", message: "Category not found" }, corsHeaders(req));
   sendJson(res, 200, { item: result.rows[0], ok: true }, corsHeaders(req));
@@ -3386,7 +3404,7 @@ async function handleRequest(req, res) {
     if (req.method === "GET" && url.pathname === "/api/public/categories") {
       await publishDueScheduledPosts();
       await refreshPublishedTaxonomyCounts();
-      const result = await query("SELECT id, name, slug, description, icon, posts_count FROM categories WHERE posts_count > 0 ORDER BY sort_order ASC, name ASC");
+      const result = await query("SELECT id, name, slug, description, icon, cover, background, theme_color, posts_count FROM categories WHERE posts_count > 0 ORDER BY sort_order ASC, name ASC");
       return sendJson(res, 200, { items: result.rows }, headers);
     }
     if (req.method === "GET" && url.pathname === "/api/public/tags") {

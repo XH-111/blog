@@ -220,6 +220,51 @@ function toNumber(value: number | string | null | undefined) {
   return Number(value ?? 0);
 }
 
+const mockCategoryVisuals: Record<string, Pick<AdminCategoryItem, "icon" | "cover" | "background" | "themeColor" | "description">> = {
+  前端开发: {
+    icon: "code",
+    cover: "/assets/thumb-next.png",
+    background: "linear-gradient(135deg, rgba(0,229,255,.18), rgba(72,94,255,.08))",
+    themeColor: "#00e5ff",
+    description: "聚焦 React、Vue、TypeScript 与现代前端工程实践。",
+  },
+  后端开发: {
+    icon: "server",
+    cover: "/assets/thumb-docker.png",
+    background: "linear-gradient(135deg, rgba(0,229,255,.2), rgba(45,92,255,.1))",
+    themeColor: "#00e5ff",
+    description: "专注后端开发技术、架构设计、性能优化与最佳实践。",
+  },
+  运维部署: {
+    icon: "cloud",
+    cover: "/assets/thumb-linux.png",
+    background: "linear-gradient(135deg, rgba(91,255,186,.18), rgba(0,229,255,.08))",
+    themeColor: "#5dffba",
+    description: "记录 Linux、Docker、CI/CD 与线上稳定性相关经验。",
+  },
+  数据库: {
+    icon: "database",
+    cover: "/assets/article-cover.png",
+    background: "linear-gradient(135deg, rgba(157,104,255,.2), rgba(0,229,255,.08))",
+    themeColor: "#9d68ff",
+    description: "沉淀数据库建模、查询优化、索引设计与数据可靠性实践。",
+  },
+  工具教程: {
+    icon: "tool",
+    cover: "/assets/editor-cover.png",
+    background: "linear-gradient(135deg, rgba(255,198,90,.18), rgba(0,229,255,.08))",
+    themeColor: "#ffc65a",
+    description: "分享高效开发工具、调试方法和工作流优化技巧。",
+  },
+  随笔杂谈: {
+    icon: "chat",
+    cover: "/assets/home-hero-scene.png",
+    background: "linear-gradient(135deg, rgba(255,61,242,.18), rgba(0,229,255,.08))",
+    themeColor: "#ff8df8",
+    description: "记录技术之外的思考、复盘、成长和日常灵感。",
+  },
+};
+
 let currentDraftId: number | undefined;
 
 type EditorPostMeta = {
@@ -322,6 +367,9 @@ export type AdminCategoryItem = {
   slug: string;
   description?: string;
   icon?: string;
+  cover?: string;
+  background?: string;
+  themeColor?: string;
   postsCount: number;
   updatedAt?: string;
 };
@@ -647,6 +695,10 @@ type BackendCategory = {
   slug: string;
   description?: string;
   icon?: string;
+  cover?: string;
+  background?: string;
+  theme_color?: string;
+  themeColor?: string;
   posts_count?: number | string;
   updated_at?: string;
 };
@@ -891,6 +943,9 @@ function mapBackendCategory(item: BackendCategory): AdminCategoryItem {
     slug: item.slug,
     description: item.description,
     icon: item.icon,
+    cover: resolveBackendAssetUrl(item.cover),
+    background: item.background,
+    themeColor: item.themeColor ?? item.theme_color,
     postsCount: toNumber(item.posts_count),
     updatedAt: item.updated_at,
   };
@@ -1276,7 +1331,16 @@ export const api = {
     return { articles: data.items.map(mapBackendPost), page, pageSize, total, hasMore: Boolean(data.hasMore), source: "api" as const };
   },
   getPublicCategories: async () => {
-    const fallback = { items: categories.map(([name, count], index) => ({ id: index + 1, name, slug: String(name), postsCount: count })), source: "mock" as const };
+    const fallback = {
+      items: categories.map(([name, count], index) => ({
+        id: index + 1,
+        name,
+        slug: String(name),
+        postsCount: count,
+        ...(mockCategoryVisuals[String(name)] ?? {}),
+      })),
+      source: "mock" as const,
+    };
     const data = await requestJson<{ items?: BackendCategory[]; source?: "mock" }>("/public/categories", { items: [], source: "mock" });
     if (data.source === "mock" || !Array.isArray(data.items)) return wait(fallback);
     return { items: data.items.map(mapBackendCategory).filter((item) => item.postsCount > 0), source: "api" as const };
@@ -1473,12 +1537,12 @@ export const api = {
     if (!Array.isArray(data.items)) throw new ApiError("后端没有返回分类列表");
     return { items: data.items.map(mapBackendCategory), source: "api" as const };
   },
-  createCategory: async (payload: { name: string; slug?: string; description?: string; icon?: string }) => {
+  createCategory: async (payload: { name: string; slug?: string; description?: string; icon?: string; cover?: string; background?: string; themeColor?: string }) => {
     const data = await requestStrictJson<{ ok?: boolean; item?: BackendCategory }>("/admin/categories", { method: "POST", body: JSON.stringify(payload) });
     if (!data.item) throw new ApiError("后端没有返回已创建的分类");
     return { ok: data.ok ?? true, item: mapBackendCategory(data.item), source: "api" as const };
   },
-  updateCategory: async (id: number, payload: { name: string; slug?: string; description?: string; icon?: string }) => {
+  updateCategory: async (id: number, payload: { name: string; slug?: string; description?: string; icon?: string; cover?: string; background?: string; themeColor?: string }) => {
     const data = await requestStrictJson<{ ok?: boolean; item?: BackendCategory }>(`/admin/categories/${id}`, { method: "PUT", body: JSON.stringify(payload) });
     if (!data.item) throw new ApiError("后端没有返回已更新的分类");
     return { ok: data.ok ?? true, item: mapBackendCategory(data.item), source: "api" as const };
